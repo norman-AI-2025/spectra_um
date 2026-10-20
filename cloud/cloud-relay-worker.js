@@ -453,14 +453,14 @@ function matchesOccurrence(groupStr, studentOcc, descStr = "") {
   if (g.includes(targetOcc) || d.includes(targetOcc)) return true;
 
   if (targetNum) {
-    const numRegex = new RegExp(`\\b(?:occ|occurrence|kumpulan|group)\\s*#?\\s*0*${targetNum}\\b`, "i");
+    const numRegex = new RegExp(`\\b(?:occ|occurrence|kumpulan|group|tutorial|tut)\\s*#?\\s*0*${targetNum}\\b`, "i");
     if (numRegex.test(g) || numRegex.test(d)) return true;
   }
 
   if (g === "all students" || g === "semua pelajar" || g === "" || g === "all") {
-    const otherOccRegex = /\b(?:occ|occurrence|kumpulan|group)\s*#?\s*\d+\b/i;
+    const otherOccRegex = /\b(?:occ|occurrence|kumpulan|group|tutorial|tut)\s*#?\s*\d+\b/i;
     if (otherOccRegex.test(d)) {
-      return targetNum ? new RegExp(`\\b(?:occ|occurrence|kumpulan|group)\\s*#?\\s*0*${targetNum}\\b`, "i").test(d) : false;
+      return targetNum ? new RegExp(`\\b(?:occ|occurrence|kumpulan|group|tutorial|tut)\\s*#?\\s*0*${targetNum}\\b`, "i").test(d) : false;
     }
     return true;
   }
@@ -543,6 +543,9 @@ async function checkCloudDeadlines(env, sessionData) {
 
         // Skip if already alerted
         if (alertedDeadlineIds.has(cmid)) continue;
+
+        // Strictly exclude attendance activities from submissions
+        if (/attendance|kehadiran/i.test(rawTitle) || assignUrl.includes("mod/attendance")) continue;
 
         // Occurrence filter
         if (!matchesOccurrence("", studentOcc, rawTitle)) continue;

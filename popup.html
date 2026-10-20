@@ -64,7 +64,7 @@
     <nav class="nav-segmented" role="tablist">
       <button id="tabDeadlines" class="nav-tab active" role="tab" aria-selected="true" data-tab="deadlines">
         <span class="tab-icon">⏰</span>
-        <span class="tab-label">Deadlines</span>
+        <span class="tab-label">Submissions</span>
         <span id="urgentBadge" class="tab-badge hidden">0</span>
       </button>
       <button id="tabAnnouncements" class="nav-tab" role="tab" aria-selected="false" data-tab="announcements">
@@ -175,6 +175,17 @@
       <!-- TAB 1: DEADLINES & RADAR                                       -->
       <!-- ============================================================== -->
       <main id="sectionDeadlines" class="tab-content active" role="tabpanel">
+        <!-- Submissions Header Card -->
+        <div class="submissions-header-card">
+          <div class="flex-between">
+            <div>
+              <h3 class="submissions-main-title">Submission Due &amp; Dropboxes</h3>
+              <p class="submissions-main-sub">Assignments, quizzes &amp; Turnitin tasks • Filtered by your occurrence</p>
+            </div>
+            <span id="activeOccDeadlinesTag" class="active-occ-pill">Filtered by Occ</span>
+          </div>
+        </div>
+
         <!-- Search & Filter Bento Bar -->
         <div class="bento-filter-card">
           <div class="search-input-wrapper">

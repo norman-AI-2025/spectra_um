@@ -15,6 +15,8 @@ if (typeof console === "undefined") {
 import {
   parseCourseAssignmentsIndex,
   parseCourseViewSubmissions,
+  parseCalendarEvents,
+  isAttendanceActivity,
   isRespectiveOccurrence,
   calculateUrgency,
   formatTimeRemaining,
@@ -38,7 +40,38 @@ function assert(condition, message) {
 console.log("=== Testing Spectra Course Submission Pages & Occurrence Filtering ===");
 
 // -------------------------------------------------------------
-// Test 1: isRespectiveOccurrence with compound titles
+// Test 0: Attendance Activity Differentiation vs Submissions
+// -------------------------------------------------------------
+console.log("\n--- Sub-test 0: Attendance Differentiation ---");
+assert(isAttendanceActivity({ modulename: "attendance" }), "Identifies modulename attendance");
+assert(isAttendanceActivity({ eventtype: "attendance" }), "Identifies eventtype attendance");
+assert(isAttendanceActivity({ url: "https://spectrum.um.edu.my/mod/attendance/view.php?id=9901" }), "Identifies attendance URL");
+assert(isAttendanceActivity({ title: "Lecture Attendance (Occ 1)" }), "Identifies attendance title");
+assert(isAttendanceActivity({ title: "Rekod Kehadiran Tutorial" }), "Identifies BM Kehadiran title");
+assert(isAttendanceActivity({ title: "Take Attendance - Group 2" }), "Identifies Take Attendance title");
+
+// Coursework assignments must NEVER be flagged as attendance
+assert(!isAttendanceActivity({ title: "Assignment 1 (Occ 1)", url: "https://spectrum.um.edu.my/mod/assign/view.php?id=101", type: "assign" }), "Assignment 1 is not attendance");
+assert(!isAttendanceActivity({ title: "Quiz 2: Data Structures", url: "https://spectrum.um.edu.my/mod/quiz/view.php?id=202", type: "quiz" }), "Quiz 2 is not attendance");
+assert(!isAttendanceActivity({ title: "Turnitin Essay Submission", url: "https://spectrum.um.edu.my/mod/turnitintooltwo/view.php?id=303", type: "turnitin" }), "Turnitin is not attendance");
+assert(!isAttendanceActivity({ title: "Lab 3 Report", url: "https://spectrum.um.edu.my/mod/assign/view.php?id=404", type: "assign" }), "Lab Report is not attendance");
+
+// parseCalendarEvents strictly filters out attendance
+const mixedCalendarAjax = {
+  events: [
+    { id: 101, name: "Assignment 1", modulename: "assign", timesort: Math.floor(Date.now() / 1000) + 3600 },
+    { id: 102, name: "Lecture Attendance Occ 1", modulename: "attendance", timesort: Math.floor(Date.now() / 1000) + 1800, url: "https://spectrum.um.edu.my/mod/attendance/view.php?id=50" },
+    { id: 103, name: "Quiz 1", modulename: "quiz", timesort: Math.floor(Date.now() / 1000) + 7200 }
+  ]
+};
+const parsedCalendarEvents = parseCalendarEvents(mixedCalendarAjax);
+assert(parsedCalendarEvents.length === 2, `parseCalendarEvents filtered attendance (expected 2, got ${parsedCalendarEvents.length})`);
+assert(!parsedCalendarEvents.some(e => e.title.includes("Attendance")), "Attendance event excluded from parsed calendar");
+assert(parsedCalendarEvents.some(e => e.title === "Assignment 1"), "Assignment 1 retained");
+assert(parsedCalendarEvents.some(e => e.title === "Quiz 1"), "Quiz 1 retained");
+
+// -------------------------------------------------------------
+// Test 1: isRespectiveOccurrence with compound titles and variations
 // -------------------------------------------------------------
 console.log("\n--- Sub-test 1: isRespectiveOccurrence ---");
 assert(isRespectiveOccurrence("", "Occ 1", "Assignment 1 (Occ 1)"), "Assignment 1 (Occ 1) matches student Occ 1");
@@ -49,6 +82,14 @@ assert(isRespectiveOccurrence("", "Occ 1", "Final Project (Universal Submission)
 assert(isRespectiveOccurrence("", "Occ 1", "General Assignment 3"), "General assignment with number matches student Occ 1");
 assert(!isRespectiveOccurrence("", "Occ 1", "Lab Report - Kumpulan 2"), "Kumpulan 2 rejected for student Occ 1");
 assert(isRespectiveOccurrence("", "Occ 1", "Lab Report - Kumpulan 1"), "Kumpulan 1 matches student Occ 1");
+
+// Various user-entered occurrence formats
+assert(isRespectiveOccurrence("", "1", "Assignment 1 (Occ 1)"), "User entering '1' matches Occ 1");
+assert(isRespectiveOccurrence("", "Occurrence 2", "Lab 2 (Occ 2)"), "User entering 'Occurrence 2' matches Occ 2");
+assert(isRespectiveOccurrence("", "Group 1", "Assignment 1 (Group 1)"), "User entering 'Group 1' matches Group 1");
+assert(isRespectiveOccurrence("", "Tut 2", "Tutorial 2 (Tut 2)"), "User entering 'Tut 2' matches Tut 2");
+assert(isRespectiveOccurrence("", "Tutorial 3", "Lab Task (Tutorial 3)"), "User entering 'Tutorial 3' matches Tutorial 3");
+assert(isRespectiveOccurrence("", "Occ 01", "Assignment 1 (Occ 1)"), "User entering 'Occ 01' matches Occ 1 (zero-padded)");
 
 // -------------------------------------------------------------
 // Test 2: parseCourseAssignmentsIndex (/mod/assign/index.php)
@@ -227,6 +268,17 @@ globalThis.fetch = async (url, opts = {}) => {
                 course: { id: 10, shortname: "WIF3001", fullname: "Software Engineering" },
                 url: "https://spectrum.um.edu.my/mod/assign/view.php?id=1002",
                 action: { actionable: true }
+              },
+              {
+                id: 9005,
+                instance: 5001,
+                name: "Lecture Attendance (Occ 1) is due",
+                modulename: "attendance",
+                eventtype: "attendance",
+                timesort: Math.floor(Date.now() / 1000) + 3600 * 4,
+                course: { id: 10, shortname: "WIF3001", fullname: "Software Engineering" },
+                url: "https://spectrum.um.edu.my/mod/attendance/view.php?id=5001",
+                action: { actionable: true }
               }
             ]
           }
@@ -271,6 +323,10 @@ assert(deadlines.length > 0, `Returns merged deadlines list (count: ${deadlines.
 // Check that Occ 2 items were strictly excluded
 const hasOcc2 = deadlines.some(d => d.title.includes("Occ 2"));
 assert(!hasOcc2, "Strict: No Occ 2 activities in the resulting deadlines list");
+
+// Check that Attendance items are strictly excluded
+const hasAttendance = deadlines.some(d => d.type === "attendance" || d.id === "9005" || d.cmid === "5001" || /attendance|kehadiran/i.test(d.title) || (d.url && d.url.includes("/mod/attendance/")));
+assert(!hasAttendance, "Strict: Attendance events are never included in fetchLiveDeadlines");
 
 // Check deduplication
 const item1001List = deadlines.filter(d => d.cmid === "1001" || d.id === "1001" || d.id === "9001");

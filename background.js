@@ -15,7 +15,7 @@ import {
 } from "./utils/moodleApi.js";
 
 import { fetchLiveDeadlines } from "./utils/calendar.js";
-import { parseForumDiscussions, calculateUrgency } from "./utils/parser.js";
+import { parseForumDiscussions, calculateUrgency, isAttendanceActivity } from "./utils/parser.js";
 import {
   sendTelegramMessage,
   sendTelegramTestMessage,
@@ -447,7 +447,9 @@ async function checkUpcomingDeadlines() {
     "completed_assignment_ids",
     "seen_deadline_alert_ids",
     "telegram_sent_deadline_ids",
+    "cached_courses",
     "courses",
+    "course_occurrences",
     "courseOccurrences",
     "studentOccurrence"
   ]);
@@ -468,13 +470,15 @@ async function checkUpcomingDeadlines() {
   const completed = new Set(store.completed_assignment_ids || []);
   const alerted = new Set(store.seen_deadline_alert_ids || []);
   const telegramSentDeadlineIds = new Set(store.telegram_sent_deadline_ids || []);
+  const occMap = store.course_occurrences || store.courseOccurrences || {};
+  const courseList = store.courses || store.cached_courses || [];
 
   let deadlines = [];
   try {
     deadlines = await fetchLiveDeadlines(
       sessionContext.sesskey,
-      store.courses,
-      store.courseOccurrences,
+      courseList,
+      occMap,
       store.studentOccurrence
     );
   } catch (err) {
@@ -484,6 +488,8 @@ async function checkUpcomingDeadlines() {
 
   const now = Date.now();
   const urgentItems = deadlines.filter((d) => {
+    // Strictly exclude attendance from submission due
+    if (isAttendanceActivity(d)) return false;
     if (completed.has(String(d.id)) || d.isCompleted || d.isSubmittedOnSpectrum) return false;
     if (!d.dueTimestamp) return false;
     const diffHours = (d.dueTimestamp - now) / (1000 * 60 * 60);

@@ -78,6 +78,45 @@ export function formatTimeRemaining(timestamp) {
 }
 
 /**
+ * Strict differentiator:
+ * Identifies whether an activity or calendar event represents an Attendance check-in / session,
+ * to ensure attendance is NEVER mixed into coursework submission due / dropboxes.
+ */
+export function isAttendanceActivity(item) {
+  if (!item) return false;
+
+  // 1. Explicit Moodle module types
+  const type = String(item.type || item.modulename || "").toLowerCase();
+  const eventType = String(item.eventtype || "").toLowerCase();
+  if (type === "attendance" || eventType === "attendance") {
+    return true;
+  }
+
+  // 2. Target URL indicators
+  const url = String(item.url || item.action?.url || "").toLowerCase();
+  if (url.includes("/mod/attendance/") || url.includes("attendance.php")) {
+    return true;
+  }
+
+  // 3. Activity or Event title keywords
+  const title = String(item.title || item.name || "").toLowerCase().trim();
+  if (
+    /\b(?:attendance|kehadiran|kedatangan)\b/i.test(title) ||
+    /^(?:take|record|submit)\s+attendance/i.test(title) ||
+    /^(?:rekod|isi|hantar)\s+kehadiran/i.test(title) ||
+    /\bkehadiran\s+(?:kuliah|tutorial|makmal|kelas)\b/i.test(title) ||
+    /\b(?:lecture|tutorial|lab)\s+attendance\b/i.test(title)
+  ) {
+    if (url.includes("/mod/assign/") && !/\b(?:record|take|submit|isi|hantar|sesi|session)\b/i.test(title)) {
+      return false;
+    }
+    return true;
+  }
+
+  return false;
+}
+
+/**
  * Parses calendar deadlines from SPeCTRUM HTML or JSON
  * Can accept raw HTML string from /calendar/view.php?view=upcoming
  * or parsed JSON from core_calendar_get_action_events_by_timesort
@@ -87,25 +126,27 @@ export function parseCalendarEvents(sourceData) {
 
   // Case 1: Moodle AJAX JSON response
   if (typeof sourceData === "object" && sourceData.events) {
-    return sourceData.events.map((evt) => {
-      const timestamp = (evt.timesort || evt.timestart) * 1000;
-      const courseCode = extractCourseCode(evt.course?.shortname || evt.course?.fullname || "");
-      const eventUrl = evt.action?.url || (evt.url ? evt.url : `https://spectrum.um.edu.my/mod/${evt.modulename || "assign"}/view.php?id=${evt.instance || evt.id}`);
+    return sourceData.events
+      .filter((evt) => !isAttendanceActivity(evt))
+      .map((evt) => {
+        const timestamp = (evt.timesort || evt.timestart) * 1000;
+        const courseCode = extractCourseCode(evt.course?.shortname || evt.course?.fullname || "");
+        const eventUrl = evt.action?.url || (evt.url ? evt.url : `https://spectrum.um.edu.my/mod/${evt.modulename || "assign"}/view.php?id=${evt.instance || evt.id}`);
 
-      return {
-        id: String(evt.id),
-        title: cleanMoodleTitle(evt.name),
-        courseCode,
-        courseName: evt.course?.fullname || courseCode,
-        dueDate: new Date(timestamp).toISOString(),
-        dueTimestamp: timestamp,
-        formattedTime: evt.formattedtime || new Date(timestamp).toLocaleString("en-MY", { month: "short", day: "numeric", hour: "2-digit", minute: "2-digit" }),
-        url: eventUrl,
-        type: evt.modulename || "assign",
-        urgency: calculateUrgency(timestamp),
-        isCompleted: false
-      };
-    });
+        return {
+          id: String(evt.id),
+          title: cleanMoodleTitle(evt.name),
+          courseCode,
+          courseName: evt.course?.fullname || courseCode,
+          dueDate: new Date(timestamp).toISOString(),
+          dueTimestamp: timestamp,
+          formattedTime: evt.formattedtime || new Date(timestamp).toLocaleString("en-MY", { month: "short", day: "numeric", hour: "2-digit", minute: "2-digit" }),
+          url: eventUrl,
+          type: evt.modulename || "assign",
+          urgency: calculateUrgency(timestamp),
+          isCompleted: false
+        };
+      });
   }
 
   // Case 2: Raw HTML string parsing
@@ -147,6 +188,20 @@ export function parseCalendarEvents(sourceData) {
 
         // ID extraction
         const eventId = card.getAttribute("data-event-id") || `parsed_event_${idx}_${Date.now()}`;
+        const type = url.includes("mod/quiz")
+          ? "quiz"
+          : url.includes("mod/workshop")
+          ? "workshop"
+          : url.includes("turnitintooltwo")
+          ? "turnitin"
+          : url.includes("mod/attendance")
+          ? "attendance"
+          : "assign";
+
+        // Exclude attendance from submissions
+        if (isAttendanceActivity({ url, title, type })) {
+          return;
+        }
 
         events.push({
           id: eventId,
@@ -157,7 +212,7 @@ export function parseCalendarEvents(sourceData) {
           dueTimestamp: timestamp,
           formattedTime: dateStr || new Date(timestamp).toLocaleString("en-MY", { month: "short", day: "numeric", hour: "2-digit", minute: "2-digit" }),
           url,
-          type: url.includes("mod/quiz") ? "quiz" : "assign",
+          type,
           urgency: calculateUrgency(timestamp),
           isCompleted: false
         });
@@ -898,11 +953,11 @@ export function isRespectiveOccurrence(sessionGroup, studentOccurrence, sessionD
   }
 
   // 1. If activityName explicitly declares a specific occurrence (e.g. "Tutorial Attendance Occ 2", "Attendance - Group 1")
-  const actHasOcc = actName && (/\bocc(?:urrence)?\s*\d+\b/i.test(actName) || /\bkumpulan\s*\d+\b/i.test(actName) || /\bgroup\s*\d+\b/i.test(actName));
+  const actHasOcc = actName && (/\bocc(?:urrence)?\s*\d+\b/i.test(actName) || /\bkumpulan\s*\d+\b/i.test(actName) || /\bgroup\s*\d+\b/i.test(actName) || /\btut(?:orial)?\s*\d+\b/i.test(actName));
   if (actHasOcc) {
     if (!occ) return false;
-    const occM = occ.match(/\b(?:occ|occurrence|kumpulan|group)\s*#?\s*(\d+)\b/i) || occ.match(/\b\d+\b/);
-    const actM = actName.match(/\b(?:occ|occurrence|kumpulan|group)\s*#?\s*(\d+)\b/i);
+    const occM = occ.match(/\b(?:occ|occurrence|kumpulan|group|tutorial|tut)\s*#?\s*(\d+)\b/i) || occ.match(/\b\d+\b/);
+    const actM = actName.match(/\b(?:occ|occurrence|kumpulan|group|tutorial|tut)\s*#?\s*(\d+)\b/i);
     const occNum = occM ? (occM[1] || occM[0]) : null;
     const actNum = actM ? actM[1] : null;
     if (occNum && actNum && parseInt(occNum, 10) !== parseInt(actNum, 10)) {
@@ -913,7 +968,7 @@ export function isRespectiveOccurrence(sessionGroup, studentOccurrence, sessionD
 
   // 2. Detect if group or description specifies a specific occurrence or group number
   const groupIsUniversal = !group || group.includes("all students") || group.includes("semua pelajar") || group === "all";
-  const descHasOcc = desc && (/\bocc(?:urrence)?\s*\d+\b/i.test(desc) || /\bkumpulan\s*\d+\b/i.test(desc) || /\bgroup\s*\d+\b/i.test(desc));
+  const descHasOcc = desc && (/\bocc(?:urrence)?\s*\d+\b/i.test(desc) || /\bkumpulan\s*\d+\b/i.test(desc) || /\bgroup\s*\d+\b/i.test(desc) || /\btut(?:orial)?\s*\d+\b/i.test(desc));
 
   // Determine target text for occurrence extraction
   let targetText = "";
@@ -935,18 +990,21 @@ export function isRespectiveOccurrence(sessionGroup, studentOccurrence, sessionD
     return false;
   }
 
-  // Extract occurrence number specifically associated with occ/kumpulan/group keywords if present
-  const occNumberMatch = targetText.match(/\b(?:occ|occurrence|kumpulan|group)\s*#?\s*(\d+)\b/i);
+  // Extract occurrence number specifically associated with occ/kumpulan/group/tutorial keywords if present
+  const occNumberMatch = targetText.match(/\b(?:occ|occurrence|kumpulan|group|tutorial|tut)\s*#?\s*(\d+)\b/i);
   let textNum = null;
   if (occNumberMatch) {
     textNum = occNumberMatch[1];
-  } else {
-    // If targetText is purely a group name like "Group 1" or "1", fallback to first digits
+  } else if (!groupIsUniversal && targetText === group) {
+    // If targetText is purely from group column (e.g. "1" or "01"), fallback to first digits
     const m = targetText.match(/\b\d+\b/) || targetText.match(/\d+/);
     if (m) textNum = m[0];
+  } else {
+    // If targetText had no occurrence keywords and group is universal, it is universal
+    return true;
   }
 
-  const occDigits = occ.match(/\b(?:occ|occurrence|kumpulan|group)\s*#?\s*(\d+)\b/i) || occ.match(/\b\d+\b/) || occ.match(/\d+/);
+  const occDigits = occ.match(/\b(?:occ|occurrence|kumpulan|group|tutorial|tut)\s*#?\s*(\d+)\b/i) || occ.match(/\b\d+\b/) || occ.match(/\d+/);
   const studentNum = occDigits ? (occDigits[1] || occDigits[0]) : null;
 
   if (studentNum && textNum) {

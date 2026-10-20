@@ -31,7 +31,8 @@ import {
   extractCourseCode,
   calculateUrgency,
   isRespectiveOccurrence,
-  isAttendanceSessionPastOrCurrent
+  isAttendanceSessionPastOrCurrent,
+  isAttendanceActivity
 } from "./utils/parser.js";
 
 import {
@@ -1229,7 +1230,7 @@ async function loadLiveDeadlines() {
 
   try {
     const liveEvents = await fetchLiveDeadlines(state.sesskey, state.courses, state.courseOccurrences, state.studentOccurrence);
-    state.deadlines = liveEvents;
+    state.deadlines = (liveEvents || []).filter((item) => !isAttendanceActivity(item));
 
     state.deadlines.sort((a, b) => {
       if (a.isCompleted !== b.isCompleted) return a.isCompleted ? 1 : -1;
@@ -1280,12 +1281,13 @@ function updateUrgentCountBadge() {
     if (urgentBanner) urgentBanner.classList.add("hidden");
   }
 
-  // Update filter pill counters
-  const total = state.deadlines.length;
-  const countUrgent = state.deadlines.filter((d) => !d.isCompleted && d.urgency === "urgent").length;
-  const countWeek = state.deadlines.filter((d) => !d.isCompleted && d.urgency === "this_week").length;
-  const countLater = state.deadlines.filter((d) => !d.isCompleted && d.urgency === "upcoming").length;
-  const countDone = state.deadlines.filter((d) => d.isCompleted).length;
+  // Update filter pill counters strictly for submission tasks
+  const validSubmissions = state.deadlines.filter((d) => !isAttendanceActivity(d));
+  const total = validSubmissions.length;
+  const countUrgent = validSubmissions.filter((d) => !d.isCompleted && d.urgency === "urgent").length;
+  const countWeek = validSubmissions.filter((d) => !d.isCompleted && d.urgency === "this_week").length;
+  const countLater = validSubmissions.filter((d) => !d.isCompleted && d.urgency === "upcoming").length;
+  const countDone = validSubmissions.filter((d) => d.isCompleted).length;
 
   document.getElementById("countAll").textContent = total;
   document.getElementById("countUrgent").textContent = countUrgent;
@@ -1301,6 +1303,9 @@ function renderDeadlines() {
   container.innerHTML = "";
 
   const filtered = state.deadlines.filter((item) => {
+    // Strictly exclude any attendance items
+    if (isAttendanceActivity(item)) return false;
+
     if (state.searchQuery) {
       const matchTitle = item.title.toLowerCase().includes(state.searchQuery);
       const matchCourse = item.courseCode.toLowerCase().includes(state.searchQuery);
@@ -1347,10 +1352,17 @@ function renderDeadlines() {
     const isTgSent = state.telegramSentDeadlineIds.has(String(item.id)) || item.telegramSent;
     const tgSentBadge = isTgSent ? `<span class="telegram-sent-tag" title="Alert flagged as sent to Telegram">✈️ Telegram Sent</span>` : "";
 
+    const typeLabel = item.type === "quiz" ? "Quiz" : (item.type === "turnitin" ? "Turnitin" : (item.type === "workshop" ? "Workshop" : "Assignment"));
+    const typeBadge = `<span class="activity-type-tag type-${item.type || "assign"}">${typeLabel}</span>`;
+    const studentOcc = state.courseOccurrences[item.courseCode] || state.courseOccurrences[item.courseId] || "";
+    const occBadge = studentOcc ? `<span class="occ-target-tag" title="Filtered for your registered occurrence">${escapeHtml(studentOcc)}</span>` : "";
+
     card.innerHTML = `
       <div class="deadline-card-header">
         <div class="course-badge-row">
           <span class="course-tag">${escapeHtml(item.courseCode)}</span>
+          ${typeBadge}
+          ${occBadge}
           ${item.weight ? `<span class="weight-tag">${escapeHtml(item.weight)}</span>` : ""}
           ${tgSentBadge}
         </div>
@@ -1844,6 +1856,16 @@ function renderActiveOccurrenceBadges() {
 
     container.appendChild(chip);
   });
+
+  const deadlinesTag = document.getElementById("activeOccDeadlinesTag");
+  if (deadlinesTag) {
+    const configuredCount = state.courses.filter(c => state.courseOccurrences[c.id] || state.courseOccurrences[c.code || c.shortname]).length;
+    if (configuredCount > 0) {
+      deadlinesTag.textContent = `🎯 ${configuredCount}/${state.courses.length} Courses Filtered`;
+    } else {
+      deadlinesTag.textContent = `⚠️ All Occurrences`;
+    }
+  }
 }
 
 /**
@@ -2095,7 +2117,10 @@ async function handleSaveCourseOccurrence() {
   if (courseCode) state.courseOccurrences[courseCode] = occurrence;
 
   if (typeof chrome !== "undefined" && chrome.storage?.local) {
-    await chrome.storage.local.set({ course_occurrences: state.courseOccurrences });
+    await chrome.storage.local.set({
+      course_occurrences: state.courseOccurrences,
+      courseOccurrences: state.courseOccurrences
+    });
   }
 
   // Auto-sync updated occurrences to Cloud Relay if enabled
@@ -2114,8 +2139,11 @@ async function handleSaveCourseOccurrence() {
   renderActiveOccurrenceBadges();
   populateAttendanceCourseDropdowns();
 
-  // Reload live attendance with new occurrence applied
-  await loadLiveAttendanceData(true);
+  // Reload BOTH live deadlines (filtered by new occurrence) and live attendance
+  await Promise.allSettled([
+    loadLiveDeadlines(),
+    loadLiveAttendanceData(true)
+  ]);
 }
 
 /**

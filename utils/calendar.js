@@ -14,7 +14,8 @@ import {
   parseCourseAssignmentsIndex,
   parseCourseViewSubmissions,
   parseEnrolledCourses,
-  isRespectiveOccurrence
+  isRespectiveOccurrence,
+  isAttendanceActivity
 } from "./parser.js";
 import { InvalidSessionError, getSessionContext } from "./moodleApi.js";
 
@@ -61,12 +62,21 @@ export async function fetchLiveDeadlines(sesskey, courses = [], occurrencesMap =
   if (!courses || courses.length === 0) {
     if (typeof chrome !== "undefined" && chrome.storage?.local) {
       try {
-        const stored = await chrome.storage.local.get(["courses", "courseOccurrences", "studentOccurrence"]);
+        const stored = await chrome.storage.local.get([
+          "courses",
+          "cached_courses",
+          "course_occurrences",
+          "courseOccurrences",
+          "studentOccurrence"
+        ]);
         if (Array.isArray(stored.courses) && stored.courses.length > 0) {
           courses = stored.courses;
+        } else if (Array.isArray(stored.cached_courses) && stored.cached_courses.length > 0) {
+          courses = stored.cached_courses;
         }
-        if (stored.courseOccurrences && Object.keys(occurrencesMap).length === 0) {
-          occurrencesMap = stored.courseOccurrences;
+        const localOccMap = stored.course_occurrences || stored.courseOccurrences || {};
+        if (Object.keys(occurrencesMap).length === 0 && Object.keys(localOccMap).length > 0) {
+          occurrencesMap = localOccMap;
         }
         if (!defaultOccurrence && stored.studentOccurrence) {
           defaultOccurrence = stored.studentOccurrence;
@@ -195,6 +205,10 @@ export async function fetchLiveDeadlines(sesskey, courses = [], occurrencesMap =
         const html = await htmlRes.text();
         const rawEvents = parseCalendarEvents(html);
         rawEvents.forEach((evt) => {
+          if (isAttendanceActivity(evt)) return;
+          const courseCode = evt.courseCode || extractCourseCode(evt.courseName || evt.title || "");
+          const studentOcc = occurrencesMap[courseCode] || defaultOccurrence || "";
+          if (!isRespectiveOccurrence("", studentOcc, evt.title)) return;
           const key = getActivityKey(evt);
           deadlinesMap.set(key, {
             ...evt,
@@ -210,6 +224,16 @@ export async function fetchLiveDeadlines(sesskey, courses = [], occurrencesMap =
   // Merge events from AJAX Calendar into deadlinesMap
   if (Array.isArray(eventsData)) {
     for (const evt of eventsData) {
+      // 1. Strictly exclude attendance activities / sessions from submissions
+      if (isAttendanceActivity(evt)) {
+        continue;
+      }
+      const mod = (evt.modulename || "").toLowerCase();
+      const eventType = (evt.eventtype || "").toLowerCase();
+      if (mod === "attendance" || eventType === "attendance") {
+        continue;
+      }
+
       const timestamp = (evt.timesort || evt.timestart) * 1000;
       const courseCode = extractCourseCode(evt.course?.shortname || evt.course?.fullname || "");
       const courseId = evt.course?.id ? String(evt.course.id) : "";
@@ -338,9 +362,11 @@ export async function fetchLiveDeadlines(sesskey, courses = [], occurrencesMap =
   }
 
   // -------------------------------------------------------------
-  // 3. Finalize Urgency, Local Completion, and Sort
+  // 3. Finalize Urgency, Local Completion, Attendance Exclusion, and Sort
   // -------------------------------------------------------------
-  const allDeadlines = Array.from(deadlinesMap.values()).map((item) => {
+  const allDeadlines = Array.from(deadlinesMap.values())
+    .filter((item) => !isAttendanceActivity(item))
+    .map((item) => {
     const isCompleted = item.isSubmittedOnSpectrum || completedSet.has(String(item.id)) || completedSet.has(String(item.cmid));
     const urgency = item.dueTimestamp ? calculateUrgency(item.dueTimestamp) : "upcoming";
     return {
