@@ -17,6 +17,7 @@ import {
   parseCourseViewSubmissions,
   parseCalendarEvents,
   isAttendanceActivity,
+  isOverdueMoreThan100Days,
   isRespectiveOccurrence,
   calculateUrgency,
   formatTimeRemaining,
@@ -42,13 +43,20 @@ console.log("=== Testing Spectra Course Submission Pages & Occurrence Filtering 
 // -------------------------------------------------------------
 // Test 0: Attendance Activity Differentiation vs Submissions
 // -------------------------------------------------------------
-console.log("\n--- Sub-test 0: Attendance Differentiation ---");
+console.log("\n--- Sub-test 0: Attendance Differentiation & 100-Day Overdue Filter ---");
 assert(isAttendanceActivity({ modulename: "attendance" }), "Identifies modulename attendance");
 assert(isAttendanceActivity({ eventtype: "attendance" }), "Identifies eventtype attendance");
 assert(isAttendanceActivity({ url: "https://spectrum.um.edu.my/mod/attendance/view.php?id=9901" }), "Identifies attendance URL");
+assert(isAttendanceActivity({ title: "Attendance" }), "Identifies pure Attendance title");
+assert(isAttendanceActivity({ title: "Attendance Week 2" }), "Identifies Attendance Week 2");
 assert(isAttendanceActivity({ title: "Lecture Attendance (Occ 1)" }), "Identifies attendance title");
 assert(isAttendanceActivity({ title: "Rekod Kehadiran Tutorial" }), "Identifies BM Kehadiran title");
 assert(isAttendanceActivity({ title: "Take Attendance - Group 2" }), "Identifies Take Attendance title");
+assert(isAttendanceActivity({ title: "Attendence (Occ 1)" }), "Identifies typo Attendence");
+assert(isAttendanceActivity({ title: "Check-in Week 3" }), "Identifies Check-in Week 3");
+assert(isAttendanceActivity({ title: "Weekly Class Sign-in" }), "Identifies Class Sign-in");
+assert(isAttendanceActivity({ title: "Borang Kehadiran Kuliah" }), "Identifies Borang Kehadiran Kuliah");
+assert(isAttendanceActivity({ title: "Kehadiran Minggu 4 (Occ 2)" }), "Identifies Kehadiran Minggu 4");
 
 // Coursework assignments must NEVER be flagged as attendance
 assert(!isAttendanceActivity({ title: "Assignment 1 (Occ 1)", url: "https://spectrum.um.edu.my/mod/assign/view.php?id=101", type: "assign" }), "Assignment 1 is not attendance");
@@ -56,17 +64,33 @@ assert(!isAttendanceActivity({ title: "Quiz 2: Data Structures", url: "https://s
 assert(!isAttendanceActivity({ title: "Turnitin Essay Submission", url: "https://spectrum.um.edu.my/mod/turnitintooltwo/view.php?id=303", type: "turnitin" }), "Turnitin is not attendance");
 assert(!isAttendanceActivity({ title: "Lab 3 Report", url: "https://spectrum.um.edu.my/mod/assign/view.php?id=404", type: "assign" }), "Lab Report is not attendance");
 
-// parseCalendarEvents strictly filters out attendance
+// Academic projects ABOUT an attendance system must remain classified as assignments
+assert(!isAttendanceActivity({ title: "Assignment 2: Smart Attendance System", url: "https://spectrum.um.edu.my/mod/assign/view.php?id=505", type: "assign" }), "Project about attendance system is not attendance check-in");
+assert(!isAttendanceActivity({ title: "Final Project: RFID Attendance Tracker App", url: "https://spectrum.um.edu.my/mod/assign/view.php?id=506", type: "assign" }), "Project about attendance app is not attendance check-in");
+
+// Test isOverdueMoreThan100Days
+const now = Date.now();
+const dayMs = 24 * 60 * 60 * 1000;
+assert(isOverdueMoreThan100Days(now - 105 * dayMs, now), "Item due 105 days ago is identified as overdue > 100 days");
+assert(isOverdueMoreThan100Days(now - 180 * dayMs, now), "Item due 180 days ago is identified as overdue > 100 days");
+assert(!isOverdueMoreThan100Days(now - 99 * dayMs, now), "Item due 99 days ago is NOT overdue > 100 days");
+assert(!isOverdueMoreThan100Days(now - 10 * dayMs, now), "Item due 10 days ago is NOT overdue > 100 days");
+assert(!isOverdueMoreThan100Days(now + 2 * dayMs, now), "Future item is NOT overdue > 100 days");
+assert(!isOverdueMoreThan100Days(null, now), "Null due date is NOT overdue > 100 days");
+
+// parseCalendarEvents strictly filters out attendance and items overdue > 100 days
 const mixedCalendarAjax = {
   events: [
     { id: 101, name: "Assignment 1", modulename: "assign", timesort: Math.floor(Date.now() / 1000) + 3600 },
     { id: 102, name: "Lecture Attendance Occ 1", modulename: "attendance", timesort: Math.floor(Date.now() / 1000) + 1800, url: "https://spectrum.um.edu.my/mod/attendance/view.php?id=50" },
-    { id: 103, name: "Quiz 1", modulename: "quiz", timesort: Math.floor(Date.now() / 1000) + 7200 }
+    { id: 103, name: "Quiz 1", modulename: "quiz", timesort: Math.floor(Date.now() / 1000) + 7200 },
+    { id: 104, name: "Ancient Assignment 0", modulename: "assign", timesort: Math.floor((Date.now() - 150 * dayMs) / 1000) }
   ]
 };
 const parsedCalendarEvents = parseCalendarEvents(mixedCalendarAjax);
-assert(parsedCalendarEvents.length === 2, `parseCalendarEvents filtered attendance (expected 2, got ${parsedCalendarEvents.length})`);
+assert(parsedCalendarEvents.length === 2, `parseCalendarEvents filtered attendance & 100d overdue (expected 2, got ${parsedCalendarEvents.length})`);
 assert(!parsedCalendarEvents.some(e => e.title.includes("Attendance")), "Attendance event excluded from parsed calendar");
+assert(!parsedCalendarEvents.some(e => e.id === "104"), "150-day overdue assignment excluded from parsed calendar");
 assert(parsedCalendarEvents.some(e => e.title === "Assignment 1"), "Assignment 1 retained");
 assert(parsedCalendarEvents.some(e => e.title === "Quiz 1"), "Quiz 1 retained");
 
@@ -136,6 +160,18 @@ const mockAssignIndexHtml = `
       <td>Sunday, 20 December 2026, 11:59 PM</td>
       <td>No submission</td>
     </tr>
+    <tr>
+      <td>Week 1</td>
+      <td><a href="https://spectrum.um.edu.my/mod/assign/view.php?id=1006">Attendance Week 1 (Occ 1)</a></td>
+      <td>Friday, 24 October 2026, 11:59 PM</td>
+      <td>Submitted for grading</td>
+    </tr>
+    <tr>
+      <td>Early Term</td>
+      <td><a href="https://spectrum.um.edu.my/mod/assign/view.php?id=1007">Ancient Survey (Occ 1)</a></td>
+      <td>Wednesday, 1 January 2025, 11:59 PM</td>
+      <td>No submission</td>
+    </tr>
   </tbody>
 </table>
 `;
@@ -147,6 +183,8 @@ assert(occ1Assignments.some(a => a.cmid === "1003"), "Universal Midterm Project 
 assert(occ1Assignments.some(a => a.cmid === "1005"), "Bottom Week 14 Final Dropbox (Occ 1) is included");
 assert(!occ1Assignments.some(a => a.cmid === "1002"), "Assignment 1 (Occ 2) is strictly excluded");
 assert(!occ1Assignments.some(a => a.cmid === "1004"), "Final Dropbox (Occ 2) is strictly excluded");
+assert(!occ1Assignments.some(a => a.cmid === "1006"), "Attendance in assign index strictly excluded from submissions");
+assert(!occ1Assignments.some(a => a.cmid === "1007"), "Ancient 100+ days overdue assignment strictly excluded");
 
 const occ2Assignments = parseCourseAssignmentsIndex(mockAssignIndexHtml, "WIF3001", "Software Engineering", "Occ 2");
 assert(occ2Assignments.length === 3, `Occ 2 gets exactly 3 assignments (got ${occ2Assignments.length})`);
@@ -219,6 +257,22 @@ const mockCourseViewHtml = `
         </div>
         <div class="activity-dates">Due: Thursday, 24 December 2026, 11:59 PM</div>
       </li>
+      <li class="activity assign modtype_assign" id="module-2006">
+        <div class="activity-instance">
+          <a href="https://spectrum.um.edu.my/mod/assign/view.php?id=2006">
+            <span class="instancename">Attendance Week 1 - Lecture Session (Occ 1)</span>
+          </a>
+        </div>
+        <div class="activity-dates">Due: Friday, 24 October 2026, 11:59 PM</div>
+      </li>
+      <li class="activity assign modtype_assign" id="module-2007">
+        <div class="activity-instance">
+          <a href="https://spectrum.um.edu.my/mod/assign/view.php?id=2007">
+            <span class="instancename">Ancient Diagnostic Test (Occ 1)</span>
+          </a>
+        </div>
+        <div class="activity-dates">Due: Wednesday, 1 January 2025, 11:59 PM</div>
+      </li>
     </ul>
   </li>
 </ul>
@@ -231,6 +285,8 @@ assert(courseSubmissionsOcc1.some(s => s.cmid === "2003" && s.type === "quiz"), 
 assert(courseSubmissionsOcc1.some(s => s.cmid === "2005" && s.type === "turnitin"), "Bottom section Week 14 Turnitin Occ 1 captured");
 assert(!courseSubmissionsOcc1.some(s => s.cmid === "2002"), "Top section Occ 2 assignment excluded");
 assert(!courseSubmissionsOcc1.some(s => s.cmid === "2004"), "Bottom section Occ 2 Turnitin excluded");
+assert(!courseSubmissionsOcc1.some(s => s.cmid === "2006"), "Attendance in course view strictly excluded");
+assert(!courseSubmissionsOcc1.some(s => s.cmid === "2007"), "Ancient 100+ days overdue submission in course view strictly excluded");
 
 // -------------------------------------------------------------
 // Test 4: End-to-End fetchLiveDeadlines with Mocked Fetches
@@ -278,6 +334,16 @@ globalThis.fetch = async (url, opts = {}) => {
                 timesort: Math.floor(Date.now() / 1000) + 3600 * 4,
                 course: { id: 10, shortname: "WIF3001", fullname: "Software Engineering" },
                 url: "https://spectrum.um.edu.my/mod/attendance/view.php?id=5001",
+                action: { actionable: true }
+              },
+              {
+                id: 9006,
+                instance: 5002,
+                name: "Ancient Semester Task is due",
+                modulename: "assign",
+                timesort: Math.floor((Date.now() - 150 * 24 * 60 * 60 * 1000) / 1000),
+                course: { id: 10, shortname: "WIF3001", fullname: "Software Engineering" },
+                url: "https://spectrum.um.edu.my/mod/assign/view.php?id=5002",
                 action: { actionable: true }
               }
             ]
@@ -327,6 +393,10 @@ assert(!hasOcc2, "Strict: No Occ 2 activities in the resulting deadlines list");
 // Check that Attendance items are strictly excluded
 const hasAttendance = deadlines.some(d => d.type === "attendance" || d.id === "9005" || d.cmid === "5001" || /attendance|kehadiran/i.test(d.title) || (d.url && d.url.includes("/mod/attendance/")));
 assert(!hasAttendance, "Strict: Attendance events are never included in fetchLiveDeadlines");
+
+// Check that 100+ days overdue items are strictly excluded
+const hasOverdueOver100Days = deadlines.some(d => d.id === "9006" || d.cmid === "5002" || (d.dueTimestamp && isOverdueMoreThan100Days(d.dueTimestamp)));
+assert(!hasOverdueOver100Days, "Strict: Items overdue > 100 days are strictly excluded from fetchLiveDeadlines");
 
 // Check deduplication
 const item1001List = deadlines.filter(d => d.cmid === "1001" || d.id === "1001" || d.id === "9001");

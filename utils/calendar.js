@@ -15,7 +15,8 @@ import {
   parseCourseViewSubmissions,
   parseEnrolledCourses,
   isRespectiveOccurrence,
-  isAttendanceActivity
+  isAttendanceActivity,
+  isOverdueMoreThan100Days
 } from "./parser.js";
 import { InvalidSessionError, getSessionContext } from "./moodleApi.js";
 
@@ -206,6 +207,7 @@ export async function fetchLiveDeadlines(sesskey, courses = [], occurrencesMap =
         const rawEvents = parseCalendarEvents(html);
         rawEvents.forEach((evt) => {
           if (isAttendanceActivity(evt)) return;
+          if (isOverdueMoreThan100Days(evt.dueTimestamp)) return;
           const courseCode = evt.courseCode || extractCourseCode(evt.courseName || evt.title || "");
           const studentOcc = occurrencesMap[courseCode] || defaultOccurrence || "";
           if (!isRespectiveOccurrence("", studentOcc, evt.title)) return;
@@ -235,6 +237,9 @@ export async function fetchLiveDeadlines(sesskey, courses = [], occurrencesMap =
       }
 
       const timestamp = (evt.timesort || evt.timestart) * 1000;
+      if (isOverdueMoreThan100Days(timestamp)) {
+        continue;
+      }
       const courseCode = extractCourseCode(evt.course?.shortname || evt.course?.fullname || "");
       const courseId = evt.course?.id ? String(evt.course.id) : "";
       const studentOcc = occurrencesMap[courseId] || occurrencesMap[courseCode] || defaultOccurrence || "";
@@ -366,6 +371,7 @@ export async function fetchLiveDeadlines(sesskey, courses = [], occurrencesMap =
   // -------------------------------------------------------------
   const allDeadlines = Array.from(deadlinesMap.values())
     .filter((item) => !isAttendanceActivity(item))
+    .filter((item) => !isOverdueMoreThan100Days(item.dueTimestamp))
     .map((item) => {
     const isCompleted = item.isSubmittedOnSpectrum || completedSet.has(String(item.id)) || completedSet.has(String(item.cmid));
     const urgency = item.dueTimestamp ? calculateUrgency(item.dueTimestamp) : "upcoming";

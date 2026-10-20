@@ -32,7 +32,8 @@ import {
   calculateUrgency,
   isRespectiveOccurrence,
   isAttendanceSessionPastOrCurrent,
-  isAttendanceActivity
+  isAttendanceActivity,
+  isOverdueMoreThan100Days
 } from "./utils/parser.js";
 
 import {
@@ -723,6 +724,13 @@ function hydrateDeadlinesFromScrape(events = [], rawCalendarEvents = []) {
     state.deadlines = [];
   }
 
+  // Strictly filter out attendance activities and submissions overdue > 100 days
+  state.deadlines = state.deadlines.filter((item) => {
+    if (isAttendanceActivity(item)) return false;
+    if (isOverdueMoreThan100Days(item.dueTimestamp)) return false;
+    return true;
+  });
+
   // Sort deadlines: pending first, then by urgency / due timestamp
   state.deadlines.sort((a, b) => {
     if (a.isCompleted !== b.isCompleted) return a.isCompleted ? 1 : -1;
@@ -1230,7 +1238,11 @@ async function loadLiveDeadlines() {
 
   try {
     const liveEvents = await fetchLiveDeadlines(state.sesskey, state.courses, state.courseOccurrences, state.studentOccurrence);
-    state.deadlines = (liveEvents || []).filter((item) => !isAttendanceActivity(item));
+    state.deadlines = (liveEvents || []).filter((item) => {
+      if (isAttendanceActivity(item)) return false;
+      if (isOverdueMoreThan100Days(item.dueTimestamp)) return false;
+      return true;
+    });
 
     state.deadlines.sort((a, b) => {
       if (a.isCompleted !== b.isCompleted) return a.isCompleted ? 1 : -1;
@@ -1281,8 +1293,12 @@ function updateUrgentCountBadge() {
     if (urgentBanner) urgentBanner.classList.add("hidden");
   }
 
-  // Update filter pill counters strictly for submission tasks
-  const validSubmissions = state.deadlines.filter((d) => !isAttendanceActivity(d));
+  // Update filter pill counters strictly for submission tasks (exclude attendance and overdue > 100 days)
+  const validSubmissions = state.deadlines.filter((d) => {
+    if (isAttendanceActivity(d)) return false;
+    if (isOverdueMoreThan100Days(d.dueTimestamp)) return false;
+    return true;
+  });
   const total = validSubmissions.length;
   const countUrgent = validSubmissions.filter((d) => !d.isCompleted && d.urgency === "urgent").length;
   const countWeek = validSubmissions.filter((d) => !d.isCompleted && d.urgency === "this_week").length;
@@ -1305,6 +1321,9 @@ function renderDeadlines() {
   const filtered = state.deadlines.filter((item) => {
     // Strictly exclude any attendance items
     if (isAttendanceActivity(item)) return false;
+
+    // Strictly exclude submissions overdue by more than 100 days
+    if (isOverdueMoreThan100Days(item.dueTimestamp)) return false;
 
     if (state.searchQuery) {
       const matchTitle = item.title.toLowerCase().includes(state.searchQuery);

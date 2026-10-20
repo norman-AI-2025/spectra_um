@@ -77,17 +77,30 @@ export function formatTimeRemaining(timestamp) {
   return `${days} days left`;
 }
 
+export const MAX_OVERDUE_DAYS = 100;
+export const MAX_OVERDUE_MS = MAX_OVERDUE_DAYS * 24 * 60 * 60 * 1000; // 100 days in ms
+
+/**
+ * Checks if a submission is overdue by more than 100 days.
+ * Items overdue by > 100 days are hidden from the UI and background scans to reduce clutter.
+ */
+export function isOverdueMoreThan100Days(dueTimestamp, now = Date.now()) {
+  if (!dueTimestamp || isNaN(dueTimestamp)) return false;
+  return (now - Number(dueTimestamp)) > MAX_OVERDUE_MS;
+}
+
 /**
  * Strict differentiator:
  * Identifies whether an activity or calendar event represents an Attendance check-in / session,
  * to ensure attendance is NEVER mixed into coursework submission due / dropboxes.
+ * Reads module types, URLs, and inspects titles carefully in English and Bahasa Melayu.
  */
 export function isAttendanceActivity(item) {
   if (!item) return false;
 
-  // 1. Explicit Moodle module types
-  const type = String(item.type || item.modulename || "").toLowerCase();
-  const eventType = String(item.eventtype || "").toLowerCase();
+  // 1. Explicit Moodle module types & event types
+  const type = String(item.type || item.modulename || "").toLowerCase().trim();
+  const eventType = String(item.eventtype || "").toLowerCase().trim();
   if (type === "attendance" || eventType === "attendance") {
     return true;
   }
@@ -99,18 +112,45 @@ export function isAttendanceActivity(item) {
   }
 
   // 3. Activity or Event title keywords
-  const title = String(item.title || item.name || "").toLowerCase().trim();
-  if (
-    /\b(?:attendance|kehadiran|kedatangan)\b/i.test(title) ||
-    /^(?:take|record|submit)\s+attendance/i.test(title) ||
-    /^(?:rekod|isi|hantar)\s+kehadiran/i.test(title) ||
-    /\bkehadiran\s+(?:kuliah|tutorial|makmal|kelas)\b/i.test(title) ||
-    /\b(?:lecture|tutorial|lab)\s+attendance\b/i.test(title)
-  ) {
-    if (url.includes("/mod/assign/") && !/\b(?:record|take|submit|isi|hantar|sesi|session)\b/i.test(title)) {
-      return false;
+  const rawTitle = String(item.title || item.name || "");
+  const title = rawTitle.toLowerCase().trim();
+  if (!title) return false;
+
+  // Safeguard: Check if this is an academic project or assignment ABOUT an attendance system/app,
+  // e.g. "Assignment 1: Smart Attendance Management System", "Project Attendance Tracker App"
+  const isProjectAboutAttendance =
+    /\b(?:system|sistem|software|app|application|aplikasi|tracker|tracking|database|proposal|casestudy|case\s+study|architecture|framework|development)\b/i.test(title) &&
+    /\b(?:assignment|project|projek|tugasan|homework|essay|report|laporan)\b/i.test(title);
+
+  if (isProjectAboutAttendance) {
+    return false;
+  }
+
+  // Comprehensive attendance indicators:
+  // English: attendance, attendence (typo), attandance, check-in, check in, checkin, sign-in, sign in, signin, presensi, roll call
+  // Bahasa Melayu: kehadiran, kedatangan, daftar kehadiran, rekod kehadiran, isi kehadiran, catat kehadiran, sahkan kehadiran
+  const attendancePatterns = [
+    // Direct presence keywords
+    /\b(?:attendance|attendence|attandance|kehadiran|kedatangan|presensi|absensi)\b/i,
+    // Check-in / Sign-in / Roll call
+    /\b(?:check[\s-]?in|sign[\s-]?in|roll[\s-]?call)\b/i,
+    // Action verbs + attendance/kehadiran
+    /\b(?:take|record|submit|mark|verify|confirm|log)\s+(?:your\s+)?attendance\b/i,
+    /\b(?:rekod|isi|hantar|catat|daftar|sahkan|tanda|ambil)\s+kehadiran\b/i,
+    // Contextual: Lecture / Tutorial / Lab / Class / Week attendance
+    /\b(?:lecture|tutorial|lab|class|weekly|daily|sesi|session|kuliah|makmal|kelas|mingguan)\s+(?:attendance|kehadiran|check[\s-]?in|sign[\s-]?in)\b/i,
+    /\b(?:attendance|kehadiran)\s+(?:for\s+)?(?:lecture|tutorial|lab|class|week|minggu|sesi|session|kuliah|makmal|kelas)\b/i,
+    // Attendance with group or occurrence
+    /\b(?:attendance|kehadiran)\s*[-–:]?\s*(?:occ|occurrence|group|kumpulan|tut|tutorial)\b/i,
+    // Attendance forms & QR
+    /\b(?:qr|form|borang)\s+(?:code\s+)?(?:attendance|kehadiran)\b/i,
+    /\b(?:attendance|kehadiran)\s+(?:qr|form|borang)\b/i
+  ];
+
+  for (const pattern of attendancePatterns) {
+    if (pattern.test(title)) {
+      return true;
     }
-    return true;
   }
 
   return false;
@@ -128,6 +168,10 @@ export function parseCalendarEvents(sourceData) {
   if (typeof sourceData === "object" && sourceData.events) {
     return sourceData.events
       .filter((evt) => !isAttendanceActivity(evt))
+      .filter((evt) => {
+        const timestamp = (evt.timesort || evt.timestart) * 1000;
+        return !isOverdueMoreThan100Days(timestamp);
+      })
       .map((evt) => {
         const timestamp = (evt.timesort || evt.timestart) * 1000;
         const courseCode = extractCourseCode(evt.course?.shortname || evt.course?.fullname || "");
@@ -200,6 +244,11 @@ export function parseCalendarEvents(sourceData) {
 
         // Exclude attendance from submissions
         if (isAttendanceActivity({ url, title, type })) {
+          return;
+        }
+
+        // Exclude items overdue by more than 100 days
+        if (isOverdueMoreThan100Days(timestamp)) {
           return;
         }
 
@@ -366,6 +415,9 @@ export function parseCourseAssignmentsIndex(html, courseCode = "", courseName = 
         const rawTitle = linkEl.textContent.trim();
         const title = cleanMoodleTitle(rawTitle);
 
+        // Strictly exclude attendance items that lecturers created via Moodle assignment tool
+        if (isAttendanceActivity({ title, url, type: "assign" })) return;
+
         // Filter by occurrence: if student specified an occurrence, title must match or be universal
         const matchesOcc = isRespectiveOccurrence("", studentOccurrence, title);
         if (!matchesOcc) return;
@@ -387,6 +439,10 @@ export function parseCourseAssignmentsIndex(html, courseCode = "", courseName = 
         });
 
         const dueTimestamp = dueDateText ? parseMoodleDateString(dueDateText) : null;
+
+        // Strictly exclude submissions overdue by more than 100 days
+        if (isOverdueMoreThan100Days(dueTimestamp)) return;
+
         const isSubmitted = /submitted|graded|selesai|dihantar/i.test(submissionStatusText) && !/no submission|not submitted|belum/i.test(submissionStatusText);
 
         assignments.push({
@@ -427,6 +483,10 @@ export function parseCourseAssignmentsIndex(html, courseCode = "", courseName = 
     const cmid = linkMatch[2];
     const rawTitle = linkMatch[3].replace(/<[^>]+>/g, "").trim();
     const title = cleanMoodleTitle(rawTitle);
+    const url = rawUrl.startsWith("http") ? rawUrl : `https://spectrum.um.edu.my/${rawUrl.replace(/^\//, "")}`;
+
+    // Strictly exclude attendance items
+    if (isAttendanceActivity({ title, url, type: "assign" })) continue;
 
     const matchesOcc = isRespectiveOccurrence("", studentOccurrence, title);
     if (!matchesOcc) continue;
@@ -452,8 +512,10 @@ export function parseCourseAssignmentsIndex(html, courseCode = "", courseName = 
     }
 
     const dueTimestamp = dueDateText ? parseMoodleDateString(dueDateText) : null;
+
+    // Strictly exclude submissions overdue by more than 100 days
+    if (isOverdueMoreThan100Days(dueTimestamp)) continue;
     const isSubmitted = /submitted|graded|selesai|dihantar/i.test(submissionStatusText) && !/no submission|not submitted|belum/i.test(submissionStatusText);
-    const url = rawUrl.startsWith("http") ? rawUrl : `https://spectrum.um.edu.my/${rawUrl.replace(/^\//, "")}`;
 
     assignments.push({
       id: cmid,
@@ -509,6 +571,15 @@ export function parseCourseViewSubmissions(html, courseCode = "", courseName = "
         const rawTitle = linkEl.querySelector(".instancename") ? linkEl.querySelector(".instancename").textContent : linkEl.textContent;
         const title = cleanMoodleTitle(rawTitle);
 
+        let type = "assign";
+        if (url.includes("mod/quiz")) type = "quiz";
+        else if (url.includes("mod/workshop")) type = "workshop";
+        else if (url.includes("turnitintooltwo")) type = "turnitin";
+        else if (url.includes("mod/attendance")) type = "attendance";
+
+        // Strictly exclude attendance activities
+        if (isAttendanceActivity({ title, url, type })) return;
+
         // Strict occurrence filter
         const matchesOcc = isRespectiveOccurrence("", studentOccurrence, title);
         if (!matchesOcc) return;
@@ -534,10 +605,9 @@ export function parseCourseViewSubmissions(html, courseCode = "", courseName = "
         }
 
         const dueTimestamp = dueDateText ? parseMoodleDateString(dueDateText) : null;
-        let type = "assign";
-        if (url.includes("mod/quiz")) type = "quiz";
-        else if (url.includes("mod/workshop")) type = "workshop";
-        else if (url.includes("turnitintooltwo")) type = "turnitin";
+
+        // Strictly exclude items overdue by more than 100 days
+        if (isOverdueMoreThan100Days(dueTimestamp)) return;
 
         submissions.push({
           id: cmid,
@@ -575,16 +645,19 @@ export function parseCourseViewSubmissions(html, courseCode = "", courseName = "
 
     const rawTitle = match[3].replace(/<[^>]+>/g, "").trim();
     const title = cleanMoodleTitle(rawTitle);
-
-    const matchesOcc = isRespectiveOccurrence("", studentOccurrence, title);
-    if (!matchesOcc) continue;
-
     const url = rawUrl.startsWith("http") ? rawUrl : `https://spectrum.um.edu.my/${rawUrl.replace(/^\//, "")}`;
 
     let type = "assign";
     if (url.includes("mod/quiz")) type = "quiz";
     else if (url.includes("mod/workshop")) type = "workshop";
     else if (url.includes("turnitintooltwo")) type = "turnitin";
+    else if (url.includes("mod/attendance")) type = "attendance";
+
+    // Strictly exclude attendance activities
+    if (isAttendanceActivity({ title, url, type })) continue;
+
+    const matchesOcc = isRespectiveOccurrence("", studentOccurrence, title);
+    if (!matchesOcc) continue;
 
     // Extract nearby text snippet to capture due date and submission status
     const contextSnippet = html.slice(match.index, match.index + 1200);
@@ -595,6 +668,9 @@ export function parseCourseViewSubmissions(html, courseCode = "", courseName = "
     }
     const isSubmitted = /submitted|dihantar|done|selesai/i.test(contextSnippet) && !/not submitted|belum|to do/i.test(contextSnippet);
     const dueTimestamp = dueDateText ? parseMoodleDateString(dueDateText) : null;
+
+    // Strictly exclude items overdue by more than 100 days
+    if (isOverdueMoreThan100Days(dueTimestamp)) continue;
 
     submissions.push({
       id: cmid,

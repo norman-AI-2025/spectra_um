@@ -468,6 +468,33 @@ function matchesOccurrence(groupStr, studentOcc, descStr = "") {
   return false;
 }
 
+function isAttendanceWorkerActivity(title, url = "") {
+  const u = String(url || "").toLowerCase();
+  if (u.includes("/mod/attendance/") || u.includes("attendance.php")) return true;
+
+  const t = String(title || "").toLowerCase().trim();
+  if (!t) return false;
+
+  const isProjectAboutAttendance =
+    /\b(?:system|sistem|software|app|application|aplikasi|tracker|tracking|database|proposal|casestudy|case\s+study|architecture|framework|development)\b/i.test(t) &&
+    /\b(?:assignment|project|projek|tugasan|homework|essay|report|laporan)\b/i.test(t);
+  if (isProjectAboutAttendance) return false;
+
+  const patterns = [
+    /\b(?:attendance|attendence|attandance|kehadiran|kedatangan|presensi|absensi)\b/i,
+    /\b(?:check[\s-]?in|sign[\s-]?in|roll[\s-]?call)\b/i,
+    /\b(?:take|record|submit|mark|verify|confirm|log)\s+(?:your\s+)?attendance\b/i,
+    /\b(?:rekod|isi|hantar|catat|daftar|sahkan|tanda|ambil)\s+kehadiran\b/i,
+    /\b(?:lecture|tutorial|lab|class|weekly|daily|sesi|session|kuliah|makmal|kelas|mingguan)\s+(?:attendance|kehadiran|check[\s-]?in|sign[\s-]?in)\b/i,
+    /\b(?:attendance|kehadiran)\s+(?:for\s+)?(?:lecture|tutorial|lab|class|week|minggu|sesi|session|kuliah|makmal|kelas)\b/i,
+    /\b(?:attendance|kehadiran)\s*[-–:]?\s*(?:occ|occurrence|group|kumpulan|tut|tutorial)\b/i,
+    /\b(?:qr|form|borang)\s+(?:code\s+)?(?:attendance|kehadiran)\b/i,
+    /\b(?:attendance|kehadiran)\s+(?:qr|form|borang)\b/i
+  ];
+
+  return patterns.some(p => p.test(t));
+}
+
 async function dispatchTelegram(botToken, chatId, textHtml) {
   const cleanToken = (botToken || "").trim().replace(/^bot/i, "");
   const url = `https://api.telegram.org/bot${cleanToken}/sendMessage`;
@@ -545,7 +572,7 @@ async function checkCloudDeadlines(env, sessionData) {
         if (alertedDeadlineIds.has(cmid)) continue;
 
         // Strictly exclude attendance activities from submissions
-        if (/attendance|kehadiran/i.test(rawTitle) || assignUrl.includes("mod/attendance")) continue;
+        if (isAttendanceWorkerActivity(rawTitle, assignUrl)) continue;
 
         // Occurrence filter
         if (!matchesOccurrence("", studentOcc, rawTitle)) continue;
@@ -574,6 +601,9 @@ async function checkCloudDeadlines(env, sessionData) {
 
         const dueTimestamp = dueDateText ? parseWorkerDateString(dueDateText) : null;
         if (!dueTimestamp) continue;
+
+        // Strictly exclude items overdue by more than 100 days
+        if (now - dueTimestamp > 100 * 24 * 60 * 60 * 1000) continue;
 
         const diffHours = (dueTimestamp - now) / (1000 * 60 * 60);
         if (diffHours > 0 && diffHours <= 24) {
