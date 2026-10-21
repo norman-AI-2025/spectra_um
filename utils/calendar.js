@@ -16,6 +16,7 @@ import {
   parseEnrolledCourses,
   isRespectiveOccurrence,
   isAttendanceActivity,
+  isOverdueMoreThan40Days,
   isOverdueMoreThan100Days,
   parseMoodleIcsCalendar,
   parseCourseContentsModules,
@@ -357,7 +358,7 @@ export async function fetchLiveDeadlines(sesskey, courses = [], occurrencesMap =
     )
   );
   if (missingDueItems.length > 0) {
-    await pMap(missingDueItems.slice(0, 8), async (item) => {
+    await pMap(missingDueItems.slice(0, 40), async (item) => {
       try {
         const ctrl = typeof AbortController !== "undefined" ? new AbortController() : null;
         const tid = ctrl ? setTimeout(() => ctrl.abort(), 12000) : null;
@@ -394,7 +395,7 @@ export async function fetchLiveDeadlines(sesskey, courses = [], occurrencesMap =
   // -------------------------------------------------------------
   const allDeadlines = Array.from(deadlinesMap.values())
     .filter((item) => !isAttendanceActivity(item))
-    .filter((item) => !isOverdueMoreThan100Days(item.dueTimestamp))
+    .filter((item) => !isOverdueMoreThan40Days(item.dueTimestamp))
     .map((item) => {
     const isCompleted = item.isSubmittedOnSpectrum || completedSet.has(String(item.id)) || completedSet.has(String(item.cmid));
     const urgency = item.dueTimestamp ? calculateUrgency(item.dueTimestamp) : "upcoming";
@@ -475,7 +476,7 @@ export function normalizeHydratedDeadlines(events = [], rawCalendarEvents = [], 
       }
 
       const timestamp = (item.timesort || item.timestart) * 1000;
-      if (isOverdueMoreThan100Days(timestamp)) {
+      if (isOverdueMoreThan40Days(timestamp)) {
         continue;
       }
 
@@ -536,7 +537,7 @@ export function normalizeHydratedDeadlines(events = [], rawCalendarEvents = [], 
         }
 
         const timestamp = item.dueTimestamp || (item.dueDate ? Date.parse(item.dueDate) : null);
-        if (timestamp && isOverdueMoreThan100Days(timestamp)) continue;
+        if (timestamp && isOverdueMoreThan40Days(timestamp)) continue;
 
         const courseCode = item.courseCode || extractCourseCode(item.courseName || item.title || item.name || "");
         const courseId = item.courseId ? String(item.courseId) : "";
@@ -586,7 +587,7 @@ export function normalizeHydratedDeadlines(events = [], rawCalendarEvents = [], 
         if (!title || title.toLowerCase() === "assignment") continue;
 
         const dueTs = Date.parse(item["Due Date"]);
-        if (!dueTs || isNaN(dueTs) || isOverdueMoreThan100Days(dueTs)) continue;
+        if (!dueTs || isNaN(dueTs) || isOverdueMoreThan40Days(dueTs)) continue;
 
         const code = extractCourseCode(item["Course Code"] || "") || item["Course Code"] || "N/A";
         const studentOcc = (courseOccurrences && courseOccurrences[code]) || studentOccurrence || "";

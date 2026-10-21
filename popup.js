@@ -34,6 +34,7 @@ import {
   isRespectiveOccurrence,
   isAttendanceSessionPastOrCurrent,
   isAttendanceActivity,
+  isOverdueMoreThan40Days,
   isOverdueMoreThan100Days
 } from "./utils/parser.js";
 
@@ -1001,6 +1002,7 @@ async function syncLiveSession() {
           if (!d || typeof d !== "object") return false;
           const title = (d.title || d.name || "").trim();
           if (!title) return false;
+          if (d.dueTimestamp && isOverdueMoreThan40Days(d.dueTimestamp)) return false;
           const isSynthetic = (
             (d.id && String(d.id).startsWith("scraped-") && (!d.url || d.url.includes("/my/"))) ||
             (d.courseCode === "UM" && (!d.url || !d.url.includes("view.php?id=")))
@@ -1189,7 +1191,7 @@ async function loadLiveDeadlines() {
     state.deadlines = (liveEvents || []).filter((item) => {
       if (!item || typeof item !== "object") return false;
       if (isAttendanceActivity(item)) return false;
-      if (isOverdueMoreThan100Days(item.dueTimestamp)) return false;
+      if (isOverdueMoreThan40Days(item.dueTimestamp)) return false;
       const title = (item.title || item.name || "").trim();
       if (!title) return false;
       const isSynthetic = (
@@ -1248,10 +1250,10 @@ function updateUrgentCountBadge() {
     if (urgentBanner) urgentBanner.classList.add("hidden");
   }
 
-  // Update filter pill counters strictly for submission tasks (exclude attendance and overdue > 100 days)
+  // Update filter pill counters strictly for submission tasks (exclude attendance and overdue > 40 days)
   const validSubmissions = state.deadlines.filter((d) => {
     if (isAttendanceActivity(d)) return false;
-    if (isOverdueMoreThan100Days(d.dueTimestamp)) return false;
+    if (isOverdueMoreThan40Days(d.dueTimestamp)) return false;
     return true;
   });
   const total = validSubmissions.length;
@@ -1277,8 +1279,8 @@ function renderDeadlines() {
     // Strictly exclude any attendance items
     if (isAttendanceActivity(item)) return false;
 
-    // Strictly exclude submissions overdue by more than 100 days
-    if (isOverdueMoreThan100Days(item.dueTimestamp)) return false;
+    // Strictly exclude submissions overdue by more than 40 days
+    if (isOverdueMoreThan40Days(item.dueTimestamp)) return false;
 
     if (state.searchQuery) {
       const matchTitle = item.title.toLowerCase().includes(state.searchQuery);

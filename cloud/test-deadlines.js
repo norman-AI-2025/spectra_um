@@ -18,6 +18,7 @@ import {
   parseCourseViewSubmissions,
   parseCalendarEvents,
   isAttendanceActivity,
+  isOverdueMoreThan40Days,
   isOverdueMoreThan100Days,
   isRespectiveOccurrence,
   calculateUrgency,
@@ -47,7 +48,7 @@ console.log("=== Testing Spectra Course Submission Pages & Occurrence Filtering 
 // -------------------------------------------------------------
 // Test 0: Attendance Activity Differentiation vs Submissions
 // -------------------------------------------------------------
-console.log("\n--- Sub-test 0: Attendance Differentiation & 100-Day Overdue Filter ---");
+console.log("\n--- Sub-test 0: Attendance Differentiation & 40-Day Overdue Filter ---");
 assert(isAttendanceActivity({ modulename: "attendance" }), "Identifies modulename attendance");
 assert(isAttendanceActivity({ eventtype: "attendance" }), "Identifies eventtype attendance");
 assert(isAttendanceActivity({ url: "https://spectrum.um.edu.my/mod/attendance/view.php?id=9901" }), "Identifies attendance URL");
@@ -72,29 +73,29 @@ assert(!isAttendanceActivity({ title: "Lab 3 Report", url: "https://spectrum.um.
 assert(!isAttendanceActivity({ title: "Assignment 2: Smart Attendance System", url: "https://spectrum.um.edu.my/mod/assign/view.php?id=505", type: "assign" }), "Project about attendance system is not attendance check-in");
 assert(!isAttendanceActivity({ title: "Final Project: RFID Attendance Tracker App", url: "https://spectrum.um.edu.my/mod/assign/view.php?id=506", type: "assign" }), "Project about attendance app is not attendance check-in");
 
-// Test isOverdueMoreThan100Days
+// Test isOverdueMoreThan40Days
 const now = Date.now();
 const dayMs = 24 * 60 * 60 * 1000;
-assert(isOverdueMoreThan100Days(now - 105 * dayMs, now), "Item due 105 days ago is identified as overdue > 100 days");
-assert(isOverdueMoreThan100Days(now - 180 * dayMs, now), "Item due 180 days ago is identified as overdue > 100 days");
-assert(!isOverdueMoreThan100Days(now - 99 * dayMs, now), "Item due 99 days ago is NOT overdue > 100 days");
-assert(!isOverdueMoreThan100Days(now - 10 * dayMs, now), "Item due 10 days ago is NOT overdue > 100 days");
-assert(!isOverdueMoreThan100Days(now + 2 * dayMs, now), "Future item is NOT overdue > 100 days");
-assert(!isOverdueMoreThan100Days(null, now), "Null due date is NOT overdue > 100 days");
+assert(isOverdueMoreThan40Days(now - 45 * dayMs, now), "Item due 45 days ago is identified as overdue > 40 days");
+assert(isOverdueMoreThan40Days(now - 180 * dayMs, now), "Item due 180 days ago is identified as overdue > 40 days");
+assert(!isOverdueMoreThan40Days(now - 39 * dayMs, now), "Item due 39 days ago is NOT overdue > 40 days");
+assert(!isOverdueMoreThan40Days(now - 10 * dayMs, now), "Item due 10 days ago is NOT overdue > 40 days");
+assert(!isOverdueMoreThan40Days(now + 2 * dayMs, now), "Future item is NOT overdue > 40 days");
+assert(!isOverdueMoreThan40Days(null, now), "Null due date is NOT overdue > 40 days");
 
-// parseCalendarEvents strictly filters out attendance and items overdue > 100 days
+// parseCalendarEvents strictly filters out attendance and items overdue > 40 days
 const mixedCalendarAjax = {
   events: [
     { id: 101, name: "Assignment 1", modulename: "assign", timesort: Math.floor(Date.now() / 1000) + 3600 },
     { id: 102, name: "Lecture Attendance Occ 1", modulename: "attendance", timesort: Math.floor(Date.now() / 1000) + 1800, url: "https://spectrum.um.edu.my/mod/attendance/view.php?id=50" },
     { id: 103, name: "Quiz 1", modulename: "quiz", timesort: Math.floor(Date.now() / 1000) + 7200 },
-    { id: 104, name: "Ancient Assignment 0", modulename: "assign", timesort: Math.floor((Date.now() - 150 * dayMs) / 1000) }
+    { id: 104, name: "Ancient Assignment 0", modulename: "assign", timesort: Math.floor((Date.now() - 50 * dayMs) / 1000) }
   ]
 };
 const parsedCalendarEvents = parseCalendarEvents(mixedCalendarAjax);
-assert(parsedCalendarEvents.length === 2, `parseCalendarEvents filtered attendance & 100d overdue (expected 2, got ${parsedCalendarEvents.length})`);
+assert(parsedCalendarEvents.length === 2, `parseCalendarEvents filtered attendance & 40d overdue (expected 2, got ${parsedCalendarEvents.length})`);
 assert(!parsedCalendarEvents.some(e => e.title.includes("Attendance")), "Attendance event excluded from parsed calendar");
-assert(!parsedCalendarEvents.some(e => e.id === "104"), "150-day overdue assignment excluded from parsed calendar");
+assert(!parsedCalendarEvents.some(e => e.id === "104"), "50-day overdue assignment excluded from parsed calendar");
 assert(parsedCalendarEvents.some(e => e.title === "Assignment 1"), "Assignment 1 retained");
 assert(parsedCalendarEvents.some(e => e.title === "Quiz 1"), "Quiz 1 retained");
 
@@ -188,7 +189,7 @@ assert(occ1Assignments.some(a => a.cmid === "1005"), "Bottom Week 14 Final Dropb
 assert(!occ1Assignments.some(a => a.cmid === "1002"), "Assignment 1 (Occ 2) is strictly excluded");
 assert(!occ1Assignments.some(a => a.cmid === "1004"), "Final Dropbox (Occ 2) is strictly excluded");
 assert(!occ1Assignments.some(a => a.cmid === "1006"), "Attendance in assign index strictly excluded from submissions");
-assert(!occ1Assignments.some(a => a.cmid === "1007"), "Ancient 100+ days overdue assignment strictly excluded");
+assert(!occ1Assignments.some(a => a.cmid === "1007"), "Ancient 40+ days overdue assignment strictly excluded");
 
 const occ2Assignments = parseCourseAssignmentsIndex(mockAssignIndexHtml, "WIF3001", "Software Engineering", "Occ 2");
 assert(occ2Assignments.length === 3, `Occ 2 gets exactly 3 assignments (got ${occ2Assignments.length})`);
@@ -290,7 +291,7 @@ assert(courseSubmissionsOcc1.some(s => s.cmid === "2005" && s.type === "turnitin
 assert(!courseSubmissionsOcc1.some(s => s.cmid === "2002"), "Top section Occ 2 assignment excluded");
 assert(!courseSubmissionsOcc1.some(s => s.cmid === "2004"), "Bottom section Occ 2 Turnitin excluded");
 assert(!courseSubmissionsOcc1.some(s => s.cmid === "2006"), "Attendance in course view strictly excluded");
-assert(!courseSubmissionsOcc1.some(s => s.cmid === "2007"), "Ancient 100+ days overdue submission in course view strictly excluded");
+assert(!courseSubmissionsOcc1.some(s => s.cmid === "2007"), "Ancient 40+ days overdue submission in course view strictly excluded");
 
 // -------------------------------------------------------------
 // Test 4: End-to-End fetchLiveDeadlines with Mocked Fetches
@@ -398,9 +399,9 @@ assert(!hasOcc2, "Strict: No Occ 2 activities in the resulting deadlines list");
 const hasAttendance = deadlines.some(d => d.type === "attendance" || d.id === "9005" || d.cmid === "5001" || /attendance|kehadiran/i.test(d.title) || (d.url && d.url.includes("/mod/attendance/")));
 assert(!hasAttendance, "Strict: Attendance events are never included in fetchLiveDeadlines");
 
-// Check that 100+ days overdue items are strictly excluded
-const hasOverdueOver100Days = deadlines.some(d => d.id === "9006" || d.cmid === "5002" || (d.dueTimestamp && isOverdueMoreThan100Days(d.dueTimestamp)));
-assert(!hasOverdueOver100Days, "Strict: Items overdue > 100 days are strictly excluded from fetchLiveDeadlines");
+// Check that 40+ days overdue items are strictly excluded
+const hasOverdueOver40Days = deadlines.some(d => d.id === "9006" || d.cmid === "5002" || (d.dueTimestamp && isOverdueMoreThan40Days(d.dueTimestamp)));
+assert(!hasOverdueOver40Days, "Strict: Items overdue > 40 days are strictly excluded from fetchLiveDeadlines");
 
 // Check deduplication
 const item1001List = deadlines.filter(d => d.cmid === "1001" || d.id === "1001" || d.id === "9001");

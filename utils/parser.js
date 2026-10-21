@@ -105,17 +105,20 @@ export function formatDueCalendarDate(timestamp, fallbackText = "") {
   return "No deadline specified";
 }
 
-export const MAX_OVERDUE_DAYS = 100;
-export const MAX_OVERDUE_MS = MAX_OVERDUE_DAYS * 24 * 60 * 60 * 1000; // 100 days in ms
+export const MAX_OVERDUE_DAYS = 40;
+export const MAX_OVERDUE_MS = MAX_OVERDUE_DAYS * 24 * 60 * 60 * 1000; // 40 days in ms
 
 /**
- * Checks if a submission is overdue by more than 100 days.
- * Items overdue by > 100 days are hidden from the UI and background scans to reduce clutter.
+ * Checks if a submission is overdue by more than 40 days.
+ * Items overdue by > 40 days are hidden from the UI and background scans to reduce clutter.
  */
-export function isOverdueMoreThan100Days(dueTimestamp, now = Date.now()) {
+export function isOverdueMoreThan40Days(dueTimestamp, now = Date.now()) {
   if (!dueTimestamp || isNaN(dueTimestamp)) return false;
   return (now - Number(dueTimestamp)) > MAX_OVERDUE_MS;
 }
+
+// Backward-compatible alias
+export const isOverdueMoreThan100Days = isOverdueMoreThan40Days;
 
 /**
  * Strict differentiator:
@@ -198,7 +201,7 @@ export function parseCalendarEvents(sourceData) {
       .filter((evt) => !isAttendanceActivity(evt))
       .filter((evt) => {
         const timestamp = (evt.timesort || evt.timestart) * 1000;
-        return !isOverdueMoreThan100Days(timestamp);
+        return !isOverdueMoreThan40Days(timestamp);
       })
       .map((evt) => {
         const timestamp = (evt.timesort || evt.timestart) * 1000;
@@ -275,8 +278,8 @@ export function parseCalendarEvents(sourceData) {
           return;
         }
 
-        // Exclude items overdue by more than 100 days
-        if (isOverdueMoreThan100Days(timestamp)) {
+        // Exclude items overdue by more than 40 days
+        if (isOverdueMoreThan40Days(timestamp)) {
           return;
         }
 
@@ -488,8 +491,8 @@ export function parseCourseAssignmentsIndex(html, courseCode = "", courseName = 
 
         const dueTimestamp = dueDateText ? parseMoodleDateString(dueDateText) : null;
 
-        // Strictly exclude submissions overdue by more than 100 days
-        if (isOverdueMoreThan100Days(dueTimestamp)) return;
+        // Strictly exclude submissions overdue by more than 40 days
+        if (isOverdueMoreThan40Days(dueTimestamp)) return;
 
         const isSubmitted = /\b(?:submitted|submission|graded|grading|selesai|dihantar|dinilai|diserahkan)\b/i.test(submissionStatusText) && !/\b(?:no submission|not submitted|belum|tiada|tidak|draft|draf)\b/i.test(submissionStatusText);
 
@@ -562,8 +565,8 @@ export function parseCourseAssignmentsIndex(html, courseCode = "", courseName = 
 
     const dueTimestamp = dueDateText ? parseMoodleDateString(dueDateText) : null;
 
-    // Strictly exclude submissions overdue by more than 100 days
-    if (isOverdueMoreThan100Days(dueTimestamp)) continue;
+    // Strictly exclude submissions overdue by more than 40 days
+    if (isOverdueMoreThan40Days(dueTimestamp)) continue;
     const isSubmitted = /\b(?:submitted|submission|graded|grading|selesai|dihantar|dinilai|diserahkan)\b/i.test(submissionStatusText) && !/\b(?:no submission|not submitted|belum|tiada|tidak|draft|draf)\b/i.test(submissionStatusText);
 
     assignments.push({
@@ -643,8 +646,8 @@ export function parseCourseQuizzesIndex(html, courseCode = "", courseName = "", 
 
         const dueTimestamp = closeDateText ? parseMoodleDateString(closeDateText) : null;
 
-        // Strictly exclude submissions overdue by more than 100 days
-        if (isOverdueMoreThan100Days(dueTimestamp)) return;
+        // Strictly exclude submissions overdue by more than 40 days
+        if (isOverdueMoreThan40Days(dueTimestamp)) return;
 
         const isSubmitted = (
           /\b(?:submitted|completed|graded|grading|selesai|dihantar|dinilai|finished|review)\b/i.test(submissionStatusText) ||
@@ -719,7 +722,7 @@ export function parseCourseQuizzesIndex(html, courseCode = "", courseName = "", 
     }
 
     const dueTimestamp = closeDateText ? parseMoodleDateString(closeDateText) : null;
-    if (isOverdueMoreThan100Days(dueTimestamp)) continue;
+    if (isOverdueMoreThan40Days(dueTimestamp)) continue;
 
     const isSubmitted = (
       /\b(?:submitted|completed|graded|grading|selesai|dihantar|dinilai|finished|review)\b/i.test(submissionStatusText) ||
@@ -769,13 +772,14 @@ export function parseAssignmentViewPage(html) {
         const th = (tr.querySelector("th, td.c0, td:first-child")?.textContent || "").trim().toLowerCase();
         const td = (tr.querySelector("td.c1, td:last-child")?.textContent || "").trim();
         if (
-          th.includes("due date") ||
+          (th.includes("due") && !th.includes("overdue")) ||
           th.includes("closed date") ||
           th.includes("close date") ||
           th.includes("closed on") ||
           th.includes("closed") ||
           th.includes("closes") ||
           th.includes("quiz closes") ||
+          th.includes("quiz closed") ||
           th.includes("cut-off date") ||
           th.includes("cutoff date") ||
           th.includes("tarikh akhir") ||
@@ -805,7 +809,7 @@ export function parseAssignmentViewPage(html) {
         const infoBlocks = doc.querySelectorAll(".quizinfo p, .generalbox p, .box p, .activity-description p, p");
         for (const p of infoBlocks) {
           const txt = (p.textContent || "").trim();
-          const match = txt.match(/(?:this\s+quiz\s+(?:will\s+)?close\s+on|this\s+assignment\s+is\s+closed(?:\s+on)?|quiz\s+closes|closed?\s*date|close\s*date|closed\s+on|cut-?off\s*date|due\s*date|tarikh\s*(?:tutup|akhir)|ditutup\s*(?:pada)?)[\s:]+([^\n\r]+)/i);
+          const match = txt.match(/(?:this\s+quiz\s+(?:will\s+)?closed?(?:\s+on)?|this\s+assignment\s+is\s+closed(?:\s+on)?|quiz\s+closed?|closed?\s*(?:date|on)?|close\s*(?:date)?|(?:was\s+)?due(?:\s*(?:date|on))?|cut-?off\s*date|cutoff\s*date|tarikh\s*(?:tutup|akhir)|ditutup\s*(?:pada)?)[\s:]+([^\n\r]+)/i);
           if (match) {
             dueDateText = match[1].trim();
             if (/close|tutup/i.test(match[0])) dateLabel = "Closes";
@@ -827,7 +831,7 @@ export function parseAssignmentViewPage(html) {
   }
 
   if (!dueDateText) {
-    const dueMatch = html.match(/(?:Due\s*date|Closed?\s*date|Close\s*date|Closed\s+on|Quiz\s*closes?|Cut-?off\s*date|Tarikh\s*(?:akhir|tutup)|Ditutup\s*(?:pada)?)<\/(?:th|td)>\s*<td[^>]*>([\s\S]*?)<\/td>/i);
+    const dueMatch = html.match(/(?:(?:Was\s+)?Due(?:\s*date)?|Closed?\s*date|Close\s*date|Closed\s+on|Quiz\s*closes?|Quiz\s*closed|Cut-?off\s*date|Tarikh\s*(?:akhir|tutup)|Ditutup\s*(?:pada)?)<\/(?:th|td)>\s*<td[^>]*>([\s\S]*?)<\/td>/i);
     if (dueMatch) {
       dueDateText = dueMatch[1].replace(/<[^>]+>/g, "").trim();
       if (/close|tutup/i.test(dueMatch[0])) dateLabel = "Closes";
@@ -836,7 +840,7 @@ export function parseAssignmentViewPage(html) {
     }
   }
   if (!dueDateText) {
-    const textMatch = html.match(/(?:this\s+quiz\s+(?:will\s+)?close\s+on|this\s+assignment\s+is\s+closed(?:\s+on)?|quiz\s+closes|closed?\s*date|close\s*date|closed\s+on|cut-?off\s*date|due\s*date|tarikh\s*(?:tutup|akhir)|ditutup\s*(?:pada)?)[\s:]+([0-9A-Za-z\s,.:\-]+(?:am|pm|[\d]{2,4}))/i);
+    const textMatch = html.match(/(?:this\s+quiz\s+(?:will\s+)?closed?(?:\s+on)?|this\s+assignment\s+is\s+closed(?:\s+on)?|quiz\s+closed?|closed?\s*(?:date|on)?|close\s*(?:date)?|(?:was\s+)?due(?:\s*(?:date|on))?|cut-?off\s*date|cutoff\s*date|tarikh\s*(?:tutup|akhir)|ditutup\s*(?:pada)?)[\s:]+([0-9A-Za-z\s,.:\-]+(?:am|pm|[\d]{2,4}))/i);
     if (textMatch) {
       dueDateText = textMatch[1].replace(/<[^>]+>/g, "").trim();
       if (/close|tutup/i.test(textMatch[0])) dateLabel = "Closes";
@@ -857,7 +861,14 @@ export function parseAssignmentViewPage(html) {
     }
   }
 
-  const dueTimestamp = dueDateText ? parseMoodleDateString(dueDateText) : null;
+  let dueTimestamp = dueDateText ? parseMoodleDateString(dueDateText) : null;
+  if (!dueTimestamp && timeRemainingText) {
+    const overdueMatch = timeRemainingText.match(/(?:overdue\s+by|lewat\s+sebanyak)[\s:]*(\d+)\s*(?:days?|hari)/i);
+    if (overdueMatch) {
+      const overdueDays = parseInt(overdueMatch[1], 10);
+      dueTimestamp = Date.now() - (overdueDays * 24 * 60 * 60 * 1000);
+    }
+  }
   const isSubmitted = /\b(?:submitted|grading|graded|dihantar|selesai|dinilai|diserahkan|finished|completed|review)\b/i.test(submissionStatus) && !/\b(?:no attempt|not submitted|belum|tiada|tidak|draft|draf|in progress)\b/i.test(submissionStatus);
 
   return {
@@ -937,8 +948,8 @@ export function parseCourseViewSubmissions(html, courseCode = "", courseName = "
 
         const dueTimestamp = dueDateText ? parseMoodleDateString(dueDateText) : null;
 
-        // Strictly exclude items overdue by more than 100 days
-        if (isOverdueMoreThan100Days(dueTimestamp)) return;
+        // Strictly exclude items overdue by more than 40 days
+        if (isOverdueMoreThan40Days(dueTimestamp)) return;
 
         const isClosed = /close|tutup/i.test(dueDateText) || type === "quiz";
         const dateLabel = isClosed ? "Closes" : (/cut-?off/i.test(dueDateText) ? "Cut-off" : "Due");
@@ -1004,8 +1015,8 @@ export function parseCourseViewSubmissions(html, courseCode = "", courseName = "
     const isSubmitted = /\b(?:submitted|submission|graded|grading|dihantar|done|selesai|dinilai|diserahkan)\b/i.test(contextSnippet) && !/\b(?:not submitted|no submission|belum|to do|tiada|tidak|draft|draf)\b/i.test(contextSnippet);
     const dueTimestamp = dueDateText ? parseMoodleDateString(dueDateText) : null;
 
-    // Strictly exclude items overdue by more than 100 days
-    if (isOverdueMoreThan100Days(dueTimestamp)) continue;
+    // Strictly exclude items overdue by more than 40 days
+    if (isOverdueMoreThan40Days(dueTimestamp)) continue;
 
     const isClosed = /close|tutup/i.test(dueDateText) || type === "quiz";
     const dateLabel = isClosed ? "Closes" : (/cut-?off/i.test(dueDateText) ? "Cut-off" : "Due");
@@ -2277,8 +2288,8 @@ export function parseMoodleIcsCalendar(icsText, studentOccurrencesMap = {}, defa
     const dueTimestamp = parseIcsDateTime(dateStr);
     if (!dueTimestamp) continue;
 
-    // Filter: Exclude activities overdue by more than 100 days
-    if (isOverdueMoreThan100Days(dueTimestamp)) continue;
+    // Filter: Exclude activities overdue by more than 40 days
+    if (isOverdueMoreThan40Days(dueTimestamp)) continue;
 
     // Clean title (remove "is due" or "due" suffix commonly appended by Moodle calendar export)
     let title = rawSummary
@@ -2440,7 +2451,7 @@ export function parseCourseContentsModules(sectionsJson, courseCode = "", course
           }
         }
 
-        if (isOverdueMoreThan100Days(dueTimestamp)) {
+        if (isOverdueMoreThan40Days(dueTimestamp)) {
           continue;
         }
 

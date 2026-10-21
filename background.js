@@ -15,7 +15,7 @@ import {
 } from "./utils/moodleApi.js";
 
 import { fetchLiveDeadlines } from "./utils/calendar.js";
-import { parseForumDiscussions, calculateUrgency, isAttendanceActivity, isOverdueMoreThan100Days } from "./utils/parser.js";
+import { parseForumDiscussions, calculateUrgency, isAttendanceActivity, isOverdueMoreThan40Days, isOverdueMoreThan100Days } from "./utils/parser.js";
 import {
   sendTelegramMessage,
   sendTelegramTestMessage,
@@ -488,7 +488,7 @@ async function checkUpcomingDeadlines() {
       const validDeadlines = deadlines.filter((d) => {
         if (!d || typeof d !== "object") return false;
         if (isAttendanceActivity(d)) return false;
-        if (isOverdueMoreThan100Days(d.dueTimestamp)) return false;
+        if (isOverdueMoreThan40Days(d.dueTimestamp)) return false;
         const title = (d.title || d.name || "").trim();
         if (!title) return false;
         const isSynthetic = (
