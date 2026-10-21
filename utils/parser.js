@@ -821,10 +821,13 @@ export function parseAssignmentViewPage(html) {
       }
 
       // Check quiz attempts summary for submission status
-      if (!submissionStatus && doc.querySelector(".quizattemptsummary, table.quizreviewsummary, table.generaltable")) {
-        const fullText = doc.body?.textContent || "";
-        if (/\b(?:Summary of your previous attempts|Highest grade|Marks|Finished|Submitted|Review|Telah dinilai|Selesai)\b/i.test(fullText)) {
-          submissionStatus = "Submitted";
+      if (!submissionStatus) {
+        const quizTable = doc.querySelector(".quizattemptsummary, table.quizreviewsummary");
+        if (quizTable) {
+          const tableText = quizTable.textContent || "";
+          if (/\b(?:Finished|Submitted|Review|Telah dinilai|Selesai)\b/i.test(tableText)) {
+            submissionStatus = "Submitted";
+          }
         }
       }
     } catch (_) {}
@@ -856,8 +859,13 @@ export function parseAssignmentViewPage(html) {
     const statMatch = html.match(/(?:Submission status|Status penghantaran)<\/(?:th|td)>\s*<td[^>]*>([\s\S]*?)<\/td>/i);
     if (statMatch) {
       submissionStatus = statMatch[1].replace(/<[^>]+>/g, "").trim();
-    } else if (/\b(?:Summary of your previous attempts|Highest grade|Marks|Finished|Review|Telah dinilai|Selesai)\b/i.test(html)) {
-      submissionStatus = "Submitted";
+    } else {
+      // Only check within quiz attempts summary table markup for quiz completion evidence
+      const quizTableMatch = html.match(/<table[^>]*class="[^"]*quizattemptsummary[^"]*"[^>]*>([\s\S]*?)<\/table>/i) ||
+                             html.match(/<table[^>]*class="[^"]*quizreviewsummary[^"]*"[^>]*>([\s\S]*?)<\/table>/i);
+      if (quizTableMatch && /\b(?:Finished|Submitted|Review|Telah dinilai|Selesai)\b/i.test(quizTableMatch[1])) {
+        submissionStatus = "Submitted";
+      }
     }
   }
 
@@ -940,9 +948,30 @@ export function parseCourseViewSubmissions(html, courseCode = "", courseName = "
             dueDateText = dueM[1].trim();
           }
 
-          // Submission / completion indicator
-          if (/\b(?:submitted|submission|graded|grading|dihantar|done|selesai|dinilai|diserahkan)\b/i.test(actText) && !/\b(?:not submitted|no submission|belum|to do|tiada|tidak|draft|draf)\b/i.test(actText)) {
+          // Submission / completion indicator - use STRICT evidence only.
+          // Check for Moodle completion badge elements, NOT the full activity text
+          // (which includes lecturer instructions containing words like "submit your work").
+          const completionBadge = parentAct.querySelector(
+            '.badge-success, .badge-info, .completion-complete, .autocompletion img[title*="Completed"], ' +
+            '.autocompletion img[title*="Done"], .autocompletion img[title*="Selesai"], ' +
+            '.completioninfo .complete, .activity-completion .complete'
+          );
+          if (completionBadge) {
             isSubmitted = true;
+          }
+
+          // Also check for inline submission status text that is clearly a Moodle status label,
+          // not embedded in instructional paragraphs.
+          if (!isSubmitted) {
+            const statusEls = parentAct.querySelectorAll('.submissionstatussubmitted, .submissionstatus, .submission-status, .activity-altcontent, .badge');
+            for (const el of statusEls) {
+              const elText = (el.textContent || '').trim();
+              if (/\b(?:submitted|graded|grading|dihantar|selesai|dinilai|diserahkan)\b/i.test(elText) &&
+                  !/\b(?:not submitted|no submission|belum|tiada|tidak|draft|draf)\b/i.test(elText)) {
+                isSubmitted = true;
+                break;
+              }
+            }
           }
         }
 
@@ -1012,7 +1041,12 @@ export function parseCourseViewSubmissions(html, courseCode = "", courseName = "
     if (dueM) {
       dueDateText = dueM[1].trim();
     }
-    const isSubmitted = /\b(?:submitted|submission|graded|grading|dihantar|done|selesai|dinilai|diserahkan)\b/i.test(contextSnippet) && !/\b(?:not submitted|no submission|belum|to do|tiada|tidak|draft|draf)\b/i.test(contextSnippet);
+    // Strict: Only detect submission via Moodle-specific CSS class markers or completion badge HTML,
+    // NOT via generic keyword matching on the full context (which includes lecturer instructions).
+    const isSubmitted = (
+      /class=["'][^"']*(?:submissionstatussubmitted|completion-complete|badge-success)[^"']*["']/i.test(contextSnippet) ||
+      /img[^>]+title=["'](?:Completed|Done|Selesai)["']/i.test(contextSnippet)
+    );
     const dueTimestamp = dueDateText ? parseMoodleDateString(dueDateText) : null;
 
     // Strictly exclude items overdue by more than 40 days

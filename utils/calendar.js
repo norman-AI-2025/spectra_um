@@ -233,11 +233,11 @@ export async function fetchLiveDeadlines(sesskey, courses = [], occurrencesMap =
                 existing.formattedTime = item.formattedTime;
                 existing.urgency = item.urgency;
               }
-              if (item.isSubmittedOnSpectrum) {
-                existing.isSubmittedOnSpectrum = true;
-                existing.isCompleted = true;
-                existing.submissionStatus = "Submitted";
-              }
+              // Assign index page is AUTHORITATIVE for submission status.
+              // It shows the actual Moodle submission table, so always trust it.
+              existing.isSubmittedOnSpectrum = item.isSubmittedOnSpectrum;
+              existing.isCompleted = item.isSubmittedOnSpectrum || existing.isCompleted;
+              existing.submissionStatus = item.submissionStatus || existing.submissionStatus;
             } else {
               if (completedSet.has(String(item.id)) || (item.cmid && completedSet.has(String(item.cmid)))) {
                 item.isCompleted = true;
@@ -277,11 +277,11 @@ export async function fetchLiveDeadlines(sesskey, courses = [], occurrencesMap =
                 existing.urgency = item.urgency;
                 if (item.dateLabel) existing.dateLabel = item.dateLabel;
               }
-              if (item.isSubmittedOnSpectrum) {
-                existing.isSubmittedOnSpectrum = true;
-                existing.isCompleted = true;
-                existing.submissionStatus = item.submissionStatus || "Submitted";
-              }
+              // Quiz index page is AUTHORITATIVE for submission status.
+              // It shows Moodle's actual attempt/grade table, so always trust it.
+              existing.isSubmittedOnSpectrum = item.isSubmittedOnSpectrum;
+              existing.isCompleted = item.isSubmittedOnSpectrum || existing.isCompleted;
+              existing.submissionStatus = item.submissionStatus || existing.submissionStatus;
             } else {
               if (completedSet.has(String(item.id)) || (item.cmid && completedSet.has(String(item.cmid)))) {
                 item.isCompleted = true;
@@ -324,7 +324,10 @@ export async function fetchLiveDeadlines(sesskey, courses = [], occurrencesMap =
                   existing.formattedTime = item.formattedTime;
                   if (item.dateLabel) existing.dateLabel = item.dateLabel;
                 }
-                if (item.isSubmittedOnSpectrum) {
+                // Course view page is the LEAST authoritative source for submission status.
+                // Only upgrade to submitted if no authoritative source has spoken yet,
+                // never downgrade a false-negative from assign/quiz index.
+                if (item.isSubmittedOnSpectrum && !existing.isSubmittedOnSpectrum) {
                   existing.isSubmittedOnSpectrum = true;
                   existing.isCompleted = true;
                   existing.submissionStatus = "Submitted";
