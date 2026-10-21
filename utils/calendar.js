@@ -320,7 +320,7 @@ export async function fetchLiveDeadlines(sesskey, courses = [], occurrencesMap =
         type: evt.modulename || "assign",
         urgency: calculateUrgency(timestamp),
         isSubmittedOnSpectrum,
-        isCompleted: isSubmittedOnSpectrum || completedSet.has(eventId),
+        isCompleted: isSubmittedOnSpectrum || completedSet.has(eventId) || (evt.instance && completedSet.has(String(evt.instance))),
         weight: "",
         matchesOccurrence: true
       };
@@ -363,6 +363,9 @@ export async function fetchLiveDeadlines(sesskey, courses = [], occurrencesMap =
                   existing.formattedTime = item.formattedTime;
                 }
               } else {
+                if (completedSet.has(String(item.id)) || (item.cmid && completedSet.has(String(item.cmid)))) {
+                  item.isCompleted = true;
+                }
                 deadlinesMap.set(key, item);
               }
             });
@@ -397,6 +400,9 @@ export async function fetchLiveDeadlines(sesskey, courses = [], occurrencesMap =
                 existing.submissionStatus = "Submitted";
               }
             } else {
+              if (completedSet.has(String(item.id)) || (item.cmid && completedSet.has(String(item.cmid)))) {
+                item.isCompleted = true;
+              }
               deadlinesMap.set(key, item);
             }
           });
@@ -435,6 +441,9 @@ export async function fetchLiveDeadlines(sesskey, courses = [], occurrencesMap =
                   existing.submissionStatus = "Submitted";
                 }
               } else {
+                if (completedSet.has(String(item.id)) || (item.cmid && completedSet.has(String(item.cmid)))) {
+                  item.isCompleted = true;
+                }
                 deadlinesMap.set(key, item);
               }
             });
@@ -475,3 +484,208 @@ export async function fetchLiveDeadlines(sesskey, courses = [], occurrencesMap =
 
   return allDeadlines;
 }
+
+/**
+ * Normalizes and filters cached or scraped deadlines for UI pre-hydration and rendering.
+ * Strictly prioritizes processed cached_deadlines (events) over raw calendar events.
+ * Enforces student occurrence filtering, attendance activity exclusion, 100-day overdue exclusion,
+ * and preserves verified submission and completion statuses across popup re-opens.
+ *
+ * @param {Array} [events] - Cached processed deadlines or table scraper items
+ * @param {Array} [rawCalendarEvents] - Fallback raw Moodle calendar action events
+ * @param {Object} [options] - Options containing courseOccurrences, studentOccurrence, and completedIds
+ * @returns {Array} Clean, filtered, sorted deadline objects
+ */
+export function normalizeHydratedDeadlines(events = [], rawCalendarEvents = [], options = {}) {
+  const {
+    courseOccurrences = {},
+    studentOccurrence = "",
+    completedIds = new Set()
+  } = options;
+
+  const completedSet = completedIds instanceof Set
+    ? completedIds
+    : new Set(Array.isArray(completedIds) ? completedIds.map(String) : []);
+
+  // Precedence: cached_deadlines (events) strictly takes priority over rawCalendarEvents
+  let candidateList = [];
+  let isRawCalendar = false;
+
+  if (Array.isArray(events) && events.length > 0) {
+    candidateList = events;
+    isRawCalendar = false;
+  } else if (Array.isArray(events) && events.length === 0 && (!rawCalendarEvents || rawCalendarEvents.length === 0 || Array.isArray(rawCalendarEvents))) {
+    // If events was explicitly provided as an empty array [] (from cached_deadlines),
+    // we should trust it: the student has 0 upcoming deadlines or has finished them.
+    // Never fall back to rawCalendarEvents to resurrect items from other occurrences.
+    return [];
+  } else if (Array.isArray(rawCalendarEvents) && rawCalendarEvents.length > 0) {
+    candidateList = rawCalendarEvents;
+    isRawCalendar = true;
+  } else {
+    return [];
+  }
+
+  const normalized = [];
+
+  for (let idx = 0; idx < candidateList.length; idx++) {
+    const item = candidateList[idx];
+    if (!item) continue;
+
+    if (isRawCalendar) {
+      // 1. Strictly exclude attendance activities
+      if (
+        isAttendanceActivity(item) ||
+        (item.modulename || "").toLowerCase() === "attendance" ||
+        (item.eventtype || "").toLowerCase() === "attendance"
+      ) {
+        continue;
+      }
+
+      const timestamp = (item.timesort || item.timestart) * 1000;
+      if (isOverdueMoreThan100Days(timestamp)) {
+        continue;
+      }
+
+      const courseCode = extractCourseCode(item.course?.shortname || item.course?.fullname || "");
+      const courseId = item.course?.id ? String(item.course.id) : "";
+      const studentOcc = (courseOccurrences && (courseOccurrences[courseId] || courseOccurrences[courseCode])) || studentOccurrence || "";
+      const title = cleanMoodleTitle(item.name || item.title || "");
+
+      // Strict occurrence filter: if event belongs to another occurrence, exclude it!
+      if (!isRespectiveOccurrence("", studentOcc, title)) {
+        continue;
+      }
+
+      const eventUrl = item.action?.url || item.url || `${SPECTRUM_BASE_URL}/mod/${item.modulename || "assign"}/view.php?id=${item.instance || item.id}`;
+      const eventId = String(item.id);
+      const cmid = item.instance ? String(item.instance) : "";
+      const isActionDone = item.action ? !item.action.actionable : false;
+      const isCompleted = isActionDone || completedSet.has(eventId) || (cmid && completedSet.has(cmid));
+
+      normalized.push({
+        id: eventId,
+        cmid: cmid || eventId,
+        title,
+        courseCode: courseCode || (item.course?.shortname || "N/A"),
+        courseName: item.course?.fullname || courseCode,
+        dueDate: new Date(timestamp).toISOString(),
+        dueTimestamp: timestamp,
+        formattedTime: item.formattedtime || new Date(timestamp).toLocaleString("en-MY", {
+          month: "short",
+          day: "numeric",
+          hour: "2-digit",
+          minute: "2-digit"
+        }),
+        url: eventUrl,
+        type: item.modulename || "assign",
+        urgency: calculateUrgency(timestamp),
+        isSubmittedOnSpectrum: isActionDone,
+        isCompleted,
+        submissionStatus: isActionDone ? "Submitted" : "No submission",
+        weight: "",
+        matchesOccurrence: true
+      });
+    } else {
+      // Branch 2: Item from cached_deadlines or table scraper
+      if ((item.title !== undefined || item.name !== undefined) && (item.dueTimestamp || item.dueDate)) {
+        // Standard live deadline object
+        if (isAttendanceActivity(item)) continue;
+        const timestamp = item.dueTimestamp || (item.dueDate ? Date.parse(item.dueDate) : Date.now());
+        if (isOverdueMoreThan100Days(timestamp)) continue;
+
+        const courseCode = item.courseCode || extractCourseCode(item.courseName || item.title || item.name || "");
+        const courseId = item.courseId ? String(item.courseId) : "";
+        const studentOcc = (courseOccurrences && (courseOccurrences[courseId] || courseOccurrences[courseCode])) || studentOccurrence || "";
+        const title = cleanMoodleTitle(item.title || item.name || "");
+
+        // Strict occurrence filter
+        if (!isRespectiveOccurrence("", studentOcc, title)) {
+          continue;
+        }
+
+        const eventId = String(item.id || `deadline-${idx}`);
+        const cmid = item.cmid ? String(item.cmid) : "";
+
+        // Preserve verified submission statuses
+        const statusText = item.submissionStatus || "";
+        const isStatusSubmitted = /\b(?:submitted|submission|graded|grading|selesai|dihantar|dinilai|diserahkan)\b/i.test(statusText) && !/\b(?:no submission|not submitted|belum|tiada|tidak|draft|draf)\b/i.test(statusText);
+        const isSubmittedOnSpectrum = Boolean(item.isSubmittedOnSpectrum) || isStatusSubmitted;
+        const isCompleted = isSubmittedOnSpectrum || Boolean(item.isCompleted) || completedSet.has(eventId) || (cmid && completedSet.has(cmid));
+
+        normalized.push({
+          ...item,
+          id: eventId,
+          cmid: cmid || eventId,
+          title,
+          courseCode: courseCode || "N/A",
+          courseName: item.courseName || item.courseCode || "N/A",
+          dueDate: item.dueDate || new Date(timestamp).toISOString(),
+          dueTimestamp: timestamp,
+          formattedTime: item.formattedTime || new Date(timestamp).toLocaleString("en-MY", {
+            month: "short",
+            day: "numeric",
+            hour: "2-digit",
+            minute: "2-digit"
+          }),
+          url: item.url || `${SPECTRUM_BASE_URL}/calendar/view.php`,
+          type: item.type || "assign",
+          urgency: calculateUrgency(timestamp),
+          isSubmittedOnSpectrum,
+          isCompleted,
+          submissionStatus: isSubmittedOnSpectrum ? (statusText || "Submitted") : (statusText || "No submission"),
+          weight: item.weight || "",
+          matchesOccurrence: true
+        });
+      } else {
+        // Old table scraper format
+        const code = extractCourseCode(item["Course Code"] || "") || item["Course Code"] || "N/A";
+        const title = cleanMoodleTitle(item["Assignment / Task"] || "Assignment");
+        const studentOcc = (courseOccurrences && courseOccurrences[code]) || studentOccurrence || "";
+
+        if (!isRespectiveOccurrence("", studentOcc, title)) {
+          continue;
+        }
+
+        const dueTs = Date.parse(item["Due Date"]) || (Date.now() + 86400000);
+        if (isOverdueMoreThan100Days(dueTs)) continue;
+
+        const subText = item["Submitted?"] || "";
+        const isSubmitted = /\b(?:submitted|graded|dihantar|selesai|dinilai|diserahkan)\b/i.test(subText) && !/\b(?:pending|belum|tiada|tidak)\b/i.test(subText);
+        const id = `scraped-${idx}-${title}`;
+        const isCompleted = isSubmitted || completedSet.has(id);
+
+        normalized.push({
+          id,
+          cmid: id,
+          title,
+          courseCode: code,
+          courseName: item["Course Code"] || code,
+          dueDate: new Date(dueTs).toISOString(),
+          dueTimestamp: dueTs,
+          formattedTime: item["Due Date"] || new Date(dueTs).toLocaleString(),
+          url: item["Direct Link"] || `${SPECTRUM_BASE_URL}/calendar/view.php`,
+          type: "assign",
+          urgency: calculateUrgency(dueTs),
+          isSubmittedOnSpectrum: isSubmitted,
+          isCompleted,
+          submissionStatus: isSubmitted ? "Submitted" : "No submission",
+          weight: "",
+          matchesOccurrence: true
+        });
+      }
+    }
+  }
+
+  // Sort deadlines: pending first, then by earliest due date
+  normalized.sort((a, b) => {
+    if (a.isCompleted !== b.isCompleted) return a.isCompleted ? 1 : -1;
+    if (a.dueTimestamp && b.dueTimestamp) return a.dueTimestamp - b.dueTimestamp;
+    if (a.dueTimestamp && !b.dueTimestamp) return -1;
+    if (!a.dueTimestamp && b.dueTimestamp) return 1;
+    return (a.title || "").localeCompare(b.title || "");
+  });
+
+  return normalized;
+}
+

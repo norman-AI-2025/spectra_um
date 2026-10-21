@@ -612,7 +612,6 @@ export async function injectAndScrapeSpectrum(moodleSession) {
         userName: result.userName,
         sessionStatus: "connected",
         sessionLastVerified: Date.now(),
-        cached_deadlines: result.events,
         cached_courses: result.courses,
         cached_raw_events: result.rawCalendarEvents,
         cached_raw_courses: result.rawCourses
@@ -699,5 +698,5 @@ export async function autoDetectSession() {
 
 export { getLiveEnrolledCourses, getLiveCourseMaterials, fetchLiveEnrolledCourses, fetchLiveCourseMaterials, fetchLiveAnnouncements, fetchCourseContentsViaAjax } from "./courses.js";
 export { fetchCourseAttendance, fetchLiveAllAttendance, autoSubmitAttendance, scanAndAutoRecordAttendance, formatAttendanceTelegram, fetchCourseGradebookAttendance } from "./attendance.js";
-export { fetchLiveDeadlines, fetchIcsDeadlines } from "./calendar.js";
+export { fetchLiveDeadlines, fetchIcsDeadlines, normalizeHydratedDeadlines } from "./calendar.js";
 

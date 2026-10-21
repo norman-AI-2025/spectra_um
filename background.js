@@ -15,7 +15,7 @@ import {
 } from "./utils/moodleApi.js";
 
 import { fetchLiveDeadlines } from "./utils/calendar.js";
-import { parseForumDiscussions, calculateUrgency, isAttendanceActivity } from "./utils/parser.js";
+import { parseForumDiscussions, calculateUrgency, isAttendanceActivity, isOverdueMoreThan100Days } from "./utils/parser.js";
 import {
   sendTelegramMessage,
   sendTelegramTestMessage,
@@ -484,6 +484,10 @@ async function checkUpcomingDeadlines() {
       occMap,
       store.studentOccurrence
     );
+    if (Array.isArray(deadlines)) {
+      const validDeadlines = deadlines.filter((d) => !isAttendanceActivity(d) && !isOverdueMoreThan100Days(d.dueTimestamp));
+      await chrome.storage.local.set({ cached_deadlines: validDeadlines });
+    }
   } catch (err) {
     console.warn("[Spectra] Error querying live deadlines in background:", err);
     return;

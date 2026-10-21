@@ -23,7 +23,7 @@ import {
   formatTimeRemaining,
   cleanMoodleTitle
 } from "../utils/parser.js";
-import { fetchLiveDeadlines } from "../utils/calendar.js";
+import { fetchLiveDeadlines, normalizeHydratedDeadlines } from "../utils/calendar.js";
 
 let passed = 0;
 let failed = 0;
@@ -413,6 +413,131 @@ assert(Boolean(bottomItem), "Bottom Week 14 dropbox Final Dropbox (Occ 1) is pre
 
 // Restore fetch
 globalThis.fetch = originalFetch;
+
+// -------------------------------------------------------------
+// Test 5: normalizeHydratedDeadlines (Cache Precedence, Occurrence Filtering & Submission Persistence)
+// -------------------------------------------------------------
+console.log("\n--- Sub-test 5: normalizeHydratedDeadlines Cache Hydration ---");
+
+const mockCachedDeadlines = [
+  {
+    id: "9001",
+    cmid: "1001",
+    title: "Assignment 1 (Occ 1)",
+    courseCode: "WIF3001",
+    dueTimestamp: Date.now() + 86400000,
+    isSubmittedOnSpectrum: true,
+    submissionStatus: "Submitted for grading",
+    isCompleted: true
+  },
+  {
+    id: "9002",
+    cmid: "1002",
+    title: "Assignment 1 (Occ 2)", // Belongs to other occurrence!
+    courseCode: "WIF3001",
+    dueTimestamp: Date.now() + 86400000,
+    isSubmittedOnSpectrum: false,
+    isCompleted: false
+  },
+  {
+    id: "9003",
+    cmid: "1003",
+    title: "Project Alpha (Universal)",
+    courseCode: "WIF3001",
+    dueTimestamp: Date.now() + 172800000,
+    isSubmittedOnSpectrum: false,
+    submissionStatus: "No submission",
+    isCompleted: false
+  }
+];
+
+const mockRawEvents = [
+  {
+    id: 9001,
+    instance: 1001,
+    name: "Assignment 1 (Occ 1) is due",
+    timesort: Math.floor(Date.now() / 1000) + 86400,
+    course: { shortname: "WIF3001" },
+    action: { actionable: true } // In Moodle action events, actionable is often true even if submitted
+  },
+  {
+    id: 9002,
+    instance: 1002,
+    name: "Assignment 1 (Occ 2) is due", // Occ 2!
+    timesort: Math.floor(Date.now() / 1000) + 86400,
+    course: { shortname: "WIF3001" },
+    action: { actionable: true }
+  },
+  {
+    id: 9005,
+    instance: 5001,
+    name: "Lecture Attendance (Occ 1)",
+    modulename: "attendance",
+    timesort: Math.floor(Date.now() / 1000) + 3600,
+    course: { shortname: "WIF3001" }
+  }
+];
+
+// Test 5A: When cached_deadlines exist, they must take precedence over raw calendar events
+const hydratedFromCache = normalizeHydratedDeadlines(mockCachedDeadlines, mockRawEvents, {
+  courseOccurrences: { "WIF3001": "Occ 1" },
+  studentOccurrence: "Occ 1"
+});
+
+assert(hydratedFromCache.length === 2, `Hydrated exactly 2 matching tasks from cache (got ${hydratedFromCache.length})`);
+const cacheOcc2 = hydratedFromCache.find(d => d.title.includes("Occ 2"));
+assert(!cacheOcc2, "Strict: Occ 2 task is never shown on cache hydration");
+const cacheSubmitted = hydratedFromCache.find(d => d.cmid === "1001");
+assert(cacheSubmitted && cacheSubmitted.isSubmittedOnSpectrum === true, "Task 1001 retains isSubmittedOnSpectrum: true on popup open");
+assert(cacheSubmitted && cacheSubmitted.isCompleted === true, "Task 1001 retains isCompleted: true on popup open");
+
+// Test 5B: When cached_deadlines is explicitly empty [], it must return [] without falling back to raw events
+const hydratedEmpty = normalizeHydratedDeadlines([], mockRawEvents, {
+  courseOccurrences: { "WIF3001": "Occ 1" },
+  studentOccurrence: "Occ 1"
+});
+assert(hydratedEmpty.length === 0, "Explicitly empty cached_deadlines returns empty without resurrecting raw events");
+
+// Test 5C: When falling back to rawCalendarEvents (e.g. initial login before live scrape)
+const hydratedFromRaw = normalizeHydratedDeadlines(null, mockRawEvents, {
+  courseOccurrences: { "WIF3001": "Occ 1" },
+  studentOccurrence: "Occ 1",
+  completedIds: new Set(["9003"])
+});
+assert(hydratedFromRaw.length === 1, `Raw fallback captures only Occ 1 non-attendance events (got ${hydratedFromRaw.length})`);
+assert(hydratedFromRaw[0].cmid === "1001", "Raw fallback matches Assignment 1 (Occ 1)");
+assert(!hydratedFromRaw.some(d => d.title.includes("Occ 2")), "Strict: Raw fallback excludes Occ 2");
+assert(!hydratedFromRaw.some(d => d.type === "attendance"), "Strict: Raw fallback excludes attendance");
+
+// Test 5D: Malay submission status keywords in parser
+const mockMalayAssignHtml = `
+<table>
+  <tr>
+    <td><a href="https://spectrum.um.edu.my/mod/assign/view.php?id=3001">Tugasan 1 (Occ 1)</a></td>
+    <td>Friday, 30 October 2026, 11:59 PM</td>
+    <td>Telah dinilai</td>
+  </tr>
+  <tr>
+    <td><a href="https://spectrum.um.edu.my/mod/assign/view.php?id=3002">Tugasan 2 (Occ 1)</a></td>
+    <td>Friday, 30 October 2026, 11:59 PM</td>
+    <td>Dihantar untuk dinilai</td>
+  </tr>
+  <tr>
+    <td><a href="https://spectrum.um.edu.my/mod/assign/view.php?id=3003">Tugasan 3 (Occ 1)</a></td>
+    <td>Friday, 30 October 2026, 11:59 PM</td>
+    <td>Tiada penghantaran</td>
+  </tr>
+</table>
+`;
+const malayTasks = parseCourseAssignmentsIndex(mockMalayAssignHtml, "WIX1002", "Data Science", "Occ 1");
+assert(malayTasks.length === 3, `Parsed 3 Malay assignments (got ${malayTasks.length})`);
+const task3001 = malayTasks.find(t => t.cmid === "3001");
+assert(task3001 && task3001.isSubmittedOnSpectrum === true, "'Telah dinilai' marked isSubmittedOnSpectrum: true");
+const task3002 = malayTasks.find(t => t.cmid === "3002");
+assert(task3002 && task3002.isSubmittedOnSpectrum === true, "'Dihantar untuk dinilai' marked isSubmittedOnSpectrum: true");
+const task3003 = malayTasks.find(t => t.cmid === "3003");
+assert(task3003 && task3003.isSubmittedOnSpectrum === false, "'Tiada penghantaran' marked isSubmittedOnSpectrum: false");
+
 
 console.log(`\n=== All Deadlines Tests Finished: ${passed} passed, ${failed} failed ===`);
 if (failed > 0) {

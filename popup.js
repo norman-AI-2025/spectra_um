@@ -22,7 +22,7 @@ import {
   AuthExpiredError
 } from "./utils/moodleApi.js";
 
-import { fetchLiveDeadlines } from "./utils/calendar.js";
+import { fetchLiveDeadlines, normalizeHydratedDeadlines } from "./utils/calendar.js";
 
 import {
   formatTimeRemaining,
@@ -640,105 +640,14 @@ function handleToggleSessionVisibility() {
 
 /**
  * Hydrates state.deadlines from scraped calendar events and renders the Deadlines tab UI.
- * Supports both raw Moodle events (rawCalendarEvents) and formatted table items (events).
+ * Supports both clean cached deadline items (events) and fallback raw Moodle action events (rawCalendarEvents).
+ * Enforces student occurrence filtering, attendance exclusion, and preserves verified submission status.
  */
 function hydrateDeadlinesFromScrape(events = [], rawCalendarEvents = []) {
-  if (Array.isArray(rawCalendarEvents) && rawCalendarEvents.length > 0) {
-    state.deadlines = rawCalendarEvents.map((evt) => {
-      const timestamp = (evt.timesort || evt.timestart) * 1000;
-      const courseCode = extractCourseCode(evt.course?.shortname || evt.course?.fullname || "");
-      const eventUrl = evt.action?.url || evt.url || `https://spectrum.um.edu.my/mod/${evt.modulename || "assign"}/view.php?id=${evt.instance || evt.id}`;
-      const eventId = String(evt.id);
-      const isSubmittedOnSpectrum = evt.action ? !evt.action.actionable : false;
-
-      return {
-        id: eventId,
-        title: cleanMoodleTitle(evt.name),
-        courseCode: courseCode || (evt.course?.shortname || "N/A"),
-        courseName: evt.course?.fullname || courseCode,
-        dueDate: new Date(timestamp).toISOString(),
-        dueTimestamp: timestamp,
-        formattedTime: evt.formattedtime || new Date(timestamp).toLocaleString("en-MY", {
-          month: "short",
-          day: "numeric",
-          hour: "2-digit",
-          minute: "2-digit"
-        }),
-        url: eventUrl,
-        type: evt.modulename || "assign",
-        urgency: calculateUrgency(timestamp),
-        isSubmittedOnSpectrum,
-        isCompleted: isSubmittedOnSpectrum || state.completedIds.has(eventId),
-        weight: ""
-      };
-    });
-  } else if (Array.isArray(events) && events.length > 0) {
-    state.deadlines = events.map((ev, idx) => {
-      // Check if already in standard live deadline format
-      if (ev && (ev.title !== undefined || ev.name !== undefined) && (ev.dueTimestamp || ev.dueDate)) {
-        const timestamp = ev.dueTimestamp || (ev.dueDate ? Date.parse(ev.dueDate) : Date.now());
-        const eventId = String(ev.id || `deadline-${idx}`);
-        const isSubmittedOnSpectrum = Boolean(ev.isSubmittedOnSpectrum);
-        return {
-          ...ev,
-          id: eventId,
-          title: cleanMoodleTitle(ev.title || ev.name || ""),
-          courseCode: ev.courseCode || "N/A",
-          courseName: ev.courseName || ev.courseCode || "N/A",
-          dueDate: ev.dueDate || new Date(timestamp).toISOString(),
-          dueTimestamp: timestamp,
-          formattedTime: ev.formattedTime || new Date(timestamp).toLocaleString("en-MY", {
-            month: "short",
-            day: "numeric",
-            hour: "2-digit",
-            minute: "2-digit"
-          }),
-          url: ev.url || "https://spectrum.um.edu.my/calendar/view.php",
-          type: ev.type || "assign",
-          urgency: calculateUrgency(timestamp),
-          isSubmittedOnSpectrum,
-          isCompleted: isSubmittedOnSpectrum || state.completedIds.has(eventId),
-          weight: ev.weight || ""
-        };
-      }
-
-      // Old table scraper format
-      const dueTs = Date.parse(ev["Due Date"]) || (Date.now() + 86400000);
-      const isSubmitted = ev["Submitted?"] === "Submitted";
-      const id = `scraped-${idx}-${ev["Assignment / Task"] || idx}`;
-      const code = extractCourseCode(ev["Course Code"] || "") || ev["Course Code"] || "N/A";
-
-      return {
-        id,
-        title: cleanMoodleTitle(ev["Assignment / Task"] || "Assignment"),
-        courseCode: code,
-        courseName: ev["Course Code"] || code,
-        dueDate: new Date(dueTs).toISOString(),
-        dueTimestamp: dueTs,
-        formattedTime: ev["Due Date"] || new Date(dueTs).toLocaleString(),
-        url: ev["Direct Link"] || "https://spectrum.um.edu.my/calendar/view.php",
-        type: "assign",
-        urgency: calculateUrgency(dueTs),
-        isSubmittedOnSpectrum: isSubmitted,
-        isCompleted: isSubmitted || state.completedIds.has(id),
-        weight: ""
-      };
-    });
-  } else {
-    state.deadlines = [];
-  }
-
-  // Strictly filter out attendance activities and submissions overdue > 100 days
-  state.deadlines = state.deadlines.filter((item) => {
-    if (isAttendanceActivity(item)) return false;
-    if (isOverdueMoreThan100Days(item.dueTimestamp)) return false;
-    return true;
-  });
-
-  // Sort deadlines: pending first, then by urgency / due timestamp
-  state.deadlines.sort((a, b) => {
-    if (a.isCompleted !== b.isCompleted) return a.isCompleted ? 1 : -1;
-    return a.dueTimestamp - b.dueTimestamp;
+  state.deadlines = normalizeHydratedDeadlines(events, rawCalendarEvents, {
+    courseOccurrences: state.courseOccurrences,
+    studentOccurrence: state.studentOccurrence,
+    completedIds: state.completedIds
   });
 
   const loadingEl = document.getElementById("deadlinesLoading");
@@ -893,11 +802,12 @@ async function handleSaveAndTestSession() {
     showToast("Session Injected & Scraping Complete!", "success");
 
     // Connect scraped data directly to frontend UI
-    if ((verified.rawCalendarEvents && verified.rawCalendarEvents.length > 0) || (verified.events && verified.events.length > 0)) {
-      hydrateDeadlinesFromScrape(verified.events, verified.rawCalendarEvents);
-    } else {
-      await loadLiveDeadlines();
+    if (Array.isArray(verified.events) && verified.events.length > 0) {
+      hydrateDeadlinesFromScrape(verified.events, []);
+    } else if (Array.isArray(verified.rawCalendarEvents) && verified.rawCalendarEvents.length > 0) {
+      hydrateDeadlinesFromScrape([], verified.rawCalendarEvents);
     }
+    await loadLiveDeadlines();
 
     if ((verified.rawCourses && verified.rawCourses.length > 0) || (verified.courses && verified.courses.length > 0)) {
       await hydrateCoursesFromScrape(verified.courses, verified.rawCourses);
@@ -989,11 +899,12 @@ async function handleAutoDetectSession() {
     showToast("Session Auto-Detected Successfully!", "success");
 
     // Connect scraped data directly to frontend UI
-    if ((verified.rawCalendarEvents && verified.rawCalendarEvents.length > 0) || (verified.events && verified.events.length > 0)) {
-      hydrateDeadlinesFromScrape(verified.events, verified.rawCalendarEvents);
-    } else {
-      await loadLiveDeadlines();
+    if (Array.isArray(verified.events) && verified.events.length > 0) {
+      hydrateDeadlinesFromScrape(verified.events, []);
+    } else if (Array.isArray(verified.rawCalendarEvents) && verified.rawCalendarEvents.length > 0) {
+      hydrateDeadlinesFromScrape([], verified.rawCalendarEvents);
     }
+    await loadLiveDeadlines();
 
     if ((verified.rawCourses && verified.rawCourses.length > 0) || (verified.courses && verified.courses.length > 0)) {
       await hydrateCoursesFromScrape(verified.courses, verified.rawCourses);
@@ -1043,9 +954,26 @@ async function syncLiveSession() {
         "cached_attendance",
         "verifiedSesskey",
         "userName",
-        "userAvatarUrl"
+        "userAvatarUrl",
+        "course_occurrences",
+        "courseOccurrences",
+        "studentOccurrence",
+        "completed_assignment_ids"
       ]);
       manualToken = (stored.manualMoodleSession || stored.manual_moodle_session || "").trim();
+
+      if (stored.course_occurrences && typeof stored.course_occurrences === "object") {
+        state.courseOccurrences = { ...state.courseOccurrences, ...stored.course_occurrences };
+      }
+      if (stored.courseOccurrences && typeof stored.courseOccurrences === "object") {
+        state.courseOccurrences = { ...state.courseOccurrences, ...stored.courseOccurrences };
+      }
+      if (stored.studentOccurrence) {
+        state.studentOccurrence = stored.studentOccurrence;
+      }
+      if (Array.isArray(stored.completed_assignment_ids)) {
+        state.completedIds = new Set(stored.completed_assignment_ids.map(String));
+      }
 
       // If we have cached scraped data, pre-hydrate the UI immediately for instant responsiveness!
       if (stored.userName) {
@@ -1068,8 +996,10 @@ async function syncLiveSession() {
       if ((stored.cached_raw_courses && stored.cached_raw_courses.length > 0) || (stored.cached_courses && stored.cached_courses.length > 0)) {
         await hydrateCoursesFromScrape(stored.cached_courses, stored.cached_raw_courses);
       }
-      if ((stored.cached_raw_events && stored.cached_raw_events.length > 0) || (stored.cached_deadlines && stored.cached_deadlines.length > 0)) {
-        hydrateDeadlinesFromScrape(stored.cached_deadlines, stored.cached_raw_events);
+      if (Array.isArray(stored.cached_deadlines)) {
+        hydrateDeadlinesFromScrape(stored.cached_deadlines, []);
+      } else if (Array.isArray(stored.cached_raw_events) && stored.cached_raw_events.length > 0) {
+        hydrateDeadlinesFromScrape([], stored.cached_raw_events);
       }
       if (Array.isArray(stored.cached_announcements) && stored.cached_announcements.length > 0) {
         state.announcements = stored.cached_announcements;
@@ -1253,8 +1183,8 @@ async function loadLiveDeadlines() {
       return a.dueTimestamp - b.dueTimestamp;
     });
 
-    if (typeof chrome !== "undefined" && chrome.storage?.local && liveEvents.length > 0) {
-      await chrome.storage.local.set({ cached_deadlines: liveEvents });
+    if (typeof chrome !== "undefined" && chrome.storage?.local) {
+      await chrome.storage.local.set({ cached_deadlines: state.deadlines });
     }
 
     updateUrgentCountBadge();
@@ -1425,20 +1355,24 @@ function renderDeadlines() {
     checkbox.addEventListener("change", async (e) => {
       const isChecked = e.target.checked;
       const targetId = e.target.dataset.id;
+      const found = state.deadlines.find((d) => d.id === targetId || d.cmid === targetId);
+
       if (isChecked) {
         state.completedIds.add(targetId);
+        if (found?.cmid) state.completedIds.add(String(found.cmid));
       } else {
         state.completedIds.delete(targetId);
+        if (found?.cmid) state.completedIds.delete(String(found.cmid));
       }
+
+      if (found) found.isCompleted = isChecked;
 
       if (typeof chrome !== "undefined" && chrome.storage?.local) {
         await chrome.storage.local.set({
-          completed_assignment_ids: Array.from(state.completedIds)
+          completed_assignment_ids: Array.from(state.completedIds),
+          cached_deadlines: state.deadlines
         });
       }
-
-      const found = state.deadlines.find((d) => d.id === targetId);
-      if (found) found.isCompleted = isChecked;
 
       updateUrgentCountBadge();
       renderDeadlines();
@@ -2919,6 +2853,8 @@ async function loadStoredPreferences() {
       "last_cloud_sync_timestamp",
       "semester_start_date",
       "course_occurrences",
+      "courseOccurrences",
+      "studentOccurrence",
       "pref_auto_attendance",
       "telegram_sent_announcement_ids",
       "telegram_sent_deadline_ids"
@@ -2937,8 +2873,14 @@ async function loadStoredPreferences() {
   if (tgNoticesCountEl) tgNoticesCountEl.textContent = String(state.telegramSentAnnouncementIds.size);
   if (tgDeadlinesCountEl) tgDeadlinesCountEl.textContent = String(state.telegramSentDeadlineIds.size);
 
+  if (stored.studentOccurrence) {
+    state.studentOccurrence = stored.studentOccurrence;
+  }
   if (stored.course_occurrences && typeof stored.course_occurrences === "object") {
-    state.courseOccurrences = stored.course_occurrences;
+    state.courseOccurrences = { ...state.courseOccurrences, ...stored.course_occurrences };
+  }
+  if (stored.courseOccurrences && typeof stored.courseOccurrences === "object") {
+    state.courseOccurrences = { ...state.courseOccurrences, ...stored.courseOccurrences };
   }
   if (stored.pref_auto_attendance !== undefined) {
     state.autoAttendanceEnabled = stored.pref_auto_attendance;
@@ -2973,7 +2915,7 @@ async function loadStoredPreferences() {
   if (stored.notify_urgent_deadlines !== undefined) document.getElementById("prefDeadlines").checked = stored.notify_urgent_deadlines;
 
   if (Array.isArray(stored.completed_assignment_ids)) {
-    state.completedIds = new Set(stored.completed_assignment_ids);
+    state.completedIds = new Set(stored.completed_assignment_ids.map(String));
   }
 
   const academic = calculateAcademicWeek(stored.semester_start_date || "2026-10-05");

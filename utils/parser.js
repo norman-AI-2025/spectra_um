@@ -443,7 +443,7 @@ export function parseCourseAssignmentsIndex(html, courseCode = "", courseName = 
         // Strictly exclude submissions overdue by more than 100 days
         if (isOverdueMoreThan100Days(dueTimestamp)) return;
 
-        const isSubmitted = /submitted|graded|selesai|dihantar/i.test(submissionStatusText) && !/no submission|not submitted|belum/i.test(submissionStatusText);
+        const isSubmitted = /\b(?:submitted|submission|graded|grading|selesai|dihantar|dinilai|diserahkan)\b/i.test(submissionStatusText) && !/\b(?:no submission|not submitted|belum|tiada|tidak|draft|draf)\b/i.test(submissionStatusText);
 
         assignments.push({
           id: cmid,
@@ -515,7 +515,7 @@ export function parseCourseAssignmentsIndex(html, courseCode = "", courseName = 
 
     // Strictly exclude submissions overdue by more than 100 days
     if (isOverdueMoreThan100Days(dueTimestamp)) continue;
-    const isSubmitted = /submitted|graded|selesai|dihantar/i.test(submissionStatusText) && !/no submission|not submitted|belum/i.test(submissionStatusText);
+    const isSubmitted = /\b(?:submitted|submission|graded|grading|selesai|dihantar|dinilai|diserahkan)\b/i.test(submissionStatusText) && !/\b(?:no submission|not submitted|belum|tiada|tidak|draft|draf)\b/i.test(submissionStatusText);
 
     assignments.push({
       id: cmid,
@@ -599,7 +599,7 @@ export function parseCourseViewSubmissions(html, courseCode = "", courseName = "
           }
 
           // Submission / completion indicator
-          if (/submitted|dihantar|done|selesai/i.test(actText) && !/not submitted|belum/i.test(actText)) {
+          if (/\b(?:submitted|submission|graded|grading|dihantar|done|selesai|dinilai|diserahkan)\b/i.test(actText) && !/\b(?:not submitted|no submission|belum|to do|tiada|tidak|draft|draf)\b/i.test(actText)) {
             isSubmitted = true;
           }
         }
@@ -666,7 +666,7 @@ export function parseCourseViewSubmissions(html, courseCode = "", courseName = "
     if (dueM) {
       dueDateText = dueM[1].trim();
     }
-    const isSubmitted = /submitted|dihantar|done|selesai/i.test(contextSnippet) && !/not submitted|belum|to do/i.test(contextSnippet);
+    const isSubmitted = /\b(?:submitted|submission|graded|grading|dihantar|done|selesai|dinilai|diserahkan)\b/i.test(contextSnippet) && !/\b(?:not submitted|no submission|belum|to do|tiada|tidak|draft|draf)\b/i.test(contextSnippet);
     const dueTimestamp = dueDateText ? parseMoodleDateString(dueDateText) : null;
 
     // Strictly exclude items overdue by more than 100 days
