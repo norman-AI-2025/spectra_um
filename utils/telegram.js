@@ -216,7 +216,7 @@ export function formatDeadlineTelegram(deadline) {
   const title = escapeHtml(deadline.title || "Impending Submission");
   const hoursLeft = Math.max(1, Math.round((deadline.dueTimestamp - Date.now()) / (1000 * 60 * 60)));
   const formattedTime = escapeHtml(deadline.formattedTime || "Soon");
-  const url = deadline.url || "https://spectrum.um.edu.my/calendar/view.php";
+  const url = deadline.url || "https://spectrum.um.edu.my/my/";
 
   const isOneDayExact = hoursLeft >= 23 && hoursLeft <= 25;
   const urgencyText = isOneDayExact

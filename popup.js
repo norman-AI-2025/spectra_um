@@ -1190,7 +1190,7 @@ async function loadLiveDeadlines() {
       showToast("Session Expired. Please update your MoodleSession cookie in Settings.", "error");
     } else {
       if (state.deadlines.length === 0) {
-        showToast(`Error querying calendar: ${err.message}`, "error");
+        showToast(`Error querying assignments: ${err.message}`, "error");
       }
     }
   } finally {

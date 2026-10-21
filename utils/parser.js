@@ -1989,7 +1989,7 @@ export function parseMoodleIcsCalendar(icsText, studentOccurrencesMap = {}, defa
       dueDate: new Date(dueTimestamp).toISOString(),
       dueTimestamp,
       formattedTime,
-      url: rawUrl || `https://spectrum.um.edu.my/calendar/view.php`,
+      url: rawUrl || (cmid ? `https://spectrum.um.edu.my/mod/assign/view.php?id=${cmid}` : `https://spectrum.um.edu.my/my/`),
       type: "assign",
       submissionStatus: "No submission recorded",
       isSubmittedOnSpectrum: false,
