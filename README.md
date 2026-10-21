@@ -20,14 +20,15 @@
    - Includes a dedicated **Notices** tab in the extension with instant search and course filters.
 
 2. **⏰ Top-to-Bottom Submission Deadlines & Occurrence Filter:**
-   - **Full Course Discovery:** Queries Moodle's Assignment Overview (`/mod/assign/index.php`) and scans each course page top-to-bottom (`/course/view.php`) to catch all dropboxes, online quizzes, workshops, and Turnitin assignments—including bottom project dropboxes in Week 14.
+   - **Moodle AJAX & Full Course Discovery:** Fast pure JSON extraction via Moodle's native `core_course_get_contents` AJAX service, combined with Assignment Overview (`/mod/assign/index.php`) and top-to-bottom page scanning (`/course/view.php`) to catch all dropboxes, online quizzes, workshops, and Turnitin assignments—including bottom project dropboxes in Week 14.
    - **Respective Occurrence Filtering:** Group-specific assignments (e.g. *Lab 1 Occ 2*) are strictly excluded if you are in *Occ 1*, while universal assignments (*All students*) and your group's submissions are included.
+   - **Permanent iCal Feed Integration (Zero Cookie Expiry):** Synchronizes with your SPeCTRUM calendar export feed (`.ics`), allowing the 24/7 Cloudflare Worker to track and alert on impending deadlines indefinitely even when your browser session expires.
    - **Urgency Badges & < 24h Alerts:** Automatically flags submissions due within 24 hours (`urgent`), this week, or upcoming. Dispatches urgent phone alerts via Telegram before deadlines close.
    - **Submission Tracking:** Detects if an assignment has already been submitted on SPeCTRUM, with persistent checkboxes to mark completed work.
 
 3. **📊 Live Attendance & Intelligent Auto-Checkin:**
-   - **Full Discovery (Top to Bottom):** Discovers all attendance instances across your courses, whether located in top lecture sections, weekly blocks, or the bottom of the course page.
-   - **All Tabs Inspected (`view=5`):** Bypasses Moodle's week/month pagination by querying the universal **All** tab and group tabs.
+   - **Full Discovery (Moodle AJAX & Top-to-Bottom):** Automatically discovers all attendance instances across your courses via `core_course_get_contents` and multi-section scans.
+   - **All Tabs Inspected (`view=5`) & Gradebook Integration:** Queries the universal **All** tab and group tabs, with Gradebook user report integration for instant overall score and percentage summaries.
    - **Past Till Current Date Only:** Automatically displays sessions from the semester start up to the current date. Shows scheduled sessions for today (even if scheduled for later in the day), while excluding unrecorded future sessions.
    - **Strict Occurrence Auto-Checkin:** When check-in opens, Spectra auto-records your attendance as *Present* **strictly for your registered occurrence (e.g. Occ 1, Occ 2)**.
    - **Passcode Support & Telegram Confirmations:** Automatically submits teacher passwords if configured, or sends a Telegram alert requesting the password if required.
@@ -36,10 +37,10 @@
    - Automatically discovers and categorizes lecture slides, lab sheets, and tutorial worksheets by week (Week 1 to Week 14).
    - Generates neatly structured downloads: `Downloads/Spectra/{Course_Code}/Week_{N}/`.
 
-5. **☁️ 24/7 Cloud Relay (Hybrid Architecture):**
+5. **☁️ 24/7 Cloud Relay (Hybrid Architecture with Permanent iCal):**
    - Works hand-in-hand with the Chrome extension.
-   - When your laptop is open, the extension gives you a fast, responsive desktop hub.
-   - When your laptop is sleeping, turned off, or you are away from your desk, a lightweight Cloudflare Worker monitors announcements, deadlines, and auto-submits attendance 24/7 in the cloud.
+   - When your laptop is open, the extension gives you a fast, responsive desktop hub with auto-attendance and deadline filters.
+   - When your laptop is sleeping, turned off, or you are away from your desk, a lightweight Cloudflare Worker monitors announcements, auto-submits attendance, and continues sending deadline alerts via permanent iCal feeds even across session cookie expirations.
 
 ---
 

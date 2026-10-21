@@ -283,3 +283,67 @@ export async function fetchLiveAnnouncements(courses = [], sesskey = null) {
   return deduped;
 }
 
+/**
+ * Fetch complete course structure via Moodle's native AJAX service (core_course_get_contents).
+ * Returns sections array in structured JSON without downloading heavy HTML.
+ */
+export async function fetchCourseContentsViaAjax(courseId, sesskey = null) {
+  if (!courseId) return null;
+  if (!sesskey) {
+    try {
+      const ctx = await getSessionContext();
+      sesskey = ctx.sesskey;
+    } catch (_) {
+      return null;
+    }
+  }
+
+  const ajaxEndpoint = `${SPECTRUM_BASE_URL}/lib/ajax/service.php?sesskey=${encodeURIComponent(sesskey)}&info=core_course_get_contents`;
+  const payload = [
+    {
+      index: 0,
+      methodname: "core_course_get_contents",
+      args: {
+        courseid: Number(courseId)
+      }
+    }
+  ];
+
+  try {
+    const ctrl = typeof AbortController !== "undefined" ? new AbortController() : null;
+    const tid = ctrl ? setTimeout(() => ctrl.abort(), 6000) : null;
+    let res;
+    try {
+      res = await fetch(ajaxEndpoint, {
+        method: "POST",
+        credentials: "include",
+        headers: {
+          "Content-Type": "application/json",
+          "Accept": "application/json"
+        },
+        body: JSON.stringify(payload),
+        signal: ctrl?.signal
+      });
+    } finally {
+      if (tid) clearTimeout(tid);
+    }
+
+    if (!res || !res.ok) return null;
+
+    const data = await res.json();
+    if (Array.isArray(data) && data[0]) {
+      if (data[0].error === true) {
+        return null;
+      }
+      if (Array.isArray(data[0].data)) {
+        return data[0].data;
+      }
+    }
+  } catch (err) {
+    console.warn(`[Spectra] core_course_get_contents failed for course ${courseId}:`, err);
+  }
+
+  return null;
+}
+
+

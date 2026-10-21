@@ -1326,6 +1326,11 @@ body.spectra-body {
   color: #7C3AED;
 }
 
+.calendar-icon {
+  background: #FEF3C7;
+  color: #D97706;
+}
+
 .card-title {
   font-size: 13.5px;
   font-weight: 700;

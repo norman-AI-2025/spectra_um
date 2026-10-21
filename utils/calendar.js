@@ -16,9 +16,12 @@ import {
   parseEnrolledCourses,
   isRespectiveOccurrence,
   isAttendanceActivity,
-  isOverdueMoreThan100Days
+  isOverdueMoreThan100Days,
+  parseMoodleIcsCalendar,
+  parseCourseContentsModules
 } from "./parser.js";
 import { InvalidSessionError, getSessionContext } from "./moodleApi.js";
+import { fetchCourseContentsViaAjax } from "./courses.js";
 
 const SPECTRUM_BASE_URL = "https://spectrum.um.edu.my";
 
@@ -39,17 +42,42 @@ function getActivityKey(item) {
 }
 
 /**
+ * Fetch and parse deadlines directly from Moodle's iCalendar (.ics) export URL.
+ * Works without active cookie session expiration.
+ */
+export async function fetchIcsDeadlines(calendarIcalUrl, occurrencesMap = {}, defaultOccurrence = "") {
+  if (!calendarIcalUrl) return [];
+  try {
+    const ctrl = typeof AbortController !== "undefined" ? new AbortController() : null;
+    const tid = ctrl ? setTimeout(() => ctrl.abort(), 7000) : null;
+    let res;
+    try {
+      res = await fetch(calendarIcalUrl, { signal: ctrl?.signal });
+    } finally {
+      if (tid) clearTimeout(tid);
+    }
+    if (!res || !res.ok) return [];
+    const icsText = await res.text();
+    return parseMoodleIcsCalendar(icsText, occurrencesMap, defaultOccurrence);
+  } catch (err) {
+    console.warn("[Spectra] Error fetching iCal feed:", err);
+    return [];
+  }
+}
+
+/**
  * Fetch live submission deadlines directly from Moodle's native AJAX calendar service,
- * plus all course assignment pages and course view pages (scanned top to bottom),
- * filtering out activities that belong to other occurrences.
+ * iCalendar export feed, and course contents (pure JSON via core_course_get_contents),
+ * with fallback to course assignment index and top-to-bottom HTML scanning.
  *
  * @param {string} [sesskey] - User session key
  * @param {Array} [courses] - Enrolled course objects [{ id, code, name }]
  * @param {Object} [occurrencesMap] - Map of courseId/courseCode -> student occurrence string (e.g. "Occ 1")
  * @param {string} [defaultOccurrence] - Fallback student occurrence
+ * @param {string} [calendarIcalUrl] - Optional persistent Moodle iCal URL
  * @returns {Promise<Array>} Array of unified deadlines
  */
-export async function fetchLiveDeadlines(sesskey, courses = [], occurrencesMap = {}, defaultOccurrence = "") {
+export async function fetchLiveDeadlines(sesskey, courses = [], occurrencesMap = {}, defaultOccurrence = "", calendarIcalUrl = "") {
   if (!sesskey) {
     try {
       const ctx = await getSessionContext();
@@ -59,31 +87,34 @@ export async function fetchLiveDeadlines(sesskey, courses = [], occurrencesMap =
     }
   }
 
-  // Load courses and occurrences from storage if not provided
-  if (!courses || courses.length === 0) {
-    if (typeof chrome !== "undefined" && chrome.storage?.local) {
-      try {
-        const stored = await chrome.storage.local.get([
-          "courses",
-          "cached_courses",
-          "course_occurrences",
-          "courseOccurrences",
-          "studentOccurrence"
-        ]);
-        if (Array.isArray(stored.courses) && stored.courses.length > 0) {
-          courses = stored.courses;
-        } else if (Array.isArray(stored.cached_courses) && stored.cached_courses.length > 0) {
-          courses = stored.cached_courses;
-        }
-        const localOccMap = stored.course_occurrences || stored.courseOccurrences || {};
-        if (Object.keys(occurrencesMap).length === 0 && Object.keys(localOccMap).length > 0) {
-          occurrencesMap = localOccMap;
-        }
-        if (!defaultOccurrence && stored.studentOccurrence) {
-          defaultOccurrence = stored.studentOccurrence;
-        }
-      } catch (e) {}
-    }
+  // Load courses, occurrences, and optional iCal URL from storage if not provided
+  if (typeof chrome !== "undefined" && chrome.storage?.local) {
+    try {
+      const stored = await chrome.storage.local.get([
+        "courses",
+        "cached_courses",
+        "course_occurrences",
+        "courseOccurrences",
+        "studentOccurrence",
+        "calendarIcalUrl",
+        "calendar_ical_url"
+      ]);
+      if ((!courses || courses.length === 0) && Array.isArray(stored.courses) && stored.courses.length > 0) {
+        courses = stored.courses;
+      } else if ((!courses || courses.length === 0) && Array.isArray(stored.cached_courses) && stored.cached_courses.length > 0) {
+        courses = stored.cached_courses;
+      }
+      const localOccMap = stored.course_occurrences || stored.courseOccurrences || {};
+      if (Object.keys(occurrencesMap).length === 0 && Object.keys(localOccMap).length > 0) {
+        occurrencesMap = localOccMap;
+      }
+      if (!defaultOccurrence && stored.studentOccurrence) {
+        defaultOccurrence = stored.studentOccurrence;
+      }
+      if (!calendarIcalUrl) {
+        calendarIcalUrl = stored.calendarIcalUrl || stored.calendar_ical_url || "";
+      }
+    } catch (e) {}
   }
 
   // If courses list is still empty, auto-discover enrolled courses from /my/
@@ -109,6 +140,23 @@ export async function fetchLiveDeadlines(sesskey, courses = [], occurrencesMap =
   }
 
   const deadlinesMap = new Map();
+
+  // -------------------------------------------------------------
+  // 0. Fetch Moodle iCalendar (.ics) Feed If Configured (Permanent, No Expiry)
+  // -------------------------------------------------------------
+  if (calendarIcalUrl) {
+    try {
+      const icsItems = await fetchIcsDeadlines(calendarIcalUrl, occurrencesMap, defaultOccurrence);
+      icsItems.forEach((item) => {
+        const key = getActivityKey(item);
+        if (!deadlinesMap.has(key)) {
+          deadlinesMap.set(key, item);
+        }
+      });
+    } catch (icsErr) {
+      console.warn("[Spectra] iCal feed load notice:", icsErr);
+    }
+  }
 
   // -------------------------------------------------------------
   // 1. Fetch Native SPeCTRUM AJAX Calendar Service / Upcoming Events First (Fastest)
@@ -283,7 +331,7 @@ export async function fetchLiveDeadlines(sesskey, courses = [], occurrencesMap =
   }
 
   // -------------------------------------------------------------
-  // 2. Fetch Course-Specific Submission Pages (/mod/assign/index.php & /course/view.php)
+  // 2. Fetch Course Submissions (Moodle AJAX core_course_get_contents + assign index + course view)
   //    Enriches calendar data and catches dropboxes whether at the top, middle, or bottom of the page.
   // -------------------------------------------------------------
   if (Array.isArray(courses) && courses.length > 0) {
@@ -293,7 +341,39 @@ export async function fetchLiveDeadlines(sesskey, courses = [], occurrencesMap =
       const courseName = course.name || courseCode;
       const studentOcc = occurrencesMap[courseId] || occurrencesMap[courseCode] || defaultOccurrence || "";
 
-      // A. Check /mod/assign/index.php?id={courseId} (Assignments overview page)
+      // A. Try native Moodle AJAX core_course_get_contents first (Fastest, pure JSON, zero HTML overhead)
+      let ajaxSuccess = false;
+      if (sesskey) {
+        try {
+          const sections = await fetchCourseContentsViaAjax(courseId, sesskey);
+          if (Array.isArray(sections) && sections.length > 0) {
+            const { assignments } = parseCourseContentsModules(sections, courseCode, courseName, studentOcc);
+            assignments.forEach((item) => {
+              const key = getActivityKey(item);
+              if (deadlinesMap.has(key)) {
+                const existing = deadlinesMap.get(key);
+                if (item.isSubmittedOnSpectrum) {
+                  existing.isSubmittedOnSpectrum = true;
+                  existing.isCompleted = true;
+                  existing.submissionStatus = "Submitted";
+                }
+                if (!existing.dueTimestamp && item.dueTimestamp) {
+                  existing.dueTimestamp = item.dueTimestamp;
+                  existing.dueDate = item.dueDate;
+                  existing.formattedTime = item.formattedTime;
+                }
+              } else {
+                deadlinesMap.set(key, item);
+              }
+            });
+            ajaxSuccess = true;
+          }
+        } catch (ajaxErr) {
+          console.warn(`[Spectra] core_course_get_contents notice for ${courseCode}:`, ajaxErr);
+        }
+      }
+
+      // B. Check /mod/assign/index.php?id={courseId} (Assignments overview page for status enrichment)
       try {
         const assignIndexUrl = `${SPECTRUM_BASE_URL}/mod/assign/index.php?id=${encodeURIComponent(courseId)}`;
         const ctrl1 = typeof AbortController !== "undefined" ? new AbortController() : null;
@@ -325,41 +405,43 @@ export async function fetchLiveDeadlines(sesskey, courses = [], occurrencesMap =
         console.warn(`[Spectra] Error checking assign index for ${courseCode}:`, err);
       }
 
-      // B. Check /course/view.php?id={courseId} (Full course page scanned top to bottom for quizzes, workshops, Turnitin, and bottom dropboxes)
-      try {
-        const courseViewUrl = `${SPECTRUM_BASE_URL}/course/view.php?id=${encodeURIComponent(courseId)}`;
-        const ctrl2 = typeof AbortController !== "undefined" ? new AbortController() : null;
-        const tid2 = ctrl2 ? setTimeout(() => ctrl2.abort(), 4000) : null;
-        let res;
+      // C. Check /course/view.php?id={courseId} (Scanned top to bottom as fallback if AJAX didn't capture or wasn't available)
+      if (!ajaxSuccess) {
         try {
-          res = await fetch(courseViewUrl, { credentials: "include", signal: ctrl2?.signal });
-        } finally {
-          if (tid2) clearTimeout(tid2);
-        }
-        if (res && res.ok) {
-          const html = await res.text();
-          const items = parseCourseViewSubmissions(html, courseCode, courseName, studentOcc);
-          items.forEach((item) => {
-            const key = getActivityKey(item);
-            if (deadlinesMap.has(key)) {
-              const existing = deadlinesMap.get(key);
-              if (!existing.dueTimestamp && item.dueTimestamp) {
-                existing.dueTimestamp = item.dueTimestamp;
-                existing.dueDate = item.dueDate;
-                existing.formattedTime = item.formattedTime;
+          const courseViewUrl = `${SPECTRUM_BASE_URL}/course/view.php?id=${encodeURIComponent(courseId)}`;
+          const ctrl2 = typeof AbortController !== "undefined" ? new AbortController() : null;
+          const tid2 = ctrl2 ? setTimeout(() => ctrl2.abort(), 4000) : null;
+          let res;
+          try {
+            res = await fetch(courseViewUrl, { credentials: "include", signal: ctrl2?.signal });
+          } finally {
+            if (tid2) clearTimeout(tid2);
+          }
+          if (res && res.ok) {
+            const html = await res.text();
+            const items = parseCourseViewSubmissions(html, courseCode, courseName, studentOcc);
+            items.forEach((item) => {
+              const key = getActivityKey(item);
+              if (deadlinesMap.has(key)) {
+                const existing = deadlinesMap.get(key);
+                if (!existing.dueTimestamp && item.dueTimestamp) {
+                  existing.dueTimestamp = item.dueTimestamp;
+                  existing.dueDate = item.dueDate;
+                  existing.formattedTime = item.formattedTime;
+                }
+                if (item.isSubmittedOnSpectrum) {
+                  existing.isSubmittedOnSpectrum = true;
+                  existing.isCompleted = true;
+                  existing.submissionStatus = "Submitted";
+                }
+              } else {
+                deadlinesMap.set(key, item);
               }
-              if (item.isSubmittedOnSpectrum) {
-                existing.isSubmittedOnSpectrum = true;
-                existing.isCompleted = true;
-                existing.submissionStatus = "Submitted";
-              }
-            } else {
-              deadlinesMap.set(key, item);
-            }
-          });
+            });
+          }
+        } catch (err) {
+          console.warn(`[Spectra] Error checking course view submissions for ${courseCode}:`, err);
         }
-      } catch (err) {
-        console.warn(`[Spectra] Error checking course view submissions for ${courseCode}:`, err);
       }
     });
 

@@ -268,7 +268,9 @@ async function syncSessionToCloudRelay(sessionData, relayUrl, secretKey) {
       "course_passwords",
       "moodle_session_key",
       "telegram_bot_token",
-      "telegram_chat_id"
+      "telegram_chat_id",
+      "calendarIcalUrl",
+      "calendar_ical_url"
     ]);
 
     const courses = (store.cached_courses || []).map((c) => ({
@@ -285,6 +287,7 @@ async function syncSessionToCloudRelay(sessionData, relayUrl, secretKey) {
       sessionToken: sessionData.value,
       expires: sessionData.expires,
       sesskey: store.moodle_session_key || "",
+      calendarIcalUrl: store.calendarIcalUrl || store.calendar_ical_url || "",
       courses,
       occurrences: store.course_occurrences || {},
       passwords: store.course_passwords || {},

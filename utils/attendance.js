@@ -15,9 +15,12 @@ import {
   parseAttendanceSessionDate,
   isAttendanceSessionPastOrCurrent,
   matchesOccurrence,
-  isRespectiveOccurrence
+  isRespectiveOccurrence,
+  parseCourseContentsModules,
+  parseGradebookAttendance
 } from "./parser.js";
 import { InvalidSessionError, getSessionContext } from "./moodleApi.js";
+import { fetchCourseContentsViaAjax } from "./courses.js";
 import { escapeHtml } from "./telegram.js";
 
 const SPECTRUM_BASE_URL = "https://spectrum.um.edu.my";
@@ -106,7 +109,23 @@ export async function fetchCourseAttendance({ courseId, courseCode = "UM", sessk
     }
   };
 
-  await Promise.allSettled([fetchIndex(), fetchView()]);
+  // 0. Try native Moodle AJAX core_course_get_contents first (Discovers all mod_attendance activities in 1 instant JSON call)
+  if (sesskey) {
+    try {
+      const sections = await fetchCourseContentsViaAjax(courseId, sesskey);
+      if (Array.isArray(sections) && sections.length > 0) {
+        const { attendanceModules } = parseCourseContentsModules(sections, courseCode);
+        attendanceModules.forEach(addInstance);
+      }
+    } catch (ajaxErr) {
+      console.warn(`[Spectra] Attendance AJAX discovery notice for course ${courseId}:`, ajaxErr);
+    }
+  }
+
+  // A & B: If AJAX didn't find instances, discover via index and course view concurrently
+  if (discoveredInstances.length === 0) {
+    await Promise.allSettled([fetchIndex(), fetchView()]);
+  }
 
   if (discoveredInstances.length === 0) {
     // Course does not have an active mod_attendance module on SPeCTRUM
@@ -666,3 +685,34 @@ export function formatAttendanceTelegram({ courseCode, occurrence, status = "Pre
     `<b>Status:</b> ${status}`
   ].join("\n");
 }
+
+/**
+ * Fast Gradebook Attendance Report query (/grade/report/user/index.php?id=...)
+ * Returns overall attendance percentage and points without multi-tab pagination.
+ */
+export async function fetchCourseGradebookAttendance({ courseId, sesskey = null }) {
+  if (!courseId) return null;
+  try {
+    const ctrl = typeof AbortController !== "undefined" ? new AbortController() : null;
+    const tid = ctrl ? setTimeout(() => ctrl.abort(), 5000) : null;
+    let res;
+    try {
+      res = await fetch(`${SPECTRUM_BASE_URL}/grade/report/user/index.php?id=${encodeURIComponent(courseId)}`, {
+        method: "GET",
+        credentials: "include",
+        signal: ctrl?.signal
+      });
+    } finally {
+      if (tid) clearTimeout(tid);
+    }
+
+    if (res && res.ok) {
+      const html = await res.text();
+      return parseGradebookAttendance(html);
+    }
+  } catch (err) {
+    console.warn(`[Spectra] Gradebook attendance query failed for course ${courseId}:`, err);
+  }
+  return null;
+}
+

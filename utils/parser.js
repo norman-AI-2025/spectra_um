@@ -1841,3 +1841,346 @@ export function parseAttendanceForm(html) {
 
   return { statusId, requiresPassword, sesskey, sessid };
 }
+
+/**
+ * Helper to parse RFC 5545 iCalendar date-time strings:
+ * Formats: 20241028T155900Z (UTC), 20241028T155900 (local/TZ), 20241028 (date only)
+ */
+export function parseIcsDateTime(str) {
+  if (!str) return null;
+  const s = String(str).trim();
+
+  // Format: YYYYMMDDTHHMMSSZ (UTC)
+  const utcMatch = s.match(/^(\d{4})(\d{2})(\d{2})T(\d{2})(\d{2})(\d{2})Z$/i);
+  if (utcMatch) {
+    const [, y, m, d, h, min, sec] = utcMatch;
+    return Date.UTC(parseInt(y, 10), parseInt(m, 10) - 1, parseInt(d, 10), parseInt(h, 10), parseInt(min, 10), parseInt(sec, 10));
+  }
+
+  // Format: YYYYMMDDTHHMMSS (local floating / timezone)
+  const localMatch = s.match(/^(\d{4})(\d{2})(\d{2})T(\d{2})(\d{2})(\d{2})/i);
+  if (localMatch) {
+    const [, y, m, d, h, min, sec] = localMatch;
+    return new Date(parseInt(y, 10), parseInt(m, 10) - 1, parseInt(d, 10), parseInt(h, 10), parseInt(min, 10), parseInt(sec, 10)).getTime();
+  }
+
+  // Format: YYYYMMDD (date only, e.g. VALUE=DATE:20241028)
+  const dateMatch = s.match(/^(\d{4})(\d{2})(\d{2})$/);
+  if (dateMatch) {
+    const [, y, m, d] = dateMatch;
+    return new Date(parseInt(y, 10), parseInt(m, 10) - 1, parseInt(d, 10), 23, 59, 59).getTime();
+  }
+
+  return null;
+}
+
+/**
+ * Parse standard Moodle RFC 5545 iCalendar (.ics) export stream into unified Spectra deadlines.
+ * Handles line unfolding, timezones (UTC 'Z' or local), course code extraction from CATEGORIES / SUMMARY,
+ * occurrence filtering, attendance activity exclusion, and overdue exclusion.
+ */
+export function parseMoodleIcsCalendar(icsText, studentOccurrencesMap = {}, defaultOccurrence = "") {
+  if (!icsText || typeof icsText !== "string") return [];
+
+  // 1. Line unfolding according to RFC 5545 (lines beginning with space or tab continue previous line)
+  const unfolded = icsText.replace(/\r\n[ \t]|\r[ \t]|\n[ \t]/g, "");
+  const lines = unfolded.split(/\r\n|\r|\n/);
+
+  const events = [];
+  let inEvent = false;
+  let currentEvent = null;
+
+  for (const line of lines) {
+    const trimmed = line.trim();
+    if (!trimmed) continue;
+
+    if (trimmed === "BEGIN:VEVENT") {
+      inEvent = true;
+      currentEvent = {};
+      continue;
+    }
+
+    if (trimmed === "END:VEVENT") {
+      if (inEvent && currentEvent) {
+        events.push(currentEvent);
+      }
+      inEvent = false;
+      currentEvent = null;
+      continue;
+    }
+
+    if (inEvent && currentEvent) {
+      const colonIdx = trimmed.indexOf(":");
+      if (colonIdx === -1) continue;
+
+      const rawKey = trimmed.substring(0, colonIdx);
+      const val = trimmed.substring(colonIdx + 1);
+      const propName = rawKey.split(";")[0].toUpperCase().trim();
+
+      if (!currentEvent[propName]) {
+        currentEvent[propName] = val;
+      }
+    }
+  }
+
+  const deadlines = [];
+
+  for (const ev of events) {
+    const rawSummary = (ev.SUMMARY || "").replace(/\\,/g, ",").replace(/\\;/g, ";").replace(/\\n/g, " ").trim();
+    const rawDesc = (ev.DESCRIPTION || "").replace(/\\,/g, ",").replace(/\\;/g, ";").replace(/\\n/g, "\n").trim();
+    const categories = (ev.CATEGORIES || "").trim();
+    const rawUrl = (ev.URL || "").trim();
+    const uid = (ev.UID || "").trim();
+
+    const dateStr = ev.DTEND || ev.DTSTART || "";
+    if (!dateStr) continue;
+
+    const dueTimestamp = parseIcsDateTime(dateStr);
+    if (!dueTimestamp) continue;
+
+    // Filter: Exclude activities overdue by more than 100 days
+    if (isOverdueMoreThan100Days(dueTimestamp)) continue;
+
+    // Clean title (remove "is due" or "due" suffix commonly appended by Moodle calendar export)
+    let title = rawSummary
+      .replace(/\s+is due(?:\s+to submit)?$/i, "")
+      .replace(/\s+due$/i, "")
+      .trim();
+    title = cleanMoodleTitle(title);
+
+    // Extract Course Code
+    let courseCode = categories ? extractCourseCode(categories) : "";
+    if (!courseCode) {
+      courseCode = extractCourseCode(rawSummary) || extractCourseCode(rawDesc);
+    }
+    if (!courseCode) {
+      courseCode = "Course";
+    }
+
+    // Exclude attendance activities
+    if (isAttendanceActivity({ title, url: rawUrl, type: "calendar" })) {
+      continue;
+    }
+
+    // Filter by student occurrence
+    const studentOcc = studentOccurrencesMap[courseCode] || defaultOccurrence || "";
+    if (!isRespectiveOccurrence("", studentOcc, title, rawSummary)) {
+      continue;
+    }
+
+    // Extract cmid or ID
+    const cmidMatch = rawUrl.match(/id=(\d+)/);
+    const uidMatch = uid.match(/(\d+)@/);
+    const cmid = cmidMatch ? cmidMatch[1] : (uidMatch ? uidMatch[1] : uid);
+
+    const formattedTime = new Date(dueTimestamp).toLocaleString("en-MY", {
+      month: "short",
+      day: "numeric",
+      hour: "2-digit",
+      minute: "2-digit"
+    });
+
+    deadlines.push({
+      id: String(cmid || uid || title),
+      cmid: String(cmid || uid || ""),
+      title,
+      courseCode,
+      courseName: courseCode,
+      dueDate: new Date(dueTimestamp).toISOString(),
+      dueTimestamp,
+      formattedTime,
+      url: rawUrl || `https://spectrum.um.edu.my/calendar/view.php`,
+      type: "assign",
+      submissionStatus: "No submission recorded",
+      isSubmittedOnSpectrum: false,
+      isCompleted: false,
+      urgency: calculateUrgency(dueTimestamp),
+      matchesOccurrence: true,
+      source: "ical"
+    });
+  }
+
+  return deadlines;
+}
+
+/**
+ * Parse Moodle AJAX `core_course_get_contents` JSON structure.
+ * Extracts assignment dropboxes and attendance module instances across all course sections
+ * with zero HTML parsing overhead.
+ */
+export function parseCourseContentsModules(sectionsJson, courseCode = "", courseName = "", studentOccurrence = "") {
+  if (!Array.isArray(sectionsJson)) {
+    return { assignments: [], attendanceModules: [] };
+  }
+
+  const assignments = [];
+  const attendanceModules = [];
+
+  for (const section of sectionsJson) {
+    const sectionName = section.name || "";
+    const modules = Array.isArray(section.modules) ? section.modules : [];
+
+    for (const mod of modules) {
+      if (!mod || !mod.modname) continue;
+
+      const modType = String(mod.modname).toLowerCase();
+      const cmid = String(mod.id);
+      const rawTitle = mod.name || "";
+      const title = cleanMoodleTitle(rawTitle);
+      const url = mod.url || `https://spectrum.um.edu.my/mod/${modType}/view.php?id=${cmid}`;
+
+      // 1. Attendance Modules
+      if (modType === "attendance" || isAttendanceActivity({ title, url, type: modType })) {
+        attendanceModules.push({
+          id: cmid,
+          cmid,
+          name: rawTitle,
+          title,
+          url,
+          sectionName
+        });
+        continue;
+      }
+
+      // 2. Submission Dropboxes & Activities (assign, quiz, turnitintooltwo, workshop)
+      if (
+        modType === "assign" ||
+        modType === "quiz" ||
+        modType.includes("turnitin") ||
+        modType === "workshop" ||
+        modType === "feedback"
+      ) {
+        // Occurrence filter
+        if (!isRespectiveOccurrence("", studentOccurrence, title, sectionName)) {
+          continue;
+        }
+
+        // Extract due date from Moodle module dates array or custom properties
+        let dueTimestamp = null;
+        if (Array.isArray(mod.dates)) {
+          for (const d of mod.dates) {
+            const label = (d.label || d.dataid || "").toLowerCase();
+            if (label.includes("due") || label.includes("tutup") || label.includes("close") || label.includes("akhir") || d.dataid === "duedate") {
+              if (d.timestamp) {
+                dueTimestamp = d.timestamp * 1000;
+                break;
+              }
+            }
+          }
+          if (!dueTimestamp && mod.dates.length > 0) {
+            const cand = mod.dates.find(d => d.timestamp && typeof d.timestamp === "number");
+            if (cand) dueTimestamp = cand.timestamp * 1000;
+          }
+        }
+
+        // Completion status
+        let isSubmitted = false;
+        if (mod.completiondata) {
+          const state = mod.completiondata.state;
+          // In Moodle: 1 = complete, 2 = complete pass
+          if (state === 1 || state === 2) {
+            isSubmitted = true;
+          }
+        }
+
+        if (isOverdueMoreThan100Days(dueTimestamp)) {
+          continue;
+        }
+
+        const formattedTime = dueTimestamp
+          ? new Date(dueTimestamp).toLocaleString("en-MY", {
+              month: "short",
+              day: "numeric",
+              hour: "2-digit",
+              minute: "2-digit"
+            })
+          : "No due date";
+
+        assignments.push({
+          id: cmid,
+          cmid,
+          title,
+          courseCode: courseCode || "Course",
+          courseName: courseName || courseCode,
+          dueDate: dueTimestamp ? new Date(dueTimestamp).toISOString() : "",
+          dueTimestamp,
+          formattedTime,
+          url,
+          type: modType,
+          submissionStatus: isSubmitted ? "Submitted" : "No submission",
+          isSubmittedOnSpectrum: isSubmitted,
+          isCompleted: isSubmitted,
+          urgency: dueTimestamp ? calculateUrgency(dueTimestamp) : "upcoming",
+          matchesOccurrence: true,
+          sectionName
+        });
+      }
+    }
+  }
+
+  return { assignments, attendanceModules };
+}
+
+/**
+ * Parse SPeCTRUM Moodle Gradebook User Report (/grade/report/user/index.php?id=...)
+ * Extracts overall attendance percentage, points earned, and total sessions.
+ */
+export function parseGradebookAttendance(html) {
+  if (!html) return null;
+
+  // 1. DOMParser approach (Browser)
+  if (typeof DOMParser !== "undefined") {
+    try {
+      const doc = new DOMParser().parseFromString(html, "text/html");
+      const rows = doc.querySelectorAll("table.user-grade tr, table.generaltable tr");
+      for (const tr of rows) {
+        const itemCell = tr.querySelector("th.item, td.item, td:first-child");
+        const itemText = (itemCell?.textContent || "").toLowerCase();
+        if (itemText.includes("attendance") || itemText.includes("kehadiran")) {
+          const cells = Array.from(tr.querySelectorAll("td"));
+          let gradeVal = "";
+          let rangeVal = "";
+          let percentageVal = "";
+
+          for (const td of cells) {
+            const text = td.textContent.trim();
+            if (/\d+[\.\,]?\d*\s*%/i.test(text)) {
+              percentageVal = text;
+            } else if (/^\d+[\.\,]?\d*(?:\s*\/\s*\d+[\.\,]?\d*)?$/.test(text) && !gradeVal) {
+              gradeVal = text;
+            } else if (/^\d+\s*[-–]\s*\d+$/.test(text) && !rangeVal) {
+              rangeVal = text;
+            }
+          }
+
+          return {
+            hasAttendance: true,
+            percentage: percentageVal || "N/A",
+            points: gradeVal ? (rangeVal ? `${gradeVal} / ${rangeVal}` : gradeVal) : "N/A"
+          };
+        }
+      }
+    } catch (_) {}
+  }
+
+  // 2. Regex fallback
+  const rowRegex = /<tr[^>]*>([\s\S]*?)<\/tr>/gi;
+  let rM;
+  while ((rM = rowRegex.exec(html)) !== null) {
+    const rHtml = rM[1];
+    if (/attendance|kehadiran/i.test(rHtml)) {
+      const allPct = Array.from(rHtml.matchAll(/(\d+(?:\.\d+)?\s*%)/g));
+      const pctMatch = allPct.length > 0 ? allPct[allPct.length - 1][1] : null;
+      const gradeMatch = rHtml.match(/<td[^>]*class=["'][^"']*grade[^"']*["'][^>]*>([\s\S]*?)<\/td>/i) ||
+                         rHtml.match(/<td[^>]*>([\d\.\/ ]+)<\/td>/i);
+      return {
+        hasAttendance: true,
+        percentage: pctMatch ? pctMatch.trim() : "N/A",
+        points: gradeMatch ? gradeMatch[1].replace(/<[^>]+>/g, "").trim() : "N/A"
+      };
+    }
+  }
+
+  return null;
+}
+

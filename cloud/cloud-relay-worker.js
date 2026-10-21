@@ -44,8 +44,7 @@ export default {
     // Route: POST /sync (Called by Spectra Extension on cookie change)
     if (url.pathname === "/sync" && request.method === "POST") {
       try {
-        const body = await request.json();
-        const { sessionToken, expires, domain, courses, occurrences, passwords, sesskey, telegramToken, telegramChatId } = body;
+        const { sessionToken, expires, domain, courses, occurrences, passwords, sesskey, telegramToken, telegramChatId, calendarIcalUrl } = body;
 
         if (!sessionToken) {
           return new Response(JSON.stringify({ error: "Missing sessionToken" }), {
@@ -63,6 +62,7 @@ export default {
           occurrences: occurrences || {},
           passwords: passwords || {},
           sesskey: sesskey || "",
+          calendarIcalUrl: calendarIcalUrl || body.calendar_ical_url || body.calendarUrl || "",
           telegramToken: telegramToken || body.telegram_bot_token || "",
           telegramChatId: telegramChatId || body.telegram_chat_id || "",
           updatedAt: Date.now()
@@ -158,14 +158,27 @@ async function runSpectrumPollingJob(env) {
 
     if (calRes.status === 303 || calRes.url.includes("/login/")) {
       console.warn("[Spectra Relay] Session expired or invalid.");
+      let icsDeadlinesResult = { checked: 0, alerted: 0 };
+      if (sessionData.calendarIcalUrl) {
+        console.log("[Spectra Relay] Session cookie expired, but permanent iCal feed is configured. Scanning deadlines via iCal...");
+        icsDeadlinesResult = await checkCloudDeadlinesViaIcs(env, sessionData);
+      }
+
       if (botToken && chatId) {
+        const extraNote = sessionData.calendarIcalUrl
+          ? "\n\n<i>Note: 24/7 deadline tracking remains active via your permanent iCal feed.</i>"
+          : "";
         await dispatchTelegram(
           botToken,
           chatId,
-          `⚠️ <b>Spectra Relay Warning</b>\nYour UM SPeCTRUM session has expired. Please open SPeCTRUM in your browser to renew your login.`
+          `⚠️ <b>Spectra Relay Warning</b>\nYour UM SPeCTRUM session has expired. Please open SPeCTRUM in your browser to renew your login.${extraNote}`
         );
       }
-      return { status: "expired" };
+      return {
+        status: "expired",
+        deadlinesChecked: icsDeadlinesResult.checked,
+        deadlinesAlerted: icsDeadlinesResult.alerted
+      };
     }
 
     console.log("[Spectra Relay] Successfully authenticated to SPeCTRUM via Cloud Relay.");
@@ -631,11 +644,132 @@ async function checkCloudDeadlines(env, sessionData) {
     }
   }
 
+  if (sessionData.calendarIcalUrl) {
+    try {
+      const icsRes = await checkCloudDeadlinesViaIcs(env, sessionData);
+      alertedCount += icsRes.alerted;
+      if (icsRes.checked > 0) checkedCourses += icsRes.checked;
+    } catch (_) {}
+  }
+
   if (env.SPECTRA_KV && alertedCount > 0) {
     await env.SPECTRA_KV.put("alerted_deadline_ids", JSON.stringify(Array.from(alertedDeadlineIds)));
   }
 
   return { checked: checkedCourses, alerted: alertedCount };
+}
+
+/**
+ * 24/7 Permanent iCal Deadline Scanner (Runs even when session cookie expires!)
+ */
+async function checkCloudDeadlinesViaIcs(env, sessionData) {
+  const { calendarIcalUrl, occurrences = {} } = sessionData;
+  if (!calendarIcalUrl) return { checked: 0, alerted: 0 };
+
+  const botToken = env.TELEGRAM_BOT_TOKEN || sessionData.telegramToken;
+  const chatId = env.TELEGRAM_CHAT_ID || sessionData.telegramChatId;
+  if (!botToken || !chatId) return { checked: 0, alerted: 0 };
+
+  let alertedDeadlineIds = new Set();
+  if (env.SPECTRA_KV) {
+    const rawAlerted = await env.SPECTRA_KV.get("alerted_deadline_ids");
+    if (rawAlerted) {
+      try {
+        alertedDeadlineIds = new Set(JSON.parse(rawAlerted));
+      } catch (_) {}
+    }
+  }
+
+  let alertedCount = 0;
+  try {
+    const res = await fetch(calendarIcalUrl, {
+      headers: { "User-Agent": "Mozilla/5.0 Spectra-Relay/1.0" }
+    });
+    if (!res.ok) return { checked: 0, alerted: 0 };
+    const icsText = await res.text();
+    const unfolded = icsText.replace(/\r\n[ \t]|\r[ \t]|\n[ \t]/g, "");
+    const lines = unfolded.split(/\r\n|\r|\n/);
+
+    const events = [];
+    let cur = null;
+    for (const l of lines) {
+      const line = l.trim();
+      if (line === "BEGIN:VEVENT") cur = {};
+      else if (line === "END:VEVENT") { if (cur) events.push(cur); cur = null; }
+      else if (cur) {
+        const cIdx = line.indexOf(":");
+        if (cIdx !== -1) {
+          const k = line.substring(0, cIdx).split(";")[0].toUpperCase().trim();
+          cur[k] = line.substring(cIdx + 1);
+        }
+      }
+    }
+
+    const now = Date.now();
+    for (const ev of events) {
+      const summary = (ev.SUMMARY || "").replace(/\\,/g, ",").replace(/\\n/g, " ").trim();
+      const url = (ev.URL || "").trim();
+      const categories = (ev.CATEGORIES || "").trim();
+      const dateStr = ev.DTEND || ev.DTSTART || "";
+      const uid = (ev.UID || "").trim();
+      const cmidMatch = url.match(/id=(\d+)/) || uid.match(/(\d+)@/);
+      const cmid = cmidMatch ? cmidMatch[1] : uid;
+
+      if (!cmid || alertedDeadlineIds.has(cmid)) continue;
+      if (isAttendanceWorkerActivity(summary, url)) continue;
+
+      let courseCode = categories || "";
+      const cMatch = summary.match(/\b([A-Z]{3,4}\s*\d{4})\b/i);
+      if (cMatch) courseCode = cMatch[1];
+      if (!courseCode) courseCode = "Course";
+
+      const studentOcc = occurrences[courseCode] || "";
+      if (!matchesOccurrence("", studentOcc, summary)) continue;
+
+      let dueTimestamp = null;
+      const utcMatch = dateStr.match(/^(\d{4})(\d{2})(\d{2})T(\d{2})(\d{2})(\d{2})Z$/i);
+      if (utcMatch) {
+        const [, y, m, d, h, min, sec] = utcMatch;
+        dueTimestamp = Date.UTC(parseInt(y, 10), parseInt(m, 10) - 1, parseInt(d, 10), parseInt(h, 10), parseInt(min, 10), parseInt(sec, 10));
+      } else {
+        const lMatch = dateStr.match(/^(\d{4})(\d{2})(\d{2})T(\d{2})(\d{2})(\d{2})/i);
+        if (lMatch) {
+          const [, y, m, d, h, min, sec] = lMatch;
+          dueTimestamp = new Date(parseInt(y, 10), parseInt(m, 10) - 1, parseInt(d, 10), parseInt(h, 10), parseInt(min, 10), parseInt(sec, 10)).getTime();
+        }
+      }
+
+      if (!dueTimestamp) continue;
+      if (now - dueTimestamp > 100 * 24 * 60 * 60 * 1000) continue;
+
+      const diffHours = (dueTimestamp - now) / (1000 * 60 * 60);
+      if (diffHours > 0 && diffHours <= 24) {
+        const hoursLeft = Math.max(1, Math.round(diffHours));
+        const formattedDate = new Date(dueTimestamp).toLocaleString("en-MY", { month: "short", day: "numeric", hour: "2-digit", minute: "2-digit" });
+
+        await dispatchTelegram(
+          botToken,
+          chatId,
+          `⏰ <b>Spectra Urgent Submission Deadline (via Permanent iCal)!</b>\n` +
+          `<b>Course:</b> ${courseCode}\n` +
+          `<b>Task:</b> ${summary.replace(/\s+is due(?:\s+to submit)?$/i, "")}\n` +
+          `<b>Due:</b> ${formattedDate} (${hoursLeft}h remaining)\n` +
+          `🔗 <a href="${url || "https://spectrum.um.edu.my/calendar/view.php"}">Open on SPeCTRUM</a>`
+        );
+
+        alertedDeadlineIds.add(cmid);
+        alertedCount++;
+      }
+    }
+
+    if (env.SPECTRA_KV && alertedCount > 0) {
+      await env.SPECTRA_KV.put("alerted_deadline_ids", JSON.stringify(Array.from(alertedDeadlineIds)));
+    }
+  } catch (err) {
+    console.warn("[Spectra Relay] Error during iCal deadline check:", err);
+  }
+
+  return { checked: 1, alerted: alertedCount };
 }
 
 function parseWorkerDateString(dateStr) {

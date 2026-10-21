@@ -697,5 +697,7 @@ export async function autoDetectSession() {
   return await injectAndScrapeSpectrum(token);
 }
 
-export { getLiveEnrolledCourses, getLiveCourseMaterials, fetchLiveEnrolledCourses, fetchLiveCourseMaterials, fetchLiveAnnouncements } from "./courses.js";
-export { fetchCourseAttendance, fetchLiveAllAttendance, autoSubmitAttendance, scanAndAutoRecordAttendance, formatAttendanceTelegram } from "./attendance.js";
+export { getLiveEnrolledCourses, getLiveCourseMaterials, fetchLiveEnrolledCourses, fetchLiveCourseMaterials, fetchLiveAnnouncements, fetchCourseContentsViaAjax } from "./courses.js";
+export { fetchCourseAttendance, fetchLiveAllAttendance, autoSubmitAttendance, scanAndAutoRecordAttendance, formatAttendanceTelegram, fetchCourseGradebookAttendance } from "./attendance.js";
+export { fetchLiveDeadlines, fetchIcsDeadlines } from "./calendar.js";
+

@@ -413,6 +413,10 @@ function initDOMListeners() {
   if (testNtfyBtn) testNtfyBtn.addEventListener("click", handleTestNtfy);
   document.getElementById("syncCloudNowBtn").addEventListener("click", handleManualCloudSync);
   document.getElementById("saveSettingsBtn").addEventListener("click", handleSaveSettings);
+  const autoDiscoverIcalBtn = document.getElementById("autoDiscoverIcalBtn");
+  if (autoDiscoverIcalBtn) {
+    autoDiscoverIcalBtn.addEventListener("click", handleAutoDiscoverIcal);
+  }
 }
 
 function switchTab(tabName) {
@@ -2677,6 +2681,8 @@ async function handleSaveSettings() {
 
   const ntfyInput = document.getElementById("ntfyTopic");
   const ntfyTopic = ntfyInput ? ntfyInput.value.trim() : "";
+  const icalInput = document.getElementById("calendarIcalUrl");
+  const icalUrl = icalInput ? icalInput.value.trim() : "";
   const cloudEnabled = document.getElementById("cloudRelayToggle").checked;
   const cloudUrl = document.getElementById("cloudRelayUrl").value.trim();
   const cloudSecret = document.getElementById("cloudRelaySecret").value.trim();
@@ -2689,6 +2695,8 @@ async function handleSaveSettings() {
       telegram_bot_token: botToken,
       telegram_chat_id: chatId,
       ntfy_topic: ntfyTopic,
+      calendarIcalUrl: icalUrl,
+      calendar_ical_url: icalUrl,
       cloud_relay_enabled: cloudEnabled,
       cloud_relay_url: cloudUrl,
       cloud_relay_secret: cloudSecret,
@@ -2704,6 +2712,62 @@ async function handleSaveSettings() {
   }
 
   showToast("Settings saved successfully!", "success");
+}
+
+async function handleAutoDiscoverIcal() {
+  const btn = document.getElementById("autoDiscoverIcalBtn");
+  const origText = btn.innerHTML;
+  btn.disabled = true;
+  btn.textContent = "Discovering...";
+
+  try {
+    const res = await fetch("https://spectrum.um.edu.my/calendar/export.php", {
+      credentials: "include"
+    });
+    if (res.ok) {
+      const html = await res.text();
+      const match = html.match(/href=["']([^"']*calendar\/export_execute\.php\?[^"']+)["']/i) ||
+                    html.match(/["'](https?:\/\/[^"']*calendar\/export_execute\.php\?[^"']+)["']/i);
+      if (match) {
+        let icalUrl = match[1];
+        if (!icalUrl.startsWith("http")) {
+          icalUrl = `https://spectrum.um.edu.my/${icalUrl.replace(/^\//, "")}`;
+        }
+        document.getElementById("calendarIcalUrl").value = icalUrl;
+        if (typeof chrome !== "undefined" && chrome.storage?.local) {
+          await chrome.storage.local.set({
+            calendarIcalUrl: icalUrl,
+            calendar_ical_url: icalUrl
+          });
+        }
+        showToast("iCal Calendar Feed URL discovered and saved! ✅", "success");
+        return;
+      }
+
+      const userIdMatch = html.match(/name=["']userid["'][^>]*value=["'](\d+)["']/i) ||
+                          html.match(/value=["'](\d+)["'][^>]*name=["']userid["']/i);
+      const tokenMatch = html.match(/name=["']authtoken["'][^>]*value=["']([a-f0-9]+)["']/i) ||
+                         html.match(/value=["']([a-f0-9]+)["'][^>]*name=["']authtoken["']/i);
+      if (userIdMatch && tokenMatch) {
+        const icalUrl = `https://spectrum.um.edu.my/calendar/export_execute.php?userid=${userIdMatch[1]}&authtoken=${tokenMatch[1]}&preset_what=all&preset_time=recentupcoming`;
+        document.getElementById("calendarIcalUrl").value = icalUrl;
+        if (typeof chrome !== "undefined" && chrome.storage?.local) {
+          await chrome.storage.local.set({
+            calendarIcalUrl: icalUrl,
+            calendar_ical_url: icalUrl
+          });
+        }
+        showToast("iCal Calendar Feed URL generated and saved! ✅", "success");
+        return;
+      }
+    }
+    showToast("Please open the SPeCTRUM Calendar Export page to copy your URL.", "info");
+  } catch (err) {
+    showToast("Could not auto-detect iCal URL. Please log in to SPeCTRUM.", "error");
+  } finally {
+    btn.disabled = false;
+    btn.innerHTML = origText;
+  }
 }
 
 // ===================================================================
@@ -2888,6 +2952,11 @@ async function loadStoredPreferences() {
   if (stored.telegram_chat_id) document.getElementById("telegramChatId").value = stored.telegram_chat_id;
   const ntfyInput = document.getElementById("ntfyTopic");
   if (ntfyInput && stored.ntfy_topic) ntfyInput.value = stored.ntfy_topic;
+
+  const icalInput = document.getElementById("calendarIcalUrl");
+  if (icalInput && (stored.calendarIcalUrl || stored.calendar_ical_url)) {
+    icalInput.value = stored.calendarIcalUrl || stored.calendar_ical_url;
+  }
 
   const cloudEnabled = Boolean(stored.cloud_relay_enabled);
   document.getElementById("cloudRelayToggle").checked = cloudEnabled;
