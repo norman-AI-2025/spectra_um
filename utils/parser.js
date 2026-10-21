@@ -48,11 +48,11 @@ export function calculateUrgency(timestamp) {
 }
 
 /**
- * Format relative remaining time (e.g. "5h 12m left" or "2d left")
+ * Format relative remaining time (e.g. "5h 12m left", "Due in 3 days", or "Due today")
  */
 export function formatTimeRemaining(timestamp) {
   if (!timestamp || isNaN(timestamp)) {
-    return "View Dropbox";
+    return "Open submission (no deadline)";
   }
   const diffMs = timestamp - Date.now();
   if (diffMs <= 0) {
@@ -71,10 +71,34 @@ export function formatTimeRemaining(timestamp) {
   }
   const days = Math.floor(hours / 24);
   const remainingHours = hours % 24;
-  if (days < 7) {
-    return remainingHours > 0 ? `${days}d ${remainingHours}h left` : `${days}d left`;
+  if (days === 1) {
+    return remainingHours > 0 ? `Due in 1 day (${remainingHours}h left)` : `Due in 1 day`;
   }
-  return `${days} days left`;
+  if (days < 7) {
+    return remainingHours > 0 ? `Due in ${days} days (${remainingHours}h left)` : `Due in ${days} days`;
+  }
+  return `Due in ${days} days`;
+}
+
+/**
+ * Formats timestamp into an exact readable calendar string (e.g. "Fri, 31 Oct 2026, 11:59 PM")
+ */
+export function formatDueCalendarDate(timestamp, fallbackText = "") {
+  if (timestamp && !isNaN(Number(timestamp))) {
+    const d = new Date(Number(timestamp));
+    return d.toLocaleString("en-MY", {
+      weekday: "short",
+      day: "numeric",
+      month: "short",
+      year: "numeric",
+      hour: "2-digit",
+      minute: "2-digit"
+    });
+  }
+  if (fallbackText && fallbackText !== "No due date" && fallbackText !== "View Dropbox") {
+    return fallbackText;
+  }
+  return "No deadline specified";
 }
 
 export const MAX_OVERDUE_DAYS = 100;
@@ -537,6 +561,59 @@ export function parseCourseAssignmentsIndex(html, courseCode = "", courseName = 
   }
 
   return assignments;
+}
+
+/**
+ * Parses individual assignment page HTML (/mod/assign/view.php?id=...)
+ * Extracts authoritative due date, time remaining, and submission status from Moodle's native table.
+ */
+export function parseAssignmentViewPage(html) {
+  if (!html) return null;
+  let dueDateText = "";
+  let timeRemainingText = "";
+  let submissionStatus = "";
+
+  if (typeof DOMParser !== "undefined") {
+    try {
+      const doc = new DOMParser().parseFromString(html, "text/html");
+      const rows = doc.querySelectorAll("table.generaltable tr, .submissionstatustable tr");
+      rows.forEach((tr) => {
+        const th = (tr.querySelector("th, td.c0")?.textContent || "").trim().toLowerCase();
+        const td = (tr.querySelector("td.c1, td:last-child")?.textContent || "").trim();
+        if (th.includes("due date") || th.includes("tarikh akhir") || th.includes("closes")) {
+          dueDateText = td;
+        } else if (th.includes("time remaining") || th.includes("masa yang tinggal")) {
+          timeRemainingText = td;
+        } else if (th.includes("submission status") || th.includes("status penghantaran")) {
+          submissionStatus = td;
+        }
+      });
+    } catch (_) {}
+  }
+
+  if (!dueDateText) {
+    const dueMatch = html.match(/(?:Due date|Tarikh akhir)<\/(?:th|td)>\s*<td[^>]*>([\s\S]*?)<\/td>/i);
+    if (dueMatch) dueDateText = dueMatch[1].replace(/<[^>]+>/g, "").trim();
+  }
+  if (!timeRemainingText) {
+    const remMatch = html.match(/(?:Time remaining|Masa yang tinggal)<\/(?:th|td)>\s*<td[^>]*>([\s\S]*?)<\/td>/i);
+    if (remMatch) timeRemainingText = remMatch[1].replace(/<[^>]+>/g, "").trim();
+  }
+  if (!submissionStatus) {
+    const statMatch = html.match(/(?:Submission status|Status penghantaran)<\/(?:th|td)>\s*<td[^>]*>([\s\S]*?)<\/td>/i);
+    if (statMatch) submissionStatus = statMatch[1].replace(/<[^>]+>/g, "").trim();
+  }
+
+  const dueTimestamp = dueDateText ? parseMoodleDateString(dueDateText) : null;
+  const isSubmitted = /\b(?:submitted|grading|graded|dihantar|selesai|dinilai|diserahkan)\b/i.test(submissionStatus) && !/\b(?:no attempt|not submitted|belum|tiada|tidak|draft|draf)\b/i.test(submissionStatus);
+
+  return {
+    dueDateText,
+    dueTimestamp,
+    timeRemainingText,
+    submissionStatus,
+    isSubmitted
+  };
 }
 
 /**
@@ -2069,8 +2146,25 @@ export function parseCourseContentsModules(sectionsJson, courseCode = "", course
             }
           }
           if (!dueTimestamp && mod.dates.length > 0) {
-            const cand = mod.dates.find(d => d.timestamp && typeof d.timestamp === "number");
-            if (cand) dueTimestamp = cand.timestamp * 1000;
+            const cand = mod.dates.find(d => d.timestamp && !isNaN(Number(d.timestamp)));
+            if (cand) dueTimestamp = Number(cand.timestamp) * 1000;
+          }
+        }
+
+        // Check customdata or description if dates array was omitted by Moodle AJAX
+        if (!dueTimestamp && mod.customdata) {
+          try {
+            const cd = typeof mod.customdata === "string" ? JSON.parse(mod.customdata) : mod.customdata;
+            if (cd?.duedate) dueTimestamp = Number(cd.duedate) * 1000;
+            else if (cd?.timeclose) dueTimestamp = Number(cd.timeclose) * 1000;
+            else if (cd?.cutoffdate) dueTimestamp = Number(cd.cutoffdate) * 1000;
+          } catch (_) {}
+        }
+        if (!dueTimestamp && mod.description) {
+          const m = String(mod.description).match(/(?:due|closes|tarikh akhir|tutup)[\s:]*[\r\n\s]*([0-9A-Za-z\s,.:\-]+(?:am|pm|[\d]{2,4}))/i);
+          if (m) {
+            const parsedTs = parseMoodleDateString(m[1].trim());
+            if (parsedTs) dueTimestamp = parsedTs;
           }
         }
 

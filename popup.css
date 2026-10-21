@@ -717,6 +717,123 @@ body.spectra-body {
   color: var(--text-secondary);
 }
 
+/* Deadline Due Date & Countdown Meta Row */
+.deadline-due-meta {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  background: var(--surface-subtle);
+  border: 1px solid rgba(226, 232, 240, 0.85);
+  border-radius: var(--radius-sm);
+  padding: 6px 9px;
+  margin: 1px 0;
+  font-size: 11px;
+}
+
+.due-calendar-info {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  color: var(--text-primary);
+  font-weight: 500;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.due-calendar-icon {
+  color: var(--accent-indigo);
+  flex-shrink: 0;
+}
+
+.due-date-label {
+  color: var(--text-muted);
+  font-weight: 700;
+  text-transform: uppercase;
+  font-size: 9.5px;
+  letter-spacing: 0.3px;
+  flex-shrink: 0;
+}
+
+.due-date-value {
+  color: var(--text-primary);
+  font-weight: 600;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.due-days-pill {
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+  font-size: 10px;
+  font-weight: 700;
+  padding: 2px 7px;
+  border-radius: var(--radius-full);
+  white-space: nowrap;
+  flex-shrink: 0;
+  letter-spacing: 0.2px;
+}
+
+.due-days-pill.pill-urgent {
+  background: var(--accent-rose-subtle);
+  color: var(--accent-rose);
+  border: 1px solid var(--accent-rose-border);
+}
+
+.due-days-pill.pill-warning {
+  background: var(--accent-amber-subtle);
+  color: #B45309;
+  border: 1px solid var(--accent-amber-border);
+}
+
+.due-days-pill.pill-normal {
+  background: var(--accent-indigo-subtle);
+  color: var(--accent-indigo);
+  border: 1px solid rgba(99, 102, 241, 0.2);
+}
+
+.due-days-pill.pill-open {
+  background: #FFFFFF;
+  color: var(--text-muted);
+  border: 1px solid var(--border-card);
+}
+
+.due-days-pill.pill-completed {
+  background: var(--accent-emerald-subtle);
+  color: var(--accent-emerald);
+  border: 1px solid var(--accent-emerald-border);
+}
+
+.submission-status-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  font-size: 11px;
+  font-weight: 500;
+  color: var(--text-secondary);
+}
+
+.submission-status-chip .status-dot {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: var(--text-muted);
+  flex-shrink: 0;
+}
+
+.submission-status-chip.is-submitted .status-dot {
+  background: var(--accent-emerald);
+}
+
+.submission-status-chip.is-submitted {
+  color: var(--accent-emerald);
+  font-weight: 600;
+}
+
 .countdown-text {
   font-weight: 700;
   color: var(--accent-rose);

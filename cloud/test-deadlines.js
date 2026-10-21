@@ -21,6 +21,8 @@ import {
   isRespectiveOccurrence,
   calculateUrgency,
   formatTimeRemaining,
+  formatDueCalendarDate,
+  parseAssignmentViewPage,
   cleanMoodleTitle
 } from "../utils/parser.js";
 import { fetchLiveDeadlines, normalizeHydratedDeadlines } from "../utils/calendar.js";
@@ -579,6 +581,42 @@ assert(realAssignment.courseCode === "WIX2002", "Preserves genuine course code W
 
 assert(!sanitizedHydration.some(d => d.id === "scraped-0-Assignment"), "Synthetic ghost 'scraped-0-Assignment' is eliminated");
 assert(!sanitizedHydration.some(d => d.courseCode === "UM" && d.url.includes("/my/")), "Fake 'UM' ghost pointing to /my/ is eliminated");
+
+// Test 5F: parseAssignmentViewPage & formatDueCalendarDate
+console.log("\n--- Sub-test 5F: Direct Assignment Page & Date Formatting ---");
+const mockAssignViewHtml = `
+<table class="generaltable">
+  <tr>
+    <th class="c0">Submission status</th>
+    <td class="c1">Submitted for grading</td>
+  </tr>
+  <tr>
+    <th class="c0">Grading status</th>
+    <td class="c1">Not graded</td>
+  </tr>
+  <tr>
+    <th class="c0">Due date</th>
+    <td class="c1">Friday, 31 October 2026, 11:59 PM</td>
+  </tr>
+  <tr>
+    <th class="c0">Time remaining</th>
+    <td class="c1">4 days 2 hours</td>
+  </tr>
+</table>
+`;
+const parsedPage = parseAssignmentViewPage(mockAssignViewHtml);
+assert(Boolean(parsedPage), "parseAssignmentViewPage returns parsed object");
+assert(parsedPage.dueTimestamp !== null, "parseAssignmentViewPage extracted dueTimestamp");
+assert(parsedPage.isSubmitted === true, "parseAssignmentViewPage detected submitted status");
+assert(parsedPage.timeRemainingText === "4 days 2 hours", "Extracted native time remaining text");
+
+const testDate = new Date(2026, 9, 31, 23, 59).getTime(); // 31 Oct 2026 23:59
+const formattedDateStr = formatDueCalendarDate(testDate);
+assert(formattedDateStr.includes("Oct") && formattedDateStr.includes("31"), `Formatted date contains '31' and 'Oct' (got '${formattedDateStr}')`);
+
+const threeDaysAway = Date.now() + (3 * 86400000) + 3600000;
+const relStr = formatTimeRemaining(threeDaysAway);
+assert(relStr.includes("Due in 3 days"), `formatTimeRemaining returns 'Due in 3 days' (got '${relStr}')`);
 
 console.log(`\n=== All Deadlines Tests Finished: ${passed} passed, ${failed} failed ===`);
 if (failed > 0) {

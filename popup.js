@@ -26,6 +26,7 @@ import { fetchLiveDeadlines, normalizeHydratedDeadlines } from "./utils/calendar
 
 import {
   formatTimeRemaining,
+  formatDueCalendarDate,
   calculateAcademicWeek,
   cleanMoodleTitle,
   extractCourseCode,
@@ -1322,6 +1323,7 @@ function renderDeadlines() {
     }
 
     const timeRemainingStr = formatTimeRemaining(item.dueTimestamp);
+    const formattedDueDate = formatDueCalendarDate(item.dueTimestamp, item.formattedTime);
     const isTgSent = state.telegramSentDeadlineIds.has(String(item.id)) || item.telegramSent;
     const tgSentBadge = isTgSent ? `<span class="telegram-sent-tag" title="Alert flagged as sent to Telegram">✈️ Telegram Sent</span>` : "";
 
@@ -1329,6 +1331,39 @@ function renderDeadlines() {
     const typeBadge = `<span class="activity-type-tag type-${item.type || "assign"}">${typeLabel}</span>`;
     const studentOcc = state.courseOccurrences[item.courseCode] || state.courseOccurrences[item.courseId] || "";
     const occBadge = studentOcc ? `<span class="occ-target-tag" title="Filtered for your registered occurrence">${escapeHtml(studentOcc)}</span>` : "";
+
+    let daysLeftBadge = "";
+    if (item.isCompleted) {
+      daysLeftBadge = `<span class="due-days-pill pill-completed">✔ Completed</span>`;
+    } else if (item.dueTimestamp) {
+      const diffMs = item.dueTimestamp - Date.now();
+      if (diffMs <= 0) {
+        const ovDays = Math.floor(Math.abs(diffMs) / 86400000);
+        daysLeftBadge = `<span class="due-days-pill pill-urgent">⚠️ Overdue ${ovDays > 0 ? `${ovDays}d` : ""}</span>`;
+      } else {
+        const diffHrs = diffMs / 3600000;
+        const diffDays = Math.floor(diffHrs / 24);
+        if (diffHrs < 24) {
+          const h = Math.floor(diffHrs);
+          const m = Math.floor((diffMs % 3600000) / 60000);
+          daysLeftBadge = `<span class="due-days-pill pill-urgent countdown-pill" data-timestamp="${item.dueTimestamp}">⚡ ${h}h ${m}m left</span>`;
+        } else if (diffDays === 1) {
+          daysLeftBadge = `<span class="due-days-pill pill-warning countdown-pill" data-timestamp="${item.dueTimestamp}">⏳ Due in 1 day</span>`;
+        } else {
+          daysLeftBadge = `<span class="due-days-pill ${diffDays <= 7 ? "pill-warning" : "pill-normal"} countdown-pill" data-timestamp="${item.dueTimestamp}">⏳ Due in ${diffDays} days</span>`;
+        }
+      }
+    } else {
+      daysLeftBadge = `<span class="due-days-pill pill-open">Open</span>`;
+    }
+
+    const isSubmitted = item.isSubmittedOnSpectrum || item.isCompleted;
+    const submissionChipHtml = `
+      <div class="submission-status-chip ${isSubmitted ? "is-submitted" : "is-pending"}">
+        <span class="status-dot"></span>
+        <span>${escapeHtml(isSubmitted ? (item.submissionStatus || "Submitted") : (item.submissionStatus || "No submission"))}</span>
+      </div>
+    `;
 
     card.innerHTML = `
       <div class="deadline-card-header">
@@ -1344,15 +1379,19 @@ function renderDeadlines() {
 
       <div class="assignment-title">${escapeHtml(item.title)}</div>
 
-      <div class="deadline-card-footer">
-        <div class="deadline-time-info">
-          <svg viewBox="0 0 20 20" width="13" height="13" fill="currentColor" style="opacity:0.6;">
-            <path fill-rule="evenodd" d="M10 18a8 8 0 100-16 8 8 0 000 16zm1-12a1 1 0 10-2 0v4a1 1 0 00.293.707l2.828 2.829a1 1 0 101.415-1.415L11 9.586V6z" clip-rule="evenodd"/>
+      <div class="deadline-due-meta">
+        <div class="due-calendar-info" title="Submission deadline">
+          <svg viewBox="0 0 20 20" width="13" height="13" fill="currentColor" class="due-calendar-icon">
+            <path fill-rule="evenodd" d="M6 2a1 1 0 00-1 1v1H4a2 2 0 00-2 2v10a2 2 0 002 2h12a2 2 0 002-2V6a2 2 0 00-2-2h-1V3a1 1 0 10-2 0v1H7V3a1 1 0 00-1-1zm0 5a1 1 0 000 2h8a1 1 0 100-2H6z" clip-rule="evenodd"/>
           </svg>
-          <span class="${item.urgency === "urgent" && !item.isCompleted ? "countdown-text" : ""}" data-timestamp="${item.dueTimestamp}">
-            ${escapeHtml(timeRemainingStr)}
-          </span>
+          <span class="due-date-label">Due:</span>
+          <span class="due-date-value">${escapeHtml(formattedDueDate)}</span>
         </div>
+        ${daysLeftBadge}
+      </div>
+
+      <div class="deadline-card-footer">
+        ${submissionChipHtml}
 
         <div class="card-actions">
           <a href="${escapeHtml(item.url)}" target="_blank" class="link-launch-btn" title="Open in SPeCTRUM">

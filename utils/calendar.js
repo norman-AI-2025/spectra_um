@@ -18,6 +18,7 @@ import {
   isOverdueMoreThan100Days,
   parseMoodleIcsCalendar,
   parseCourseContentsModules,
+  parseAssignmentViewPage,
   pMap
 } from "./parser.js";
 import { InvalidSessionError, getSessionContext } from "./moodleApi.js";
@@ -224,6 +225,12 @@ export async function fetchLiveDeadlines(sesskey, courses = [], occurrencesMap =
             const key = getActivityKey(item);
             if (deadlinesMap.has(key)) {
               const existing = deadlinesMap.get(key);
+              if (item.dueTimestamp) {
+                existing.dueTimestamp = item.dueTimestamp;
+                existing.dueDate = item.dueDate;
+                existing.formattedTime = item.formattedTime;
+                existing.urgency = item.urgency;
+              }
               if (item.isSubmittedOnSpectrum) {
                 existing.isSubmittedOnSpectrum = true;
                 existing.isCompleted = true;
@@ -287,6 +294,44 @@ export async function fetchLiveDeadlines(sesskey, courses = [], occurrencesMap =
         }
       }
     }, 2);
+  }
+
+  // -------------------------------------------------------------
+  // 2B. Direct assignment view inspection for any tasks still lacking due dates
+  // -------------------------------------------------------------
+  const missingDueItems = Array.from(deadlinesMap.values()).filter(
+    (item) => !item.dueTimestamp && item.url && item.url.includes("mod/assign/view.php")
+  );
+  if (missingDueItems.length > 0) {
+    await pMap(missingDueItems.slice(0, 8), async (item) => {
+      try {
+        const ctrl = typeof AbortController !== "undefined" ? new AbortController() : null;
+        const tid = ctrl ? setTimeout(() => ctrl.abort(), 12000) : null;
+        let res;
+        try {
+          res = await fetch(item.url, { credentials: "include", signal: ctrl?.signal });
+        } finally {
+          if (tid) clearTimeout(tid);
+        }
+        if (res && res.ok) {
+          const pageHtml = await res.text();
+          const details = parseAssignmentViewPage(pageHtml);
+          if (details) {
+            if (details.dueTimestamp) {
+              item.dueTimestamp = details.dueTimestamp;
+              item.dueDate = new Date(details.dueTimestamp).toISOString();
+              item.formattedTime = details.dueDateText;
+              item.urgency = calculateUrgency(details.dueTimestamp);
+            }
+            if (details.isSubmitted) {
+              item.isSubmittedOnSpectrum = true;
+              item.isCompleted = true;
+              item.submissionStatus = details.submissionStatus || "Submitted";
+            }
+          }
+        }
+      } catch (_) {}
+    }, 4);
   }
 
   // -------------------------------------------------------------
