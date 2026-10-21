@@ -96,6 +96,10 @@ export function formatDueCalendarDate(timestamp, fallbackText = "") {
     });
   }
   if (fallbackText && fallbackText !== "No due date" && fallbackText !== "View Dropbox") {
+    const parsed = parseMoodleDateString(fallbackText);
+    if (parsed) {
+      return formatDueCalendarDate(parsed);
+    }
     return fallbackText;
   }
   return "No deadline specified";
@@ -311,17 +315,24 @@ export function parseMoodleDateString(dateStr) {
   if (!dateStr) return null;
   const now = new Date();
   const raw = String(dateStr).replace(/\u00a0/g, " ").trim();
-  const lower = raw.toLowerCase();
+
+  // Strip common Moodle prefix labels like "Closed date:", "Close date:", "Quiz closes:", "Cut-off date:", "Due date:", "Tarikh tutup:", etc.
+  const stripped = raw.replace(
+    /^(?:this\s+quiz\s+(?:will\s+)?closes?(?:\s+on)?|this\s+assignment\s+is\s+closed(?:\s+on)?|quiz\s+closes|closes?|closed(?:\s+on)?|closed?\s*date|close\s*date|due\s*date|due|cut-?off\s*date|cutoff\s*date|tarikh\s*(?:tutup|akhir)|ditutup\s*(?:pada)?)[\s:]*/i,
+    ""
+  ).trim();
+
+  const lower = stripped.toLowerCase();
 
   // If text indicates no due date
-  if (lower.includes("no due date") || lower.includes("tiada tarikh akhir") || raw === "-") {
+  if (lower.includes("no due date") || lower.includes("tiada tarikh akhir") || stripped === "-" || !stripped) {
     return null;
   }
 
   // Extract time if present
   let hours = 23;
   let minutes = 59;
-  const timeMatch = raw.match(/(\d{1,2})[:.](\d{2})(?:\s*([ap]m))?/i);
+  const timeMatch = stripped.match(/(\d{1,2})[:.](\d{2})(?:\s*([ap]m))?/i);
   if (timeMatch) {
     let h = parseInt(timeMatch[1], 10);
     const m = parseInt(timeMatch[2], 10);
@@ -348,7 +359,7 @@ export function parseMoodleDateString(dateStr) {
   }
 
   // Normalize Malay day names and month names
-  let cleaned = raw
+  let cleaned = stripped
     .replace(/\b(isnin|selasa|rabu|khamis|jumaat|sabtu|ahad)\b/gi, "")
     .replace(/\b(monday|tuesday|wednesday|thursday|friday|saturday|sunday)\b/gi, "")
     .replace(/\b(mon|tue|wed|thu|fri|sat|sun)\b/gi, "")
@@ -396,8 +407,21 @@ export function parseMoodleDateString(dateStr) {
     }
   }
 
+  // 2B. Try Month DD YYYY (e.g. "October 25, 2024" or "Oct 25 2024")
+  const monthFirstMatch = cleaned.match(/([A-Za-z]+)\s+(\d{1,2})(?:[,\s]+(\d{2,4}))?/);
+  if (monthFirstMatch) {
+    const monStr = monthFirstMatch[1].slice(0, 3).toLowerCase();
+    if (monthNames[monStr] !== undefined) {
+      const day = parseInt(monthFirstMatch[2], 10);
+      let year = monthFirstMatch[3] ? parseInt(monthFirstMatch[3], 10) : now.getFullYear();
+      if (year < 100) year += 2000;
+      const d = new Date(year, monthNames[monStr], day, hours, minutes, 0, 0);
+      if (!isNaN(d.getTime())) return d.getTime();
+    }
+  }
+
   // 3. Fallback to standard Date parse
-  const cleanStr = raw.replace(/^[A-Za-z]+,\s*/, "");
+  const cleanStr = stripped.replace(/^[A-Za-z]+,\s*/, "");
   const directDate = new Date(cleanStr);
   if (!isNaN(directDate.getTime())) {
     if (directDate.getFullYear() < 2000) {
@@ -478,6 +502,7 @@ export function parseCourseAssignmentsIndex(html, courseCode = "", courseName = 
           dueDate: dueTimestamp ? new Date(dueTimestamp).toISOString() : "",
           dueTimestamp,
           formattedTime: dueDateText || (dueTimestamp ? new Date(dueTimestamp).toLocaleString("en-MY", { month: "short", day: "numeric", hour: "2-digit", minute: "2-digit" }) : "No due date"),
+          dateLabel: /close|tutup/i.test(dueDateText) ? "Closes" : (/cut-?off/i.test(dueDateText) ? "Cut-off" : "Due"),
           url,
           type: "assign",
           submissionStatus: submissionStatusText || (isSubmitted ? "Submitted" : "No submission"),
@@ -550,6 +575,7 @@ export function parseCourseAssignmentsIndex(html, courseCode = "", courseName = 
       dueDate: dueTimestamp ? new Date(dueTimestamp).toISOString() : "",
       dueTimestamp,
       formattedTime: dueDateText || (dueTimestamp ? new Date(dueTimestamp).toLocaleString("en-MY", { month: "short", day: "numeric", hour: "2-digit", minute: "2-digit" }) : "No due date"),
+      dateLabel: /close|tutup/i.test(dueDateText) ? "Closes" : (/cut-?off/i.test(dueDateText) ? "Cut-off" : "Due"),
       url,
       type: "assign",
       submissionStatus: submissionStatusText || (isSubmitted ? "Submitted" : "No submission"),
@@ -564,36 +590,259 @@ export function parseCourseAssignmentsIndex(html, courseCode = "", courseName = 
 }
 
 /**
- * Parses individual assignment page HTML (/mod/assign/view.php?id=...)
- * Extracts authoritative due date, time remaining, and submission status from Moodle's native table.
+ * Parses SPeCTRUM /mod/quiz/index.php?id={courseId}
+ * Extracts all quiz activities, their closed/due dates, and submission/attempt status.
+ */
+export function parseCourseQuizzesIndex(html, courseCode = "", courseName = "", studentOccurrence = "") {
+  if (!html) return [];
+  const quizzes = [];
+
+  // 1. DOMParser Method (Browser / Extensions)
+  if (typeof DOMParser !== "undefined") {
+    try {
+      const parser = new DOMParser();
+      const doc = parser.parseFromString(html, "text/html");
+
+      const rows = doc.querySelectorAll("table.generaltable tr, table.mod_index tr");
+      rows.forEach((tr, idx) => {
+        const linkEl = tr.querySelector("a[href*='mod/quiz/view.php']");
+        if (!linkEl) return;
+
+        const cells = tr.querySelectorAll("td");
+        if (cells.length < 2) return;
+
+        const rawUrl = linkEl.getAttribute("href") || "";
+        const url = rawUrl.startsWith("http") ? rawUrl : `https://spectrum.um.edu.my/${rawUrl.replace(/^\//, "")}`;
+        const idMatch = url.match(/id=(\d+)/);
+        const cmid = idMatch ? idMatch[1] : `quiz_${idx}`;
+
+        const rawTitle = linkEl.textContent.trim();
+        const title = cleanMoodleTitle(rawTitle);
+
+        // Strictly exclude attendance items
+        if (isAttendanceActivity({ title, url, type: "quiz" })) return;
+
+        // Filter by occurrence
+        const matchesOcc = isRespectiveOccurrence("", studentOccurrence, title);
+        if (!matchesOcc) return;
+
+        let closeDateText = "";
+        let submissionStatusText = "";
+
+        cells.forEach((td) => {
+          if (td.contains(linkEl)) return; // Name cell
+          const text = td.textContent.trim();
+          if (/\b(?:submitted|grading|graded|completed|selesai|dihantar|dinilai|diserahkan)\b/i.test(text)) {
+            submissionStatusText = text;
+          } else if (!closeDateText && (/\d{1,2}[:.]\d{2}/.test(text) || /\b(?:jan|feb|mar|apr|may|jun|jul|aug|sep|oct|nov|dec|okt|mac|mei|ogo|dis)\b/i.test(text) || /\d{1,2}[\/\.\-]\d{1,2}/.test(text))) {
+            closeDateText = text;
+          } else if (!submissionStatusText && text && !/^(?:week|minggu|topic|topik)\s*\d*$/i.test(text) && !/^\d+$/.test(text) && text !== "-") {
+            submissionStatusText = text;
+          }
+        });
+
+        const dueTimestamp = closeDateText ? parseMoodleDateString(closeDateText) : null;
+
+        // Strictly exclude submissions overdue by more than 100 days
+        if (isOverdueMoreThan100Days(dueTimestamp)) return;
+
+        const isSubmitted = (
+          /\b(?:submitted|completed|graded|grading|selesai|dihantar|dinilai|finished|review)\b/i.test(submissionStatusText) ||
+          /\d+(?:\.\d+)?\s*\/\s*\d+/.test(submissionStatusText) ||
+          /\d+%\s*$/.test(submissionStatusText)
+        ) && !/\b(?:no attempt|not submitted|belum|tiada|tidak|draft|draf)\b/i.test(submissionStatusText);
+
+        quizzes.push({
+          id: cmid,
+          cmid,
+          title,
+          courseCode: courseCode || "Course",
+          courseName: courseName || courseCode,
+          dueDate: dueTimestamp ? new Date(dueTimestamp).toISOString() : "",
+          dueTimestamp,
+          formattedTime: closeDateText || (dueTimestamp ? new Date(dueTimestamp).toLocaleString("en-MY", { month: "short", day: "numeric", hour: "2-digit", minute: "2-digit" }) : "No due date"),
+          dateLabel: "Closes",
+          url,
+          type: "quiz",
+          submissionStatus: submissionStatusText || (isSubmitted ? "Submitted" : "No submission"),
+          isSubmittedOnSpectrum: isSubmitted,
+          isCompleted: isSubmitted,
+          urgency: dueTimestamp ? calculateUrgency(dueTimestamp) : "upcoming",
+          matchesOccurrence: true
+        });
+      });
+
+      if (quizzes.length > 0) return quizzes;
+    } catch (e) {
+      console.warn("[Spectra Parser] DOM parseCourseQuizzesIndex error:", e);
+    }
+  }
+
+  // 2. Regex Method Fallback (Node / Serverless / JSC)
+  const rowRegex = /<tr[^>]*>([\s\S]*?)<\/tr>/gi;
+  let rowMatch;
+  let idx = 0;
+  while ((rowMatch = rowRegex.exec(html)) !== null) {
+    const rowHtml = rowMatch[1];
+    const linkMatch = rowHtml.match(/<a[^>]+href=["']([^"']*mod\/quiz\/view\.php\?id=(\d+)[^"']*)["'][^>]*>([\s\S]*?)<\/a>/i);
+    if (!linkMatch) continue;
+
+    const rawUrl = linkMatch[1];
+    const cmid = linkMatch[2];
+    const rawTitle = linkMatch[3].replace(/<[^>]+>/g, "").trim();
+    const title = cleanMoodleTitle(rawTitle);
+    const url = rawUrl.startsWith("http") ? rawUrl : `https://spectrum.um.edu.my/${rawUrl.replace(/^\//, "")}`;
+
+    if (isAttendanceActivity({ title, url, type: "quiz" })) continue;
+
+    const matchesOcc = isRespectiveOccurrence("", studentOccurrence, title);
+    if (!matchesOcc) continue;
+
+    const cellRegex = /<td[^>]*>([\s\S]*?)<\/td>/gi;
+    const cells = [];
+    let cellM;
+    while ((cellM = cellRegex.exec(rowHtml)) !== null) {
+      cells.push(cellM[1].replace(/<[^>]+>/g, "").trim());
+    }
+
+    let closeDateText = "";
+    let submissionStatusText = "";
+    for (const c of cells) {
+      if (c.includes(rawTitle)) continue;
+      if (/\b(?:submitted|grading|graded|completed|selesai|dihantar|dinilai|diserahkan)\b/i.test(c)) {
+        submissionStatusText = c;
+      } else if (!closeDateText && (/\d{1,2}[:.]\d{2}/.test(c) || /\b(?:jan|feb|mar|apr|may|jun|jul|aug|sep|oct|nov|dec|okt|mac|mei|ogo|dis)\b/i.test(c) || /\d{1,2}[\/\.\-]\d{1,2}/.test(c))) {
+        closeDateText = c;
+      } else if (!submissionStatusText && c && !/^(?:week|minggu|topic|topik)\s*\d*$/i.test(c) && !/^\d+$/.test(c) && c !== "-") {
+        submissionStatusText = c;
+      }
+    }
+
+    const dueTimestamp = closeDateText ? parseMoodleDateString(closeDateText) : null;
+    if (isOverdueMoreThan100Days(dueTimestamp)) continue;
+
+    const isSubmitted = (
+      /\b(?:submitted|completed|graded|grading|selesai|dihantar|dinilai|finished|review)\b/i.test(submissionStatusText) ||
+      /\d+(?:\.\d+)?\s*\/\s*\d+/.test(submissionStatusText) ||
+      /\d+%\s*$/.test(submissionStatusText)
+    ) && !/\b(?:no attempt|not submitted|belum|tiada|tidak|draft|draf)\b/i.test(submissionStatusText);
+
+    quizzes.push({
+      id: cmid,
+      cmid,
+      title,
+      courseCode: courseCode || "Course",
+      courseName: courseName || courseCode,
+      dueDate: dueTimestamp ? new Date(dueTimestamp).toISOString() : "",
+      dueTimestamp,
+      formattedTime: closeDateText || (dueTimestamp ? new Date(dueTimestamp).toLocaleString("en-MY", { month: "short", day: "numeric", hour: "2-digit", minute: "2-digit" }) : "No due date"),
+      dateLabel: "Closes",
+      url,
+      type: "quiz",
+      submissionStatus: submissionStatusText || (isSubmitted ? "Submitted" : "No submission"),
+      isSubmittedOnSpectrum: isSubmitted,
+      isCompleted: isSubmitted,
+      urgency: dueTimestamp ? calculateUrgency(dueTimestamp) : "upcoming",
+      matchesOccurrence: true
+    });
+  }
+
+  return quizzes;
+}
+
+/**
+ * Parses individual assignment/quiz page HTML (/mod/assign/view.php?id=..., /mod/quiz/view.php?id=...)
+ * Extracts authoritative due date, closed date, time remaining, and submission status from Moodle's native table or info boxes.
  */
 export function parseAssignmentViewPage(html) {
   if (!html) return null;
   let dueDateText = "";
+  let dateLabel = "Due";
   let timeRemainingText = "";
   let submissionStatus = "";
 
   if (typeof DOMParser !== "undefined") {
     try {
       const doc = new DOMParser().parseFromString(html, "text/html");
-      const rows = doc.querySelectorAll("table.generaltable tr, .submissionstatustable tr");
+      const rows = doc.querySelectorAll("table.generaltable tr, .submissionstatustable tr, table tr");
       rows.forEach((tr) => {
-        const th = (tr.querySelector("th, td.c0")?.textContent || "").trim().toLowerCase();
+        const th = (tr.querySelector("th, td.c0, td:first-child")?.textContent || "").trim().toLowerCase();
         const td = (tr.querySelector("td.c1, td:last-child")?.textContent || "").trim();
-        if (th.includes("due date") || th.includes("tarikh akhir") || th.includes("closes")) {
-          dueDateText = td;
+        if (
+          th.includes("due date") ||
+          th.includes("closed date") ||
+          th.includes("close date") ||
+          th.includes("closed on") ||
+          th.includes("closed") ||
+          th.includes("closes") ||
+          th.includes("quiz closes") ||
+          th.includes("cut-off date") ||
+          th.includes("cutoff date") ||
+          th.includes("tarikh akhir") ||
+          th.includes("tarikh tutup") ||
+          th.includes("ditutup pada") ||
+          th.includes("ditutup")
+        ) {
+          if (!dueDateText || th.includes("closed date") || th.includes("close") || th.includes("cut-off")) {
+            dueDateText = td;
+            if (th.includes("close") || th.includes("tutup")) {
+              dateLabel = "Closes";
+            } else if (th.includes("cut-off") || th.includes("cutoff")) {
+              dateLabel = "Cut-off";
+            } else {
+              dateLabel = "Due";
+            }
+          }
         } else if (th.includes("time remaining") || th.includes("masa yang tinggal")) {
           timeRemainingText = td;
-        } else if (th.includes("submission status") || th.includes("status penghantaran")) {
+        } else if (th.includes("submission status") || th.includes("status penghantaran") || th.includes("status") || th.includes("state")) {
           submissionStatus = td;
         }
       });
+
+      // If not found in table, check quizinfo or activity description boxes
+      if (!dueDateText) {
+        const infoBlocks = doc.querySelectorAll(".quizinfo p, .generalbox p, .box p, .activity-description p, p");
+        for (const p of infoBlocks) {
+          const txt = (p.textContent || "").trim();
+          const match = txt.match(/(?:this\s+quiz\s+(?:will\s+)?close\s+on|this\s+assignment\s+is\s+closed(?:\s+on)?|quiz\s+closes|closed?\s*date|close\s*date|closed\s+on|cut-?off\s*date|due\s*date|tarikh\s*(?:tutup|akhir)|ditutup\s*(?:pada)?)[\s:]+([^\n\r]+)/i);
+          if (match) {
+            dueDateText = match[1].trim();
+            if (/close|tutup/i.test(match[0])) dateLabel = "Closes";
+            else if (/cut-?off/i.test(match[0])) dateLabel = "Cut-off";
+            else dateLabel = "Due";
+            break;
+          }
+        }
+      }
+
+      // Check quiz attempts summary for submission status
+      if (!submissionStatus && doc.querySelector(".quizattemptsummary, table.quizreviewsummary, table.generaltable")) {
+        const fullText = doc.body?.textContent || "";
+        if (/\b(?:Summary of your previous attempts|Highest grade|Marks|Finished|Submitted|Review|Telah dinilai|Selesai)\b/i.test(fullText)) {
+          submissionStatus = "Submitted";
+        }
+      }
     } catch (_) {}
   }
 
   if (!dueDateText) {
-    const dueMatch = html.match(/(?:Due date|Tarikh akhir)<\/(?:th|td)>\s*<td[^>]*>([\s\S]*?)<\/td>/i);
-    if (dueMatch) dueDateText = dueMatch[1].replace(/<[^>]+>/g, "").trim();
+    const dueMatch = html.match(/(?:Due\s*date|Closed?\s*date|Close\s*date|Closed\s+on|Quiz\s*closes?|Cut-?off\s*date|Tarikh\s*(?:akhir|tutup)|Ditutup\s*(?:pada)?)<\/(?:th|td)>\s*<td[^>]*>([\s\S]*?)<\/td>/i);
+    if (dueMatch) {
+      dueDateText = dueMatch[1].replace(/<[^>]+>/g, "").trim();
+      if (/close|tutup/i.test(dueMatch[0])) dateLabel = "Closes";
+      else if (/cut-?off/i.test(dueMatch[0])) dateLabel = "Cut-off";
+      else dateLabel = "Due";
+    }
+  }
+  if (!dueDateText) {
+    const textMatch = html.match(/(?:this\s+quiz\s+(?:will\s+)?close\s+on|this\s+assignment\s+is\s+closed(?:\s+on)?|quiz\s+closes|closed?\s*date|close\s*date|closed\s+on|cut-?off\s*date|due\s*date|tarikh\s*(?:tutup|akhir)|ditutup\s*(?:pada)?)[\s:]+([0-9A-Za-z\s,.:\-]+(?:am|pm|[\d]{2,4}))/i);
+    if (textMatch) {
+      dueDateText = textMatch[1].replace(/<[^>]+>/g, "").trim();
+      if (/close|tutup/i.test(textMatch[0])) dateLabel = "Closes";
+      else if (/cut-?off/i.test(textMatch[0])) dateLabel = "Cut-off";
+      else dateLabel = "Due";
+    }
   }
   if (!timeRemainingText) {
     const remMatch = html.match(/(?:Time remaining|Masa yang tinggal)<\/(?:th|td)>\s*<td[^>]*>([\s\S]*?)<\/td>/i);
@@ -601,15 +850,20 @@ export function parseAssignmentViewPage(html) {
   }
   if (!submissionStatus) {
     const statMatch = html.match(/(?:Submission status|Status penghantaran)<\/(?:th|td)>\s*<td[^>]*>([\s\S]*?)<\/td>/i);
-    if (statMatch) submissionStatus = statMatch[1].replace(/<[^>]+>/g, "").trim();
+    if (statMatch) {
+      submissionStatus = statMatch[1].replace(/<[^>]+>/g, "").trim();
+    } else if (/\b(?:Summary of your previous attempts|Highest grade|Marks|Finished|Review|Telah dinilai|Selesai)\b/i.test(html)) {
+      submissionStatus = "Submitted";
+    }
   }
 
   const dueTimestamp = dueDateText ? parseMoodleDateString(dueDateText) : null;
-  const isSubmitted = /\b(?:submitted|grading|graded|dihantar|selesai|dinilai|diserahkan)\b/i.test(submissionStatus) && !/\b(?:no attempt|not submitted|belum|tiada|tidak|draft|draf)\b/i.test(submissionStatus);
+  const isSubmitted = /\b(?:submitted|grading|graded|dihantar|selesai|dinilai|diserahkan|finished|completed|review)\b/i.test(submissionStatus) && !/\b(?:no attempt|not submitted|belum|tiada|tidak|draft|draf|in progress)\b/i.test(submissionStatus);
 
   return {
     dueDateText,
     dueTimestamp,
+    dateLabel,
     timeRemainingText,
     submissionStatus,
     isSubmitted
@@ -669,8 +923,8 @@ export function parseCourseViewSubmissions(html, courseCode = "", courseName = "
         if (parentAct) {
           const actText = parentAct.textContent;
 
-          // Due date patterns
-          const dueM = actText.match(/(?:due|closes|tarikh akhir|tutup)[\s:]+([^\n\r<]+)/i);
+          // Due date & closed date patterns
+          const dueM = actText.match(/(?:due(?:\s*date)?|closed?\s*date|close\s*date|quiz\s*closes?|closes?|closed(?:\s+on)?|cut-?off\s*date|cutoff\s*date|tarikh\s*(?:akhir|tutup)|ditutup\s*(?:pada)?|tutup)[\s:]+([^\n\r<]+)/i);
           if (dueM) {
             dueDateText = dueM[1].trim();
           }
@@ -686,6 +940,9 @@ export function parseCourseViewSubmissions(html, courseCode = "", courseName = "
         // Strictly exclude items overdue by more than 100 days
         if (isOverdueMoreThan100Days(dueTimestamp)) return;
 
+        const isClosed = /close|tutup/i.test(dueDateText) || type === "quiz";
+        const dateLabel = isClosed ? "Closes" : (/cut-?off/i.test(dueDateText) ? "Cut-off" : "Due");
+
         submissions.push({
           id: cmid,
           cmid,
@@ -695,6 +952,7 @@ export function parseCourseViewSubmissions(html, courseCode = "", courseName = "
           dueDate: dueTimestamp ? new Date(dueTimestamp).toISOString() : "",
           dueTimestamp,
           formattedTime: dueDateText || (dueTimestamp ? new Date(dueTimestamp).toLocaleString("en-MY", { month: "short", day: "numeric", hour: "2-digit", minute: "2-digit" }) : "View Dropbox"),
+          dateLabel,
           url,
           type,
           submissionStatus: isSubmitted ? "Submitted" : "No submission",
@@ -738,7 +996,7 @@ export function parseCourseViewSubmissions(html, courseCode = "", courseName = "
 
     // Extract nearby text snippet to capture due date and submission status
     const contextSnippet = html.slice(match.index, match.index + 1200);
-    const dueM = contextSnippet.match(/(?:due|closes|tarikh akhir|tutup)[\s:]+([^\n\r<]+)/i);
+    const dueM = contextSnippet.match(/(?:due(?:\s*date)?|closed?\s*date|close\s*date|quiz\s*closes?|closes?|closed(?:\s+on)?|cut-?off\s*date|cutoff\s*date|tarikh\s*(?:akhir|tutup)|ditutup\s*(?:pada)?|tutup)[\s:]+([^\n\r<]+)/i);
     let dueDateText = "";
     if (dueM) {
       dueDateText = dueM[1].trim();
@@ -749,6 +1007,9 @@ export function parseCourseViewSubmissions(html, courseCode = "", courseName = "
     // Strictly exclude items overdue by more than 100 days
     if (isOverdueMoreThan100Days(dueTimestamp)) continue;
 
+    const isClosed = /close|tutup/i.test(dueDateText) || type === "quiz";
+    const dateLabel = isClosed ? "Closes" : (/cut-?off/i.test(dueDateText) ? "Cut-off" : "Due");
+
     submissions.push({
       id: cmid,
       cmid,
@@ -758,6 +1019,7 @@ export function parseCourseViewSubmissions(html, courseCode = "", courseName = "
       dueDate: dueTimestamp ? new Date(dueTimestamp).toISOString() : "",
       dueTimestamp,
       formattedTime: dueDateText || (dueTimestamp ? new Date(dueTimestamp).toLocaleString("en-MY", { month: "short", day: "numeric", hour: "2-digit", minute: "2-digit" }) : "View Dropbox"),
+      dateLabel,
       url,
       type,
       submissionStatus: isSubmitted ? "Submitted" : (dueDateText ? "No submission" : "View on SPeCTRUM"),
@@ -2161,7 +2423,7 @@ export function parseCourseContentsModules(sectionsJson, courseCode = "", course
           } catch (_) {}
         }
         if (!dueTimestamp && mod.description) {
-          const m = String(mod.description).match(/(?:due|closes|tarikh akhir|tutup)[\s:]*[\r\n\s]*([0-9A-Za-z\s,.:\-]+(?:am|pm|[\d]{2,4}))/i);
+          const m = String(mod.description).match(/(?:due\s*date|closed?\s*date|close\s*date|quiz\s*closes?|closes?|closed(?:\s+on)?|cut-?off\s*date|cutoff\s*date|tarikh\s*(?:akhir|tutup)|ditutup\s*(?:pada)?|tutup)[\s:]*[\r\n\s]*([0-9A-Za-z\s,.:\-]+(?:am|pm|[\d]{2,4}))/i);
           if (m) {
             const parsedTs = parseMoodleDateString(m[1].trim());
             if (parsedTs) dueTimestamp = parsedTs;
@@ -2191,6 +2453,8 @@ export function parseCourseContentsModules(sectionsJson, courseCode = "", course
             })
           : "No due date";
 
+        const dateLabel = modType === "quiz" ? "Closes" : "Due";
+
         assignments.push({
           id: cmid,
           cmid,
@@ -2200,6 +2464,7 @@ export function parseCourseContentsModules(sectionsJson, courseCode = "", course
           dueDate: dueTimestamp ? new Date(dueTimestamp).toISOString() : "",
           dueTimestamp,
           formattedTime,
+          dateLabel,
           url,
           type: modType,
           submissionStatus: isSubmitted ? "Submitted" : "No submission",

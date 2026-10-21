@@ -11,6 +11,7 @@ import {
   extractCourseCode,
   calculateUrgency,
   parseCourseAssignmentsIndex,
+  parseCourseQuizzesIndex,
   parseCourseViewSubmissions,
   parseEnrolledCourses,
   isRespectiveOccurrence,
@@ -250,8 +251,55 @@ export async function fetchLiveDeadlines(sesskey, courses = [], occurrencesMap =
         }
       }
 
-      // C. Check /course/view.php?id={courseId} (Scanned top to bottom as fallback if AJAX didn't capture or wasn't available)
-      if (!ajaxSuccess) {
+      // B2. Check /mod/quiz/index.php?id={courseId} (Quizzes overview page for closed dates)
+      try {
+        const quizIndexUrl = `${SPECTRUM_BASE_URL}/mod/quiz/index.php?id=${encodeURIComponent(courseId)}`;
+        const ctrlQ = typeof AbortController !== "undefined" ? new AbortController() : null;
+        const tidQ = ctrlQ ? setTimeout(() => ctrlQ.abort(), 20000) : null;
+        let resQ;
+        try {
+          resQ = await fetch(quizIndexUrl, { credentials: "include", signal: ctrlQ?.signal });
+        } finally {
+          if (tidQ) clearTimeout(tidQ);
+        }
+        if (resQ && resQ.ok) {
+          const html = await resQ.text();
+          const items = parseCourseQuizzesIndex(html, courseCode, courseName, studentOcc);
+          items.forEach((item) => {
+            const key = getActivityKey(item);
+            if (deadlinesMap.has(key)) {
+              const existing = deadlinesMap.get(key);
+              if (item.dueTimestamp) {
+                existing.dueTimestamp = item.dueTimestamp;
+                existing.dueDate = item.dueDate;
+                existing.formattedTime = item.formattedTime;
+                existing.urgency = item.urgency;
+                if (item.dateLabel) existing.dateLabel = item.dateLabel;
+              }
+              if (item.isSubmittedOnSpectrum) {
+                existing.isSubmittedOnSpectrum = true;
+                existing.isCompleted = true;
+                existing.submissionStatus = item.submissionStatus || "Submitted";
+              }
+            } else {
+              if (completedSet.has(String(item.id)) || (item.cmid && completedSet.has(String(item.cmid)))) {
+                item.isCompleted = true;
+              }
+              deadlinesMap.set(key, item);
+            }
+          });
+        }
+      } catch (err) {
+        if (err?.name !== "AbortError" && !err?.message?.includes("aborted")) {
+          console.debug(`[Spectra] Quiz index note for ${courseCode}:`, err?.message || err);
+        }
+      }
+
+      // C. Check /course/view.php?id={courseId} (Scanned top to bottom as fallback if AJAX didn't capture or items are missing due dates)
+      const hasMissingDueForCourse = Array.from(deadlinesMap.values()).some(
+        (it) => (it.courseCode === courseCode || it.courseName === courseName) && !it.dueTimestamp
+      );
+      if (!ajaxSuccess || hasMissingDueForCourse) {
         try {
           const courseViewUrl = `${SPECTRUM_BASE_URL}/course/view.php?id=${encodeURIComponent(courseId)}`;
           const ctrl2 = typeof AbortController !== "undefined" ? new AbortController() : null;
@@ -273,6 +321,7 @@ export async function fetchLiveDeadlines(sesskey, courses = [], occurrencesMap =
                   existing.dueTimestamp = item.dueTimestamp;
                   existing.dueDate = item.dueDate;
                   existing.formattedTime = item.formattedTime;
+                  if (item.dateLabel) existing.dateLabel = item.dateLabel;
                 }
                 if (item.isSubmittedOnSpectrum) {
                   existing.isSubmittedOnSpectrum = true;
@@ -297,10 +346,15 @@ export async function fetchLiveDeadlines(sesskey, courses = [], occurrencesMap =
   }
 
   // -------------------------------------------------------------
-  // 2B. Direct assignment view inspection for any tasks still lacking due dates
+  // 2B. Direct view inspection for any activities still lacking due dates
   // -------------------------------------------------------------
   const missingDueItems = Array.from(deadlinesMap.values()).filter(
-    (item) => !item.dueTimestamp && item.url && item.url.includes("mod/assign/view.php")
+    (item) => !item.dueTimestamp && item.url && (
+      item.url.includes("mod/assign/view.php") ||
+      item.url.includes("mod/quiz/view.php") ||
+      item.url.includes("mod/turnitintooltwo/view.php") ||
+      item.url.includes("mod/workshop/view.php")
+    )
   );
   if (missingDueItems.length > 0) {
     await pMap(missingDueItems.slice(0, 8), async (item) => {
@@ -322,6 +376,7 @@ export async function fetchLiveDeadlines(sesskey, courses = [], occurrencesMap =
               item.dueDate = new Date(details.dueTimestamp).toISOString();
               item.formattedTime = details.dueDateText;
               item.urgency = calculateUrgency(details.dueTimestamp);
+              if (details.dateLabel) item.dateLabel = details.dateLabel;
             }
             if (details.isSubmitted) {
               item.isSubmittedOnSpectrum = true;

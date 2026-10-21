@@ -14,6 +14,7 @@ if (typeof console === "undefined") {
 
 import {
   parseCourseAssignmentsIndex,
+  parseCourseQuizzesIndex,
   parseCourseViewSubmissions,
   parseCalendarEvents,
   isAttendanceActivity,
@@ -23,6 +24,7 @@ import {
   formatTimeRemaining,
   formatDueCalendarDate,
   parseAssignmentViewPage,
+  parseMoodleDateString,
   cleanMoodleTitle
 } from "../utils/parser.js";
 import { fetchLiveDeadlines, normalizeHydratedDeadlines } from "../utils/calendar.js";
@@ -617,6 +619,142 @@ assert(formattedDateStr.includes("Oct") && formattedDateStr.includes("31"), `For
 const threeDaysAway = Date.now() + (3 * 86400000) + 3600000;
 const relStr = formatTimeRemaining(threeDaysAway);
 assert(relStr.includes("Due in 3 days"), `formatTimeRemaining returns 'Due in 3 days' (got '${relStr}')`);
+
+// -------------------------------------------------------------
+// Test 5G: Closed Dates, Cut-off Dates, and Quiz Closes
+// -------------------------------------------------------------
+console.log("\n--- Sub-test 5G: Closed Dates, Cut-off Dates, and Quiz Closes ---");
+
+// 1. Prefix Stripping in parseMoodleDateString
+const prefix1 = parseMoodleDateString("Closed date: Friday, 31 October 2026, 11:59 PM");
+assert(prefix1 !== null, "parseMoodleDateString parses 'Closed date: ...'");
+const d1 = new Date(prefix1);
+assert(d1.getDate() === 31 && d1.getMonth() === 9 && d1.getFullYear() === 2026, "Extracted 31 Oct 2026 from 'Closed date: ...'");
+
+const prefix2 = parseMoodleDateString("Close date: Friday, 31 October 2026, 11:59 PM");
+assert(prefix2 !== null, "parseMoodleDateString parses 'Close date: ...'");
+
+const prefix3 = parseMoodleDateString("This quiz will close on Friday, 31 October 2026, 11:59 PM");
+assert(prefix3 !== null, "parseMoodleDateString parses 'This quiz will close on ...'");
+
+const prefix4 = parseMoodleDateString("Quiz closes: Friday, 31 October 2026, 11:59 PM");
+assert(prefix4 !== null, "parseMoodleDateString parses 'Quiz closes: ...'");
+
+const prefix5 = parseMoodleDateString("Cut-off date: 31/10/2026 23:59");
+assert(prefix5 !== null, "parseMoodleDateString parses 'Cut-off date: 31/10/2026 23:59'");
+
+const prefix6 = parseMoodleDateString("Tarikh tutup: Jumaat, 31 Oktober 2026, 11:59 PM");
+assert(prefix6 !== null, "parseMoodleDateString parses BM 'Tarikh tutup: ...'");
+
+const prefix7 = parseMoodleDateString("Ditutup pada: 31 Okt 2026, 11:59 PM");
+assert(prefix7 !== null, "parseMoodleDateString parses BM 'Ditutup pada: ...'");
+
+// 2. Month-First Date format
+const monthFirstTs = parseMoodleDateString("October 31, 2026, 11:59 PM");
+assert(monthFirstTs !== null, "parseMoodleDateString parses Month-first 'October 31, 2026'");
+const dM = new Date(monthFirstTs);
+assert(dM.getDate() === 31 && dM.getMonth() === 9 && dM.getFullYear() === 2026, "Month-first parsed correct date and month");
+
+// 3. parseAssignmentViewPage with Closed date table
+const mockClosedPageHtml = `
+<table class="generaltable">
+  <tr>
+    <th class="c0">Submission status</th>
+    <td class="c1">No attempt</td>
+  </tr>
+  <tr>
+    <th class="c0">Closed date</th>
+    <td class="c1">Friday, 31 October 2026, 11:59 PM</td>
+  </tr>
+</table>
+`;
+const parsedClosed = parseAssignmentViewPage(mockClosedPageHtml);
+assert(parsedClosed && parsedClosed.dueTimestamp !== null, "parseAssignmentViewPage extracted dueTimestamp from 'Closed date'");
+assert(parsedClosed.dateLabel === "Closes", "parseAssignmentViewPage labeled Closed date as 'Closes'");
+assert(parsedClosed.isSubmitted === false, "parseAssignmentViewPage detected no attempt");
+
+// 4. parseAssignmentViewPage with Cut-off date table
+const mockCutoffPageHtml = `
+<table class="generaltable">
+  <tr>
+    <th class="c0">Cut-off date</th>
+    <td class="c1">Sunday, 15 November 2026, 11:59 PM</td>
+  </tr>
+</table>
+`;
+const parsedCutoff = parseAssignmentViewPage(mockCutoffPageHtml);
+assert(parsedCutoff && parsedCutoff.dueTimestamp !== null, "parseAssignmentViewPage extracted dueTimestamp from 'Cut-off date'");
+assert(parsedCutoff.dateLabel === "Cut-off", "parseAssignmentViewPage labeled Cut-off date as 'Cut-off'");
+
+// 5. parseAssignmentViewPage with Quiz Info Box
+const mockQuizViewHtml = `
+<div class="box py-3 quizinfo">
+  <p>This quiz opened at Monday, 1 October 2026, 8:00 AM</p>
+  <p>This quiz will close on Friday, 31 October 2026, 11:59 PM</p>
+  <p>Time limit: 1 hour</p>
+</div>
+<div class="quizattemptsummary">
+  <h3>Summary of your previous attempts</h3>
+  <table class="generaltable">
+    <tr><td>State: Finished</td><td>Marks: 10.00/10.00</td></tr>
+  </table>
+</div>
+`;
+const parsedQuiz = parseAssignmentViewPage(mockQuizViewHtml);
+assert(parsedQuiz && parsedQuiz.dueTimestamp !== null, "parseAssignmentViewPage extracted dueTimestamp from quizinfo paragraph");
+assert(parsedQuiz.dateLabel === "Closes", "parseAssignmentViewPage labeled quiz closing date as 'Closes'");
+assert(parsedQuiz.isSubmitted === true, "parseAssignmentViewPage detected submitted status from quiz attempt summary");
+
+// 6. parseCourseQuizzesIndex (/mod/quiz/index.php)
+const mockQuizIndexHtml = `
+<table class="generaltable mod_index">
+  <thead>
+    <tr>
+      <th>Topic</th>
+      <th>Name</th>
+      <th>Quiz closes</th>
+      <th>Grade</th>
+    </tr>
+  </thead>
+  <tbody>
+    <tr>
+      <td>Topic 2</td>
+      <td><a href="https://spectrum.um.edu.my/mod/quiz/view.php?id=7001">Quiz 1: Fundamentals (Occ 1)</a></td>
+      <td>Friday, 31 October 2026, 11:59 PM</td>
+      <td>10.00 / 10.00</td>
+    </tr>
+    <tr>
+      <td>Topic 2</td>
+      <td><a href="https://spectrum.um.edu.my/mod/quiz/view.php?id=7002">Quiz 1: Fundamentals (Occ 2)</a></td>
+      <td>Friday, 31 October 2026, 11:59 PM</td>
+      <td>-</td>
+    </tr>
+    <tr>
+      <td>Topic 5</td>
+      <td><a href="https://spectrum.um.edu.my/mod/quiz/view.php?id=7003">Midterm Quiz (Universal)</a></td>
+      <td>Friday, 20 November 2026, 5:00 PM</td>
+      <td>-</td>
+    </tr>
+    <tr>
+      <td>Topic 1</td>
+      <td><a href="https://spectrum.um.edu.my/mod/quiz/view.php?id=7004">Attendance Quiz Week 1</a></td>
+      <td>Monday, 10 October 2026, 10:00 AM</td>
+      <td>-</td>
+    </tr>
+  </tbody>
+</table>
+`;
+const quizzesOcc1 = parseCourseQuizzesIndex(mockQuizIndexHtml, "WIX2002", "Project Management", "Occ 1");
+assert(quizzesOcc1.length === 2, `parseCourseQuizzesIndex filtered occurrence & attendance (expected 2, got ${quizzesOcc1.length})`);
+assert(quizzesOcc1.some(q => q.id === "7001" && q.isSubmittedOnSpectrum === true), "Quiz 1 (Occ 1) is captured and marked Submitted");
+assert(quizzesOcc1.some(q => q.id === "7003" && q.isSubmittedOnSpectrum === false), "Midterm Quiz (Universal) is captured");
+assert(!quizzesOcc1.some(q => q.id === "7002"), "Quiz 1 (Occ 2) strictly excluded for student Occ 1");
+assert(!quizzesOcc1.some(q => q.id === "7004"), "Attendance Quiz strictly excluded");
+assert(quizzesOcc1[0].dateLabel === "Closes", "Quiz items receive dateLabel 'Closes'");
+
+// 7. formatDueCalendarDate fallback parsing
+const formattedFallback = formatDueCalendarDate(null, "Closed date: Friday, 31 October 2026, 11:59 PM");
+assert(formattedFallback.includes("Oct") && formattedFallback.includes("31"), `formatDueCalendarDate parsed fallbackText date (got '${formattedFallback}')`);
 
 console.log(`\n=== All Deadlines Tests Finished: ${passed} passed, ${failed} failed ===`);
 if (failed > 0) {

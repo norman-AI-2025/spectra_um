@@ -1332,6 +1332,11 @@ function renderDeadlines() {
     const studentOcc = state.courseOccurrences[item.courseCode] || state.courseOccurrences[item.courseId] || "";
     const occBadge = studentOcc ? `<span class="occ-target-tag" title="Filtered for your registered occurrence">${escapeHtml(studentOcc)}</span>` : "";
 
+    const isClosingTerm = item.dateLabel === "Closes" || item.type === "quiz";
+    const dateLabelText = item.dateLabel
+      ? `${item.dateLabel}:`
+      : (item.type === "quiz" ? "Closes:" : "Due:");
+
     let daysLeftBadge = "";
     if (item.isCompleted) {
       daysLeftBadge = `<span class="due-days-pill pill-completed">✔ Completed</span>`;
@@ -1339,7 +1344,7 @@ function renderDeadlines() {
       const diffMs = item.dueTimestamp - Date.now();
       if (diffMs <= 0) {
         const ovDays = Math.floor(Math.abs(diffMs) / 86400000);
-        daysLeftBadge = `<span class="due-days-pill pill-urgent">⚠️ Overdue ${ovDays > 0 ? `${ovDays}d` : ""}</span>`;
+        daysLeftBadge = `<span class="due-days-pill pill-urgent">⚠️ ${isClosingTerm ? "Closed" : "Overdue"} ${ovDays > 0 ? `${ovDays}d` : ""}</span>`;
       } else {
         const diffHrs = diffMs / 3600000;
         const diffDays = Math.floor(diffHrs / 24);
@@ -1348,9 +1353,9 @@ function renderDeadlines() {
           const m = Math.floor((diffMs % 3600000) / 60000);
           daysLeftBadge = `<span class="due-days-pill pill-urgent countdown-pill" data-timestamp="${item.dueTimestamp}">⚡ ${h}h ${m}m left</span>`;
         } else if (diffDays === 1) {
-          daysLeftBadge = `<span class="due-days-pill pill-warning countdown-pill" data-timestamp="${item.dueTimestamp}">⏳ Due in 1 day</span>`;
+          daysLeftBadge = `<span class="due-days-pill pill-warning countdown-pill" data-timestamp="${item.dueTimestamp}">⏳ ${isClosingTerm ? "Closes" : "Due"} in 1 day</span>`;
         } else {
-          daysLeftBadge = `<span class="due-days-pill ${diffDays <= 7 ? "pill-warning" : "pill-normal"} countdown-pill" data-timestamp="${item.dueTimestamp}">⏳ Due in ${diffDays} days</span>`;
+          daysLeftBadge = `<span class="due-days-pill ${diffDays <= 7 ? "pill-warning" : "pill-normal"} countdown-pill" data-timestamp="${item.dueTimestamp}">⏳ ${isClosingTerm ? "Closes" : "Due"} in ${diffDays} days</span>`;
         }
       }
     } else {
@@ -1384,7 +1389,7 @@ function renderDeadlines() {
           <svg viewBox="0 0 20 20" width="13" height="13" fill="currentColor" class="due-calendar-icon">
             <path fill-rule="evenodd" d="M6 2a1 1 0 00-1 1v1H4a2 2 0 00-2 2v10a2 2 0 002 2h12a2 2 0 002-2V6a2 2 0 00-2-2h-1V3a1 1 0 10-2 0v1H7V3a1 1 0 00-1-1zm0 5a1 1 0 000 2h8a1 1 0 100-2H6z" clip-rule="evenodd"/>
           </svg>
-          <span class="due-date-label">Due:</span>
+          <span class="due-date-label">${escapeHtml(dateLabelText)}</span>
           <span class="due-date-value">${escapeHtml(formattedDueDate)}</span>
         </div>
         ${daysLeftBadge}
