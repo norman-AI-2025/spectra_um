@@ -200,7 +200,9 @@ export async function fetchLiveDeadlines(sesskey, courses = [], occurrencesMap =
             ajaxSuccess = true;
           }
         } catch (ajaxErr) {
-          console.warn(`[Spectra] core_course_get_contents notice for ${courseCode}:`, ajaxErr);
+          if (ajaxErr?.name !== "AbortError" && !ajaxErr?.message?.includes("aborted")) {
+            console.debug(`[Spectra] core_course_get_contents note for ${courseCode}:`, ajaxErr?.message || ajaxErr);
+          }
         }
       }
 
@@ -208,7 +210,7 @@ export async function fetchLiveDeadlines(sesskey, courses = [], occurrencesMap =
       try {
         const assignIndexUrl = `${SPECTRUM_BASE_URL}/mod/assign/index.php?id=${encodeURIComponent(courseId)}`;
         const ctrl1 = typeof AbortController !== "undefined" ? new AbortController() : null;
-        const tid1 = ctrl1 ? setTimeout(() => ctrl1.abort(), 12000) : null;
+        const tid1 = ctrl1 ? setTimeout(() => ctrl1.abort(), 20000) : null;
         let res;
         try {
           res = await fetch(assignIndexUrl, { credentials: "include", signal: ctrl1?.signal });
@@ -236,7 +238,9 @@ export async function fetchLiveDeadlines(sesskey, courses = [], occurrencesMap =
           });
         }
       } catch (err) {
-        console.warn(`[Spectra] Error checking assign index for ${courseCode}:`, err);
+        if (err?.name !== "AbortError" && !err?.message?.includes("aborted")) {
+          console.debug(`[Spectra] Assign index note for ${courseCode}:`, err?.message || err);
+        }
       }
 
       // C. Check /course/view.php?id={courseId} (Scanned top to bottom as fallback if AJAX didn't capture or wasn't available)
@@ -244,7 +248,7 @@ export async function fetchLiveDeadlines(sesskey, courses = [], occurrencesMap =
         try {
           const courseViewUrl = `${SPECTRUM_BASE_URL}/course/view.php?id=${encodeURIComponent(courseId)}`;
           const ctrl2 = typeof AbortController !== "undefined" ? new AbortController() : null;
-          const tid2 = ctrl2 ? setTimeout(() => ctrl2.abort(), 12000) : null;
+          const tid2 = ctrl2 ? setTimeout(() => ctrl2.abort(), 20000) : null;
           let res;
           try {
             res = await fetch(courseViewUrl, { credentials: "include", signal: ctrl2?.signal });
@@ -277,7 +281,9 @@ export async function fetchLiveDeadlines(sesskey, courses = [], occurrencesMap =
             });
           }
         } catch (err) {
-          console.warn(`[Spectra] Error checking course view submissions for ${courseCode}:`, err);
+          if (err?.name !== "AbortError" && !err?.message?.includes("aborted")) {
+            console.debug(`[Spectra] Course view submissions note for ${courseCode}:`, err?.message || err);
+          }
         }
       }
     }, 2);

@@ -258,7 +258,9 @@ export async function fetchLiveAnnouncements(courses = [], sesskey = null) {
       }
       return courseAnnouncements;
     } catch (err) {
-      console.warn(`[Spectra] Could not load announcements for course ${course.code}:`, err);
+      if (err?.name !== "AbortError" && !err?.message?.includes("aborted")) {
+        console.debug(`[Spectra] Announcements note for course ${course.code}:`, err?.message || err);
+      }
       return [];
     }
   }, 2);
@@ -339,7 +341,9 @@ export async function fetchCourseContentsViaAjax(courseId, sesskey = null) {
       }
     }
   } catch (err) {
-    console.warn(`[Spectra] core_course_get_contents failed for course ${courseId}:`, err);
+    if (err?.name !== "AbortError" && !err?.message?.includes("aborted")) {
+      console.debug(`[Spectra] core_course_get_contents note for course ${courseId}:`, err?.message || err);
+    }
   }
 
   return null;

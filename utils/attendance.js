@@ -76,7 +76,9 @@ export async function fetchCourseAttendance({ courseId, courseCode = "UM", sessk
       }
     } catch (err) {
       if (err instanceof InvalidSessionError || err.name === "INVALID_SESSION") throw err;
-      console.warn(`[Spectra] Could not discover attendance via index for course ${courseId}:`, err);
+      if (err?.name !== "AbortError" && !err?.message?.includes("aborted")) {
+        console.debug(`[Spectra] Attendance index note for course ${courseId}:`, err?.message || err);
+      }
     }
   };
 
@@ -106,7 +108,9 @@ export async function fetchCourseAttendance({ courseId, courseCode = "UM", sessk
       }
     } catch (err) {
       if (err instanceof InvalidSessionError || err.name === "INVALID_SESSION") throw err;
-      console.warn(`[Spectra] Fallback course view scrape failed for course ${courseId}:`, err);
+      if (err?.name !== "AbortError" && !err?.message?.includes("aborted")) {
+        console.debug(`[Spectra] Attendance view note for course ${courseId}:`, err?.message || err);
+      }
     }
   };
 
@@ -356,7 +360,9 @@ export async function fetchLiveAllAttendance(courses = [], sesskey, occurrencesM
         referenceDate
       });
     } catch (err) {
-      console.warn(`[Spectra] Error fetching attendance for ${course.code}:`, err);
+      if (err?.name !== "AbortError" && !err?.message?.includes("aborted")) {
+        console.debug(`[Spectra] Attendance fetch note for ${course.code}:`, err?.message || err);
+      }
       return {
         courseId: course.id,
         courseCode: course.code,
