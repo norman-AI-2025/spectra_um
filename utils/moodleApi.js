@@ -133,7 +133,7 @@ export async function injectCookieToBrowser(sessionCookie) {
       document.cookie = `MoodleSession=${clean}; path=/; domain=spectrum.um.edu.my; max-age=${maxAge}; secure; samesite=lax`;
       document.cookie = `MoodleSession=${clean}; path=/; max-age=${maxAge}; secure; samesite=lax`;
       injected = true;
-    } catch (e) {}
+    } catch (e) { }
   }
 
   // 3. Inject cookie into active SPeCTRUM tabs if tabs & scripting permissions available
@@ -150,10 +150,10 @@ export async function injectCookieToBrowser(sessionCookie) {
               document.cookie = `MoodleSession=${val}; path=/; max-age=${maxAge}; secure; samesite=lax`;
             },
             args: [clean]
-          }).catch(() => {});
+          }).catch(() => { });
         }
       }
-    } catch (e) {}
+    } catch (e) { }
   }
 
   return injected;
@@ -386,7 +386,7 @@ export async function inPageSpectrumScraper(moodleSession) {
   document.cookie = `MoodleSession=${MOODLE_SESSION}; path=/;`;
 
   console.log("%c[2/4] Testing dashboard access & extracting sesskey...", "color: #3b82f6; font-weight: bold;");
-  
+
   let sesskey = null;
   let userName = "Unknown";
 
@@ -547,7 +547,7 @@ export async function injectAndScrapeSpectrum(moodleSession) {
     } finally {
       if (didCreateTab && targetTab && targetTab.id) {
         setTimeout(() => {
-          chrome.tabs.remove(targetTab.id).catch(() => {});
+          chrome.tabs.remove(targetTab.id).catch(() => { });
         }, 1500);
       }
     }
@@ -569,7 +569,7 @@ export async function injectAndScrapeSpectrum(moodleSession) {
         cached_courses: result.courses,
         cached_raw_courses: result.rawCourses
       });
-      await chrome.storage.local.remove(["cached_raw_events"]).catch(() => {});
+      await chrome.storage.local.remove(["cached_raw_events"]).catch(() => { });
     }
 
     return result;
@@ -652,5 +652,5 @@ export async function autoDetectSession() {
 
 export { getLiveEnrolledCourses, getLiveCourseMaterials, fetchLiveEnrolledCourses, fetchLiveCourseMaterials, fetchLiveAnnouncements, fetchCourseContentsViaAjax } from "./courses.js";
 export { fetchCourseAttendance, fetchLiveAllAttendance, autoSubmitAttendance, scanAndAutoRecordAttendance, formatAttendanceTelegram, fetchCourseGradebookAttendance } from "./attendance.js";
-export { fetchLiveDeadlines, fetchIcsDeadlines, normalizeHydratedDeadlines } from "./calendar.js";
+export { fetchLiveDeadlines, fetchIcsDeadlines, normalizeHydratedDeadlines, getTaskFingerprint, deduplicateDeadlinesList } from "./calendar.js";
 

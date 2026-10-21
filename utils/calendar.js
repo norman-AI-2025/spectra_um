@@ -29,19 +29,165 @@ import { fetchCourseContentsViaAjax } from "./courses.js";
 const SPECTRUM_BASE_URL = "https://spectrum.um.edu.my";
 
 /**
+ * Canonical task fingerprint function for deduplication across course HTML scrapes,
+ * native Moodle AJAX, and RFC 5545 iCal feeds.
+ */
+export function getTaskFingerprint(courseCode, title) {
+  const cleanCode = String(courseCode || "").toUpperCase().replace(/[^A-Z0-9]/g, "");
+  const baseTitle = String(title || "")
+    .toLowerCase()
+    .replace(/\s+is due(?:\s+to submit)?$/i, "");
+  const strippedTitle = baseTitle
+    .replace(/\b(?:tutorial|tut|lab|assignment|submission|link|dropbox)\b/gi, "")
+    .replace(/[^a-z0-9]/g, "");
+  const cleanTitle = strippedTitle || baseTitle.replace(/[^a-z0-9]/g, "");
+  return `${cleanCode}_${cleanTitle}`;
+}
+
+/**
+ * Merges a course-level scraped item and an iCal feed item:
+ * Preserves the real cmid, direct URL, and verified submission status from the course scrape,
+ * while keeping the high-precision timestamp from the iCal event.
+ */
+export function mergeDeadlineItems(existing, incoming, completedSet = new Set()) {
+  const isExistingIcal = existing?.source === "ical" || (existing?.url && existing.url.includes("calendar/view.php"));
+  const isIncomingIcal = incoming?.source === "ical" || (incoming?.url && incoming.url.includes("calendar/view.php"));
+
+  let courseItem = null;
+  let icalItem = null;
+
+  if (isExistingIcal && !isIncomingIcal) {
+    icalItem = existing;
+    courseItem = incoming;
+  } else if (!isExistingIcal && isIncomingIcal) {
+    courseItem = existing;
+    icalItem = incoming;
+  } else {
+    // Both are same type: prefer item with cmid or direct mod url as courseItem
+    const hasDirectA = existing?.url && /\/mod\/[a-z]+\/view\.php\?id=\d+/i.test(existing.url);
+    const hasDirectB = incoming?.url && /\/mod\/[a-z]+\/view\.php\?id=\d+/i.test(incoming.url);
+    if (hasDirectB && !hasDirectA) {
+      courseItem = incoming;
+      icalItem = existing;
+    } else {
+      courseItem = existing;
+      icalItem = incoming;
+    }
+  }
+
+  // Preserve real cmid and direct URL from course scrape
+  const realCmid = courseItem.cmid || icalItem.cmid || "";
+  const directUrl = (courseItem.url && /\/mod\/[a-z]+\/view\.php/i.test(courseItem.url))
+    ? courseItem.url
+    : (icalItem.url && /\/mod\/[a-z]+\/view\.php/i.test(icalItem.url) ? icalItem.url : (courseItem.url || icalItem.url));
+
+  // High-precision timestamp from iCal event (or fallback to course item)
+  const dueTimestamp = icalItem.dueTimestamp || courseItem.dueTimestamp || null;
+  const dueDate = (icalItem.dueTimestamp && icalItem.dueDate) ? icalItem.dueDate : (courseItem.dueDate || icalItem.dueDate || "");
+  const formattedTime = (icalItem.dueTimestamp && icalItem.formattedTime) ? icalItem.formattedTime : (courseItem.formattedTime || icalItem.formattedTime || "");
+
+  // Submission status from course scrape
+  const isSubmittedOnSpectrum = Boolean(courseItem.isSubmittedOnSpectrum || icalItem.isSubmittedOnSpectrum);
+  const statusText = courseItem.submissionStatus && courseItem.submissionStatus !== "No submission recorded"
+    ? courseItem.submissionStatus
+    : (icalItem.submissionStatus || courseItem.submissionStatus || "No submission recorded");
+
+  // Determine id: prefer real cmid, then courseItem id, then icalItem id
+  const id = realCmid || courseItem.id || icalItem.id;
+
+  // Local completion check
+  const isCompleted = isSubmittedOnSpectrum ||
+    Boolean(courseItem.isCompleted) ||
+    Boolean(icalItem.isCompleted) ||
+    completedSet.has(String(id)) ||
+    (realCmid && completedSet.has(String(realCmid))) ||
+    completedSet.has(String(courseItem.id)) ||
+    completedSet.has(String(icalItem.id));
+
+  return {
+    ...icalItem,
+    ...courseItem,
+    id: String(id),
+    cmid: realCmid ? String(realCmid) : "",
+    title: courseItem.title || icalItem.title,
+    courseCode: courseItem.courseCode || icalItem.courseCode,
+    courseName: courseItem.courseName || icalItem.courseName || courseItem.courseCode || icalItem.courseCode,
+    dueTimestamp,
+    dueDate,
+    formattedTime,
+    url: directUrl,
+    type: courseItem.type || icalItem.type || "assign",
+    urgency: dueTimestamp ? calculateUrgency(dueTimestamp) : (courseItem.urgency || icalItem.urgency || "upcoming"),
+    isSubmittedOnSpectrum,
+    isCompleted,
+    submissionStatus: isSubmittedOnSpectrum && statusText === "No submission recorded" ? "Submitted" : statusText,
+    weight: courseItem.weight || icalItem.weight || "",
+    matchesOccurrence: true,
+    source: courseItem.source || icalItem.source || "merged"
+  };
+}
+
+/**
+ * Deduplicate deadlines list using both seenIds (id and cmid) and seenFingerprints.
+ * Merges course-level scraped entries with matching iCal entries.
+ */
+export function deduplicateDeadlinesList(items = [], completedSet = new Set()) {
+  if (!Array.isArray(items) || items.length === 0) return [];
+
+  const completed = completedSet instanceof Set
+    ? completedSet
+    : new Set(Array.isArray(completedSet) ? completedSet.map(String) : []);
+
+  const seenIds = new Map();
+  const seenFingerprints = new Map();
+  const deduped = [];
+
+  for (const item of items) {
+    if (!item) continue;
+    const fp = getTaskFingerprint(item.courseCode, item.title || item.name || "");
+    const rawId = item.id ? String(item.id) : "";
+    const rawCmid = item.cmid ? String(item.cmid) : "";
+
+    let matchIdx = -1;
+    if (fp && seenFingerprints.has(fp)) {
+      matchIdx = seenFingerprints.get(fp);
+    } else if (rawCmid && seenIds.has(`cmid_${rawCmid}`)) {
+      matchIdx = seenIds.get(`cmid_${rawCmid}`);
+    } else if (rawId && seenIds.has(`id_${rawId}`)) {
+      matchIdx = seenIds.get(`id_${rawId}`);
+    }
+
+    if (matchIdx >= 0) {
+      const existing = deduped[matchIdx];
+      const merged = mergeDeadlineItems(existing, item, completed);
+      deduped[matchIdx] = merged;
+      if (merged.id) seenIds.set(`id_${merged.id}`, matchIdx);
+      if (merged.cmid) seenIds.set(`cmid_${merged.cmid}`, matchIdx);
+      if (fp) seenFingerprints.set(fp, matchIdx);
+    } else {
+      const idx = deduped.length;
+      deduped.push(item);
+      if (fp) seenFingerprints.set(fp, idx);
+      if (rawId) seenIds.set(`id_${rawId}`, idx);
+      if (rawCmid) seenIds.set(`cmid_${rawCmid}`, idx);
+    }
+  }
+
+  return deduped;
+}
+
+/**
  * Generate normalized activity key for deduplicating activities across
  * Calendar AJAX, /mod/assign/index.php, and /course/view.php
  */
 function getActivityKey(item) {
   if (item.url) {
-    const m = item.url.match(/id=(\d+)/);
-    const mod = item.url.match(/mod\/([a-z0-9_]+)\//);
-    const modName = mod ? mod[1] : (item.type || "assign");
-    if (m) return `${modName}_${m[1]}`;
+    const modMatch = item.url.match(/mod\/([a-z0-9_]+)\/view\.php\?id=(\d+)/i);
+    if (modMatch) return `${modMatch[1]}_${modMatch[2]}`;
   }
   if (item.cmid) return `${item.type || "assign"}_${item.cmid}`;
-  if (item.id) return `${item.type || "assign"}_${item.id}`;
-  return `${item.courseCode || ""}_${item.title || ""}`.toLowerCase().replace(/[^a-z0-9]/g, "");
+  if (item.id && !String(item.id).startsWith("event-")) return `${item.type || "assign"}_${item.id}`;
+  return getTaskFingerprint(item.courseCode, item.title || item.name || "");
 }
 
 /**
@@ -117,7 +263,7 @@ export async function fetchLiveDeadlines(sesskey, courses = [], occurrencesMap =
       if (!calendarIcalUrl) {
         calendarIcalUrl = stored.calendarIcalUrl || stored.calendar_ical_url || "";
       }
-    } catch (e) {}
+    } catch (e) { }
   }
 
   // If courses list is still empty, auto-discover enrolled courses from /my/
@@ -139,10 +285,46 @@ export async function fetchLiveDeadlines(sesskey, courses = [], occurrencesMap =
     try {
       const stored = await chrome.storage.local.get(["completed_assignment_ids"]);
       completedSet = new Set(stored.completed_assignment_ids || []);
-    } catch (e) {}
+    } catch (e) { }
   }
 
   const deadlinesMap = new Map();
+  const fingerprintMap = new Map();
+
+  function upsertDeadlineItem(incoming, sourceLevel = "general") {
+    if (!incoming) return;
+    const key = getActivityKey(incoming);
+    const fp = getTaskFingerprint(incoming.courseCode, incoming.title || incoming.name || "");
+
+    let existingKey = deadlinesMap.has(key) ? key : null;
+    if (!existingKey && fp && fingerprintMap.has(fp)) {
+      existingKey = fingerprintMap.get(fp);
+    }
+
+    if (existingKey) {
+      const existing = deadlinesMap.get(existingKey);
+      const merged = mergeDeadlineItems(existing, incoming, completedSet);
+
+      if (sourceLevel === "authoritative") {
+        merged.isSubmittedOnSpectrum = incoming.isSubmittedOnSpectrum;
+        merged.isCompleted = incoming.isSubmittedOnSpectrum || merged.isCompleted;
+        merged.submissionStatus = incoming.submissionStatus || merged.submissionStatus;
+      }
+
+      const newKey = getActivityKey(merged);
+      if (newKey !== existingKey) {
+        deadlinesMap.delete(existingKey);
+      }
+      deadlinesMap.set(newKey, merged);
+      if (fp) fingerprintMap.set(fp, newKey);
+    } else {
+      if (completedSet.has(String(incoming.id)) || (incoming.cmid && completedSet.has(String(incoming.cmid)))) {
+        incoming.isCompleted = true;
+      }
+      deadlinesMap.set(key, incoming);
+      if (fp) fingerprintMap.set(fp, key);
+    }
+  }
 
   // -------------------------------------------------------------
   // 0. Fetch Moodle iCalendar (.ics) Feed If Configured (Permanent, No Expiry)
@@ -150,12 +332,7 @@ export async function fetchLiveDeadlines(sesskey, courses = [], occurrencesMap =
   if (calendarIcalUrl) {
     try {
       const icsItems = await fetchIcsDeadlines(calendarIcalUrl, occurrencesMap, defaultOccurrence);
-      icsItems.forEach((item) => {
-        const key = getActivityKey(item);
-        if (!deadlinesMap.has(key)) {
-          deadlinesMap.set(key, item);
-        }
-      });
+      icsItems.forEach((item) => upsertDeadlineItem(item, "ical"));
     } catch (icsErr) {
       console.warn("[Spectra] iCal feed load notice:", icsErr);
     }
@@ -179,27 +356,7 @@ export async function fetchLiveDeadlines(sesskey, courses = [], occurrencesMap =
           const sections = await fetchCourseContentsViaAjax(courseId, sesskey);
           if (Array.isArray(sections) && sections.length > 0) {
             const { assignments } = parseCourseContentsModules(sections, courseCode, courseName, studentOcc);
-            assignments.forEach((item) => {
-              const key = getActivityKey(item);
-              if (deadlinesMap.has(key)) {
-                const existing = deadlinesMap.get(key);
-                if (item.isSubmittedOnSpectrum) {
-                  existing.isSubmittedOnSpectrum = true;
-                  existing.isCompleted = true;
-                  existing.submissionStatus = "Submitted";
-                }
-                if (!existing.dueTimestamp && item.dueTimestamp) {
-                  existing.dueTimestamp = item.dueTimestamp;
-                  existing.dueDate = item.dueDate;
-                  existing.formattedTime = item.formattedTime;
-                }
-              } else {
-                if (completedSet.has(String(item.id)) || (item.cmid && completedSet.has(String(item.cmid)))) {
-                  item.isCompleted = true;
-                }
-                deadlinesMap.set(key, item);
-              }
-            });
+            assignments.forEach((item) => upsertDeadlineItem(item, "ajax"));
             ajaxSuccess = true;
           }
         } catch (ajaxErr) {
@@ -223,28 +380,7 @@ export async function fetchLiveDeadlines(sesskey, courses = [], occurrencesMap =
         if (res && res.ok) {
           const html = await res.text();
           const items = parseCourseAssignmentsIndex(html, courseCode, courseName, studentOcc);
-          items.forEach((item) => {
-            const key = getActivityKey(item);
-            if (deadlinesMap.has(key)) {
-              const existing = deadlinesMap.get(key);
-              if (item.dueTimestamp) {
-                existing.dueTimestamp = item.dueTimestamp;
-                existing.dueDate = item.dueDate;
-                existing.formattedTime = item.formattedTime;
-                existing.urgency = item.urgency;
-              }
-              // Assign index page is AUTHORITATIVE for submission status.
-              // It shows the actual Moodle submission table, so always trust it.
-              existing.isSubmittedOnSpectrum = item.isSubmittedOnSpectrum;
-              existing.isCompleted = item.isSubmittedOnSpectrum || existing.isCompleted;
-              existing.submissionStatus = item.submissionStatus || existing.submissionStatus;
-            } else {
-              if (completedSet.has(String(item.id)) || (item.cmid && completedSet.has(String(item.cmid)))) {
-                item.isCompleted = true;
-              }
-              deadlinesMap.set(key, item);
-            }
-          });
+          items.forEach((item) => upsertDeadlineItem(item, "authoritative"));
         }
       } catch (err) {
         if (err?.name !== "AbortError" && !err?.message?.includes("aborted")) {
@@ -266,29 +402,7 @@ export async function fetchLiveDeadlines(sesskey, courses = [], occurrencesMap =
         if (resQ && resQ.ok) {
           const html = await resQ.text();
           const items = parseCourseQuizzesIndex(html, courseCode, courseName, studentOcc);
-          items.forEach((item) => {
-            const key = getActivityKey(item);
-            if (deadlinesMap.has(key)) {
-              const existing = deadlinesMap.get(key);
-              if (item.dueTimestamp) {
-                existing.dueTimestamp = item.dueTimestamp;
-                existing.dueDate = item.dueDate;
-                existing.formattedTime = item.formattedTime;
-                existing.urgency = item.urgency;
-                if (item.dateLabel) existing.dateLabel = item.dateLabel;
-              }
-              // Quiz index page is AUTHORITATIVE for submission status.
-              // It shows Moodle's actual attempt/grade table, so always trust it.
-              existing.isSubmittedOnSpectrum = item.isSubmittedOnSpectrum;
-              existing.isCompleted = item.isSubmittedOnSpectrum || existing.isCompleted;
-              existing.submissionStatus = item.submissionStatus || existing.submissionStatus;
-            } else {
-              if (completedSet.has(String(item.id)) || (item.cmid && completedSet.has(String(item.cmid)))) {
-                item.isCompleted = true;
-              }
-              deadlinesMap.set(key, item);
-            }
-          });
+          items.forEach((item) => upsertDeadlineItem(item, "authoritative"));
         }
       } catch (err) {
         if (err?.name !== "AbortError" && !err?.message?.includes("aborted")) {
@@ -314,31 +428,7 @@ export async function fetchLiveDeadlines(sesskey, courses = [], occurrencesMap =
           if (res && res.ok) {
             const html = await res.text();
             const items = parseCourseViewSubmissions(html, courseCode, courseName, studentOcc);
-            items.forEach((item) => {
-              const key = getActivityKey(item);
-              if (deadlinesMap.has(key)) {
-                const existing = deadlinesMap.get(key);
-                if (!existing.dueTimestamp && item.dueTimestamp) {
-                  existing.dueTimestamp = item.dueTimestamp;
-                  existing.dueDate = item.dueDate;
-                  existing.formattedTime = item.formattedTime;
-                  if (item.dateLabel) existing.dateLabel = item.dateLabel;
-                }
-                // Course view page is the LEAST authoritative source for submission status.
-                // Only upgrade to submitted if no authoritative source has spoken yet,
-                // never downgrade a false-negative from assign/quiz index.
-                if (item.isSubmittedOnSpectrum && !existing.isSubmittedOnSpectrum) {
-                  existing.isSubmittedOnSpectrum = true;
-                  existing.isCompleted = true;
-                  existing.submissionStatus = "Submitted";
-                }
-              } else {
-                if (completedSet.has(String(item.id)) || (item.cmid && completedSet.has(String(item.cmid)))) {
-                  item.isCompleted = true;
-                }
-                deadlinesMap.set(key, item);
-              }
-            });
+            items.forEach((item) => upsertDeadlineItem(item, "courseview"));
           }
         } catch (err) {
           if (err?.name !== "AbortError" && !err?.message?.includes("aborted")) {
@@ -389,7 +479,7 @@ export async function fetchLiveDeadlines(sesskey, courses = [], occurrencesMap =
             }
           }
         }
-      } catch (_) {}
+      } catch (_) { }
     }, 4);
   }
 
@@ -400,17 +490,19 @@ export async function fetchLiveDeadlines(sesskey, courses = [], occurrencesMap =
     .filter((item) => !isAttendanceActivity(item))
     .filter((item) => !isOverdueMoreThan40Days(item.dueTimestamp))
     .map((item) => {
-    const isCompleted = item.isSubmittedOnSpectrum || completedSet.has(String(item.id)) || completedSet.has(String(item.cmid));
-    const urgency = item.dueTimestamp ? calculateUrgency(item.dueTimestamp) : "upcoming";
-    return {
-      ...item,
-      isCompleted,
-      urgency
-    };
-  });
+      const isCompleted = item.isSubmittedOnSpectrum || completedSet.has(String(item.id)) || (item.cmid && completedSet.has(String(item.cmid)));
+      const urgency = item.dueTimestamp ? calculateUrgency(item.dueTimestamp) : "upcoming";
+      return {
+        ...item,
+        isCompleted,
+        urgency
+      };
+    });
+
+  const deduplicated = deduplicateDeadlinesList(allDeadlines, completedSet);
 
   // Sort: Incomplete first, then by earliest due date. Items with no due date go to the bottom of incomplete.
-  allDeadlines.sort((a, b) => {
+  deduplicated.sort((a, b) => {
     if (a.isCompleted !== b.isCompleted) return a.isCompleted ? 1 : -1;
     if (a.dueTimestamp && b.dueTimestamp) return a.dueTimestamp - b.dueTimestamp;
     if (a.dueTimestamp && !b.dueTimestamp) return -1;
@@ -418,7 +510,7 @@ export async function fetchLiveDeadlines(sesskey, courses = [], occurrencesMap =
     return (a.title || "").localeCompare(b.title || "");
   });
 
-  return allDeadlines;
+  return deduplicated;
 }
 
 /**
@@ -493,7 +585,7 @@ export function normalizeHydratedDeadlines(events = [], rawCalendarEvents = [], 
         continue;
       }
 
-      const eventUrl = item.action?.url || item.url || `${SPECTRUM_BASE_URL}/mod/${item.modulename || "assign"}/view.php?id=${item.instance || item.id}`;
+      const eventUrl = item.action?.url || item.url || (item.instance ? `${SPECTRUM_BASE_URL}/mod/${item.modulename || "assign"}/view.php?id=${item.instance}` : `${SPECTRUM_BASE_URL}/calendar/view.php?view=event&id=${item.id}`);
       const eventId = String(item.id);
       const cmid = item.instance ? String(item.instance) : "";
       const isActionDone = item.action ? !item.action.actionable : false;
@@ -563,7 +655,7 @@ export function normalizeHydratedDeadlines(events = [], rawCalendarEvents = [], 
         normalized.push({
           ...item,
           id: eventId,
-          cmid: cmid || eventId,
+          cmid: cmid || (item.source === "ical" || (item.url && item.url.includes("calendar/view.php")) ? "" : eventId),
           title,
           courseCode: courseCode || "N/A",
           courseName: item.courseName || item.courseCode || "N/A",
@@ -626,8 +718,10 @@ export function normalizeHydratedDeadlines(events = [], rawCalendarEvents = [], 
     }
   }
 
+  const deduplicated = deduplicateDeadlinesList(normalized, completedSet);
+
   // Sort deadlines: pending first, then by earliest due date
-  normalized.sort((a, b) => {
+  deduplicated.sort((a, b) => {
     if (a.isCompleted !== b.isCompleted) return a.isCompleted ? 1 : -1;
     if (a.dueTimestamp && b.dueTimestamp) return a.dueTimestamp - b.dueTimestamp;
     if (a.dueTimestamp && !b.dueTimestamp) return -1;
@@ -635,6 +729,6 @@ export function normalizeHydratedDeadlines(events = [], rawCalendarEvents = [], 
     return (a.title || "").localeCompare(b.title || "");
   });
 
-  return normalized;
+  return deduplicated;
 }
 

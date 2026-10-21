@@ -22,7 +22,7 @@ import {
   AuthExpiredError
 } from "./utils/moodleApi.js";
 
-import { fetchLiveDeadlines, normalizeHydratedDeadlines } from "./utils/calendar.js";
+import { fetchLiveDeadlines, normalizeHydratedDeadlines, getTaskFingerprint, deduplicateDeadlinesList } from "./utils/calendar.js";
 
 import {
   formatTimeRemaining,
@@ -1010,12 +1010,14 @@ async function syncLiveSession() {
           return !isSynthetic;
         });
 
-        if (cleanCached.length !== stored.cached_deadlines.length) {
-          chrome.storage.local.set({ cached_deadlines: cleanCached }).catch(() => {});
+        const dedupedCached = deduplicateDeadlinesList(cleanCached, state.completedIds);
+
+        if (dedupedCached.length !== stored.cached_deadlines.length) {
+          chrome.storage.local.set({ cached_deadlines: dedupedCached }).catch(() => {});
         }
 
-        if (cleanCached.length > 0) {
-          hydrateDeadlinesFromScrape(cleanCached, []);
+        if (dedupedCached.length > 0) {
+          hydrateDeadlinesFromScrape(dedupedCached, []);
         } else {
           state.deadlines = [];
         }
@@ -1188,7 +1190,7 @@ async function loadLiveDeadlines() {
 
   try {
     const liveEvents = await fetchLiveDeadlines(state.sesskey, state.courses, state.courseOccurrences, state.studentOccurrence);
-    state.deadlines = (liveEvents || []).filter((item) => {
+    const filteredDeadlines = (liveEvents || []).filter((item) => {
       if (!item || typeof item !== "object") return false;
       if (isAttendanceActivity(item)) return false;
       if (isOverdueMoreThan40Days(item.dueTimestamp)) return false;
@@ -1200,6 +1202,8 @@ async function loadLiveDeadlines() {
       );
       return !isSynthetic;
     });
+
+    state.deadlines = deduplicateDeadlinesList(filteredDeadlines, state.completedIds);
 
     state.deadlines.sort((a, b) => {
       if (a.isCompleted !== b.isCompleted) return a.isCompleted ? 1 : -1;
@@ -1432,6 +1436,8 @@ function renderDeadlines() {
       }
 
       if (found) found.isCompleted = isChecked;
+
+      state.deadlines = deduplicateDeadlinesList(state.deadlines, state.completedIds);
 
       if (typeof chrome !== "undefined" && chrome.storage?.local) {
         await chrome.storage.local.set({

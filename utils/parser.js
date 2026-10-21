@@ -266,12 +266,12 @@ export function parseCalendarEvents(sourceData) {
         const type = url.includes("mod/quiz")
           ? "quiz"
           : url.includes("mod/workshop")
-          ? "workshop"
-          : url.includes("turnitintooltwo")
-          ? "turnitin"
-          : url.includes("mod/attendance")
-          ? "attendance"
-          : "assign";
+            ? "workshop"
+            : url.includes("turnitintooltwo")
+              ? "turnitin"
+              : url.includes("mod/attendance")
+                ? "attendance"
+                : "assign";
 
         // Exclude attendance from submissions
         if (isAttendanceActivity({ url, title, type })) {
@@ -830,7 +830,7 @@ export function parseAssignmentViewPage(html) {
           }
         }
       }
-    } catch (_) {}
+    } catch (_) { }
   }
 
   if (!dueDateText) {
@@ -860,10 +860,9 @@ export function parseAssignmentViewPage(html) {
     if (statMatch) {
       submissionStatus = statMatch[1].replace(/<[^>]+>/g, "").trim();
     } else {
-      // Only check within quiz attempts summary table markup for quiz completion evidence
-      const quizTableMatch = html.match(/<table[^>]*class="[^"]*quizattemptsummary[^"]*"[^>]*>([\s\S]*?)<\/table>/i) ||
-                             html.match(/<table[^>]*class="[^"]*quizreviewsummary[^"]*"[^>]*>([\s\S]*?)<\/table>/i);
-      if (quizTableMatch && /\b(?:Finished|Submitted|Review|Telah dinilai|Selesai)\b/i.test(quizTableMatch[1])) {
+      // Only check within quiz attempts summary table/div markup for quiz completion evidence
+      const quizSummaryMatch = html.match(/<(?:table|div)[^>]*class="[^"]*(?:quizattemptsummary|quizreviewsummary)[^"]*"[^>]*>([\s\S]*?)<\/(?:table|div)>/i);
+      if (quizSummaryMatch && /\b(?:Finished|Submitted|Review|Telah dinilai|Selesai)\b/i.test(quizSummaryMatch[1])) {
         submissionStatus = "Submitted";
       }
     }
@@ -967,7 +966,7 @@ export function parseCourseViewSubmissions(html, courseCode = "", courseName = "
             for (const el of statusEls) {
               const elText = (el.textContent || '').trim();
               if (/\b(?:submitted|graded|grading|dihantar|selesai|dinilai|diserahkan)\b/i.test(elText) &&
-                  !/\b(?:not submitted|no submission|belum|tiada|tidak|draft|draf)\b/i.test(elText)) {
+                !/\b(?:not submitted|no submission|belum|tiada|tidak|draft|draf)\b/i.test(elText)) {
                 isSubmitted = true;
                 break;
               }
@@ -1528,7 +1527,7 @@ export function parseAttendanceIndex(html) {
       });
 
       if (links.length > 0) return links;
-    } catch (e) {}
+    } catch (e) { }
   }
 
   // Regex fallback
@@ -1598,7 +1597,7 @@ export function parseAttendanceTabs(html, cmid, baseUrl = "https://spectrum.um.e
       });
 
       if (tabs.length > 0) return tabs;
-    } catch (e) {}
+    } catch (e) { }
   }
 
   // Regex fallback
@@ -2131,14 +2130,14 @@ export function parseAttendanceForm(html) {
 
   // Extract sesskey
   const sesskeyMatch = html.match(/name=["']sesskey["'][^>]*value=["']([^"']+)["']/i) ||
-                       html.match(/value=["']([^"']+)["'][^>]*name=["']sesskey["']/i) ||
-                       html.match(/"sesskey":"([^"]+)"/);
+    html.match(/value=["']([^"']+)["'][^>]*name=["']sesskey["']/i) ||
+    html.match(/"sesskey":"([^"]+)"/);
   if (sesskeyMatch) sesskey = sesskeyMatch[1];
 
   // Extract sessid
   const sessidMatch = html.match(/name=["']sessid["'][^>]*value=["']([^"']+)["']/i) ||
-                      html.match(/value=["']([^"']+)["'][^>]*name=["']sessid["']/i) ||
-                      html.match(/sessid=(\d+)/i);
+    html.match(/value=["']([^"']+)["'][^>]*name=["']sessid["']/i) ||
+    html.match(/sessid=(\d+)/i);
   if (sessidMatch) sessid = sessidMatch[1];
 
   // Check if password field exists
@@ -2171,7 +2170,7 @@ export function parseAttendanceForm(html) {
           break;
         }
       }
-    } catch (_) {}
+    } catch (_) { }
   }
 
   // 2. Fallback: Robust regex search across all status radio inputs
@@ -2219,7 +2218,7 @@ export function parseAttendanceForm(html) {
   // 3. Fallback: If no label matched, pick first status input value
   if (!statusId) {
     const anyRadio = html.match(/name=["']status["'][^>]*value=["'](\d+)["']/i) ||
-                     html.match(/value=["'](\d+)["'][^>]*name=["']status["']/i);
+      html.match(/value=["'](\d+)["'][^>]*name=["']status["']/i);
     if (anyRadio) statusId = anyRadio[1];
   }
 
@@ -2352,10 +2351,39 @@ export function parseMoodleIcsCalendar(icsText, studentOccurrencesMap = {}, defa
       continue;
     }
 
-    // Extract cmid or ID
-    const cmidMatch = rawUrl.match(/id=(\d+)/);
-    const uidMatch = uid.match(/(\d+)@/);
-    const cmid = cmidMatch ? cmidMatch[1] : (uidMatch ? uidMatch[1] : uid);
+    // 1. Inspect ev.DESCRIPTION first using regex for direct course module activity link
+    const descUrlMatch = (ev.DESCRIPTION || "").match(/https?:\/\/[^\s"'>]*\/mod\/[a-z]+\/view\.php\?id=\d+/i);
+    const isDirectActivityUrl = (url) => /https?:\/\/[^\s"'>]*\/mod\/[a-z]+\/view\.php\?id=\d+/i.test(url || "");
+
+    let finalUrl = "";
+    let cmid = "";
+    let modType = "assign";
+
+    if (descUrlMatch) {
+      finalUrl = descUrlMatch[0];
+      const m = finalUrl.match(/id=(\d+)/);
+      if (m) cmid = m[1];
+      const modMatch = finalUrl.match(/\/mod\/([a-z]+)\//i);
+      if (modMatch) modType = modMatch[1].toLowerCase();
+    } else if (isDirectActivityUrl(rawUrl)) {
+      // 2. If ev.URL is already a valid activity link (/mod/assign/view.php?id=... or /mod/quiz/...), use it
+      finalUrl = rawUrl;
+      const m = finalUrl.match(/id=(\d+)/);
+      if (m) cmid = m[1];
+      const modMatch = finalUrl.match(/\/mod\/([a-z]+)\//i);
+      if (modMatch) modType = modMatch[1].toLowerCase();
+    } else {
+      // 3. Never construct a synthetic mod/assign/view.php URL using the calendar event ID.
+      // Instead, fallback cleanly to the legitimate Moodle Calendar Event link:
+      const eventId = uid.match(/(\d+)@/)?.[1] || "";
+      finalUrl = eventId
+        ? `https://spectrum.um.edu.my/calendar/view.php?view=event&id=${eventId}`
+        : (rawUrl || "https://spectrum.um.edu.my/calendar/view.php");
+      cmid = "";
+    }
+
+    const eventId = uid.match(/(\d+)@/)?.[1] || "";
+    const itemId = cmid || eventId || uid || title;
 
     const formattedTime = new Date(dueTimestamp).toLocaleString("en-MY", {
       month: "short",
@@ -2365,16 +2393,16 @@ export function parseMoodleIcsCalendar(icsText, studentOccurrencesMap = {}, defa
     });
 
     deadlines.push({
-      id: String(cmid || uid || title),
-      cmid: String(cmid || uid || ""),
+      id: String(itemId),
+      cmid: cmid ? String(cmid) : "",
       title,
       courseCode,
       courseName: courseCode,
       dueDate: new Date(dueTimestamp).toISOString(),
       dueTimestamp,
       formattedTime,
-      url: rawUrl || (cmid ? `https://spectrum.um.edu.my/mod/assign/view.php?id=${cmid}` : `https://spectrum.um.edu.my/my/`),
-      type: "assign",
+      url: finalUrl,
+      type: modType,
       submissionStatus: "No submission recorded",
       isSubmittedOnSpectrum: false,
       isCompleted: false,
@@ -2465,7 +2493,7 @@ export function parseCourseContentsModules(sectionsJson, courseCode = "", course
             if (cd?.duedate) dueTimestamp = Number(cd.duedate) * 1000;
             else if (cd?.timeclose) dueTimestamp = Number(cd.timeclose) * 1000;
             else if (cd?.cutoffdate) dueTimestamp = Number(cd.cutoffdate) * 1000;
-          } catch (_) {}
+          } catch (_) { }
         }
         if (!dueTimestamp && mod.description) {
           const m = String(mod.description).match(/(?:due\s*date|closed?\s*date|close\s*date|quiz\s*closes?|closes?|closed(?:\s+on)?|cut-?off\s*date|cutoff\s*date|tarikh\s*(?:akhir|tutup)|ditutup\s*(?:pada)?|tutup)[\s:]*[\r\n\s]*([0-9A-Za-z\s,.:\-]+(?:am|pm|[\d]{2,4}))/i);
@@ -2491,11 +2519,11 @@ export function parseCourseContentsModules(sectionsJson, courseCode = "", course
 
         const formattedTime = dueTimestamp
           ? new Date(dueTimestamp).toLocaleString("en-MY", {
-              month: "short",
-              day: "numeric",
-              hour: "2-digit",
-              minute: "2-digit"
-            })
+            month: "short",
+            day: "numeric",
+            hour: "2-digit",
+            minute: "2-digit"
+          })
           : "No due date";
 
         const dateLabel = modType === "quiz" ? "Closes" : "Due";
@@ -2565,7 +2593,7 @@ export function parseGradebookAttendance(html) {
           };
         }
       }
-    } catch (_) {}
+    } catch (_) { }
   }
 
   // 2. Regex fallback
@@ -2577,7 +2605,7 @@ export function parseGradebookAttendance(html) {
       const allPct = Array.from(rHtml.matchAll(/(\d+(?:\.\d+)?\s*%)/g));
       const pctMatch = allPct.length > 0 ? allPct[allPct.length - 1][1] : null;
       const gradeMatch = rHtml.match(/<td[^>]*class=["'][^"']*grade[^"']*["'][^>]*>([\s\S]*?)<\/td>/i) ||
-                         rHtml.match(/<td[^>]*>([\d\.\/ ]+)<\/td>/i);
+        rHtml.match(/<td[^>]*>([\d\.\/ ]+)<\/td>/i);
       return {
         hasAttendance: true,
         percentage: pctMatch ? pctMatch.trim() : "N/A",
