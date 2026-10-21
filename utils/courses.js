@@ -5,7 +5,7 @@
  * with verified sesskey & session error boundaries.
  */
 
-import { extractCourseCode, parseCoursePage, parseEnrolledCourses, parseForumDiscussions } from "./parser.js";
+import { extractCourseCode, parseCoursePage, parseEnrolledCourses, parseForumDiscussions, pMap } from "./parser.js";
 import { InvalidSessionError, AuthRequiredError, injectCookieToBrowser, getSessionContext } from "./moodleApi.js";
 
 const SPECTRUM_BASE_URL = "https://spectrum.um.edu.my";
@@ -210,11 +210,11 @@ export async function fetchLiveAnnouncements(courses = [], sesskey = null) {
 
   const allAnnouncements = [];
 
-  const coursePromises = (courses || []).map(async (course) => {
+  const settled = await pMap(courses || [], async (course) => {
     try {
       const courseUrl = course.url || `${SPECTRUM_BASE_URL}/course/view.php?id=${course.id}`;
       const ctrl = typeof AbortController !== "undefined" ? new AbortController() : null;
-      const tid = ctrl ? setTimeout(() => ctrl.abort(), 6000) : null;
+      const tid = ctrl ? setTimeout(() => ctrl.abort(), 12000) : null;
       let courseRes;
       try {
         courseRes = await fetch(courseUrl, { credentials: "include", signal: ctrl?.signal });
@@ -237,7 +237,7 @@ export async function fetchLiveAnnouncements(courses = [], sesskey = null) {
         seenForumUrls.add(forumUrl);
 
         const fCtrl = typeof AbortController !== "undefined" ? new AbortController() : null;
-        const fTid = fCtrl ? setTimeout(() => fCtrl.abort(), 4000) : null;
+        const fTid = fCtrl ? setTimeout(() => fCtrl.abort(), 12000) : null;
         let forumRes;
         try {
           forumRes = await fetch(forumUrl, { credentials: "include", signal: fCtrl?.signal });
@@ -261,9 +261,8 @@ export async function fetchLiveAnnouncements(courses = [], sesskey = null) {
       console.warn(`[Spectra] Could not load announcements for course ${course.code}:`, err);
       return [];
     }
-  });
+  }, 2);
 
-  const settled = await Promise.allSettled(coursePromises);
   settled.forEach((res) => {
     if (res.status === "fulfilled" && Array.isArray(res.value)) {
       allAnnouncements.push(...res.value);
@@ -311,7 +310,7 @@ export async function fetchCourseContentsViaAjax(courseId, sesskey = null) {
 
   try {
     const ctrl = typeof AbortController !== "undefined" ? new AbortController() : null;
-    const tid = ctrl ? setTimeout(() => ctrl.abort(), 6000) : null;
+    const tid = ctrl ? setTimeout(() => ctrl.abort(), 12000) : null;
     let res;
     try {
       res = await fetch(ajaxEndpoint, {

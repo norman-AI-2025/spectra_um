@@ -17,7 +17,8 @@ import {
   isAttendanceActivity,
   isOverdueMoreThan100Days,
   parseMoodleIcsCalendar,
-  parseCourseContentsModules
+  parseCourseContentsModules,
+  pMap
 } from "./parser.js";
 import { InvalidSessionError, getSessionContext } from "./moodleApi.js";
 import { fetchCourseContentsViaAjax } from "./courses.js";
@@ -162,7 +163,7 @@ export async function fetchLiveDeadlines(sesskey, courses = [], occurrencesMap =
   //    Authoritative source of truth: 100% group-restricted by Moodle, exact submission statuses.
   // -------------------------------------------------------------
   if (Array.isArray(courses) && courses.length > 0) {
-    const coursePromises = courses.map(async (course) => {
+    await pMap(courses, async (course) => {
       const courseId = course.id;
       const courseCode = course.code || course.shortname || extractCourseCode(course.name) || "Course";
       const courseName = course.name || courseCode;
@@ -207,7 +208,7 @@ export async function fetchLiveDeadlines(sesskey, courses = [], occurrencesMap =
       try {
         const assignIndexUrl = `${SPECTRUM_BASE_URL}/mod/assign/index.php?id=${encodeURIComponent(courseId)}`;
         const ctrl1 = typeof AbortController !== "undefined" ? new AbortController() : null;
-        const tid1 = ctrl1 ? setTimeout(() => ctrl1.abort(), 4000) : null;
+        const tid1 = ctrl1 ? setTimeout(() => ctrl1.abort(), 12000) : null;
         let res;
         try {
           res = await fetch(assignIndexUrl, { credentials: "include", signal: ctrl1?.signal });
@@ -243,7 +244,7 @@ export async function fetchLiveDeadlines(sesskey, courses = [], occurrencesMap =
         try {
           const courseViewUrl = `${SPECTRUM_BASE_URL}/course/view.php?id=${encodeURIComponent(courseId)}`;
           const ctrl2 = typeof AbortController !== "undefined" ? new AbortController() : null;
-          const tid2 = ctrl2 ? setTimeout(() => ctrl2.abort(), 4000) : null;
+          const tid2 = ctrl2 ? setTimeout(() => ctrl2.abort(), 12000) : null;
           let res;
           try {
             res = await fetch(courseViewUrl, { credentials: "include", signal: ctrl2?.signal });
@@ -279,9 +280,7 @@ export async function fetchLiveDeadlines(sesskey, courses = [], occurrencesMap =
           console.warn(`[Spectra] Error checking course view submissions for ${courseCode}:`, err);
         }
       }
-    });
-
-    await Promise.allSettled(coursePromises);
+    }, 2);
   }
 
   // -------------------------------------------------------------

@@ -2185,3 +2185,23 @@ export function parseGradebookAttendance(html) {
   return null;
 }
 
+/**
+ * Concurrency-limited Promise mapper.
+ * Executes async tasks over items with at most `concurrency` tasks in-flight simultaneously.
+ */
+export async function pMap(items, fn, concurrency = 2) {
+  if (!Array.isArray(items) || items.length === 0) return [];
+  const results = [];
+  const executing = new Set();
+  for (const item of items) {
+    const p = Promise.resolve().then(() => fn(item));
+    results.push(p);
+    executing.add(p);
+    const clean = () => executing.delete(p);
+    p.then(clean, clean);
+    if (executing.size >= concurrency) {
+      await Promise.race(executing);
+    }
+  }
+  return Promise.allSettled(results);
+}

@@ -17,7 +17,8 @@ import {
   matchesOccurrence,
   isRespectiveOccurrence,
   parseCourseContentsModules,
-  parseGradebookAttendance
+  parseGradebookAttendance,
+  pMap
 } from "./parser.js";
 import { InvalidSessionError, getSessionContext } from "./moodleApi.js";
 import { fetchCourseContentsViaAjax } from "./courses.js";
@@ -52,7 +53,7 @@ export async function fetchCourseAttendance({ courseId, courseCode = "UM", sessk
   const fetchIndex = async () => {
     try {
       const ctrl = typeof AbortController !== "undefined" ? new AbortController() : null;
-      const tid = ctrl ? setTimeout(() => ctrl.abort(), 5000) : null;
+      const tid = ctrl ? setTimeout(() => ctrl.abort(), 12000) : null;
       let indexRes;
       try {
         indexRes = await fetch(`${SPECTRUM_BASE_URL}/mod/attendance/index.php?id=${encodeURIComponent(courseId)}`, {
@@ -82,7 +83,7 @@ export async function fetchCourseAttendance({ courseId, courseCode = "UM", sessk
   const fetchView = async () => {
     try {
       const ctrl = typeof AbortController !== "undefined" ? new AbortController() : null;
-      const tid = ctrl ? setTimeout(() => ctrl.abort(), 5000) : null;
+      const tid = ctrl ? setTimeout(() => ctrl.abort(), 12000) : null;
       let courseRes;
       try {
         courseRes = await fetch(`${SPECTRUM_BASE_URL}/course/view.php?id=${encodeURIComponent(courseId)}`, {
@@ -344,7 +345,7 @@ export async function fetchLiveAllAttendance(courses = [], sesskey, occurrencesM
   let validPercentSum = 0;
   let coursesWithAttendance = 0;
 
-  const coursePromises = courses.map(async (course) => {
+  const settledResults = await pMap(courses, async (course) => {
     const occ = occurrencesMap[course.id] || occurrencesMap[course.code] || "";
     try {
       return await fetchCourseAttendance({
@@ -368,9 +369,9 @@ export async function fetchLiveAllAttendance(courses = [], sesskey, occurrencesM
         openSession: null
       };
     }
-  });
+  }, 2);
 
-  const settledRecords = await Promise.all(coursePromises);
+  const settledRecords = settledResults.map(r => r.status === "fulfilled" ? r.value : null);
 
   for (let i = 0; i < courses.length; i++) {
     const course = courses[i];

@@ -153,6 +153,12 @@ function initDOMListeners() {
     openLoginBtn.addEventListener("click", handleOpenLoginPortal);
   }
 
+  // Auto-Detect Session Button in Disconnected State
+  const autoDetectOverlayBtn = document.getElementById("autoDetectOverlayBtn");
+  if (autoDetectOverlayBtn) {
+    autoDetectOverlayBtn.addEventListener("click", handleAutoDetectSession);
+  }
+
   // Recheck Session Button in Disconnected State
   const recheckBtn = document.getElementById("recheckSessionBtn");
   if (recheckBtn) {
@@ -1067,9 +1073,6 @@ async function syncLiveSession() {
 
     // Step 2: Load live deadlines with populated state.courses
     await loadLiveDeadlines();
-
-    // Step 3: Announcements & Attendance can be refreshed non-blocking in background
-    loadLiveAnnouncements().catch((e) => console.warn("[Spectra] Background announcements notice:", e));
 
   } catch (err) {
     console.warn("[Spectra] Live session authentication check:", err);
