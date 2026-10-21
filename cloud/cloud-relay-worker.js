@@ -250,8 +250,10 @@ async function checkAndRecordCloudAttendance(env, sessionData) {
   let checkedCourses = 0;
 
   for (const course of courses) {
-    const courseId = course.id;
-    const courseCode = course.code || course.id;
+    const courseId = typeof course === "object" ? (course.id || course.courseId) : course;
+    const courseCode = typeof course === "object" ? (course.code || courseId) : course;
+    if (!courseId) continue;
+
     const studentOcc = occurrences[courseId] || occurrences[courseCode] || "";
     const storedPwd = passwords[courseId] || passwords[courseCode] || "";
 
@@ -465,24 +467,27 @@ function matchesOccurrence(groupStr, studentOcc, descStr = "") {
   const targetNum = targetOcc.replace(/\D+/g, "");
 
   const g = String(groupStr || "").trim().toLowerCase();
-  const d = String(descStr || "").trim().toLowerCase();
+  let d = String(descStr || "").trim().toLowerCase();
+
+  // Strip task titles so "Tutorial 3 Submission" isn't treated as occurrence 3
+  d = d.replace(/\b(?:tutorial|tut|lab|assignment|tugasan)\s+\d+\s+(?:submission|link|dropbox|box|handin|hantar|due)\b/gi, "");
 
   if (g.includes(targetOcc) || d.includes(targetOcc)) return true;
 
   if (targetNum) {
-    const numRegex = new RegExp(`\\b(?:occ|occurrence|kumpulan|group|tutorial|tut)\\s*#?\\s*0*${targetNum}\\b`, "i");
+    const numRegex = new RegExp(`\\b(?:occ|occurrence|kumpulan|group)\\s*#?\\s*0*${targetNum}\\b`, "i");
     if (numRegex.test(g) || numRegex.test(d)) return true;
   }
 
   if (g === "all students" || g === "semua pelajar" || g === "" || g === "all") {
-    const otherOccRegex = /\b(?:occ|occurrence|kumpulan|group|tutorial|tut)\s*#?\s*\d+\b/i;
+    const otherOccRegex = /\b(?:occ|occurrence|kumpulan|group)\s*#?\s*\d+\b/i;
     if (otherOccRegex.test(d)) {
-      return targetNum ? new RegExp(`\\b(?:occ|occurrence|kumpulan|group|tutorial|tut)\\s*#?\\s*0*${targetNum}\\b`, "i").test(d) : false;
+      return targetNum ? new RegExp(`\\b(?:occ|occurrence|kumpulan|group)\\s*#?\\s*0*${targetNum}\\b`, "i").test(d) : false;
     }
     return true;
   }
 
-  return false;
+  return true;
 }
 
 function isAttendanceWorkerActivity(title, url = "") {
@@ -561,71 +566,141 @@ async function checkCloudDeadlines(env, sessionData) {
   const now = Date.now();
 
   for (const course of courses) {
-    const courseId = course.id;
-    const courseCode = course.code || course.id;
+    const courseId = typeof course === "object" ? (course.id || course.courseId) : course;
+    const courseCode = typeof course === "object" ? (course.code || courseId) : course;
+    if (!courseId) continue;
+
     const studentOcc = occurrences[courseId] || occurrences[courseCode] || "";
 
     try {
-      const res = await fetch(`https://spectrum.um.edu.my/mod/assign/index.php?id=${encodeURIComponent(courseId)}`, {
-        headers: { "Cookie": cookieHeader, "User-Agent": "Mozilla/5.0 Spectra-Relay/1.0" }
-      });
-      if (!res.ok) continue;
-      const html = await res.text();
-      checkedCourses++;
+      const foundAssignments = new Map();
 
-      const rowRegex = /<tr[^>]*>([\s\S]*?)<\/tr>/gi;
-      let rowMatch;
-      while ((rowMatch = rowRegex.exec(html)) !== null) {
-        const rowHtml = rowMatch[1];
-        const linkMatch = rowHtml.match(/<a[^>]+href=["']([^"']*mod\/assign\/view\.php\?id=(\d+)[^"']*)["'][^>]*>([\s\S]*?)<\/a>/i);
-        if (!linkMatch) continue;
+      // 1. Check mod/assign/index.php
+      try {
+        const res = await fetch(`https://spectrum.um.edu.my/mod/assign/index.php?id=${encodeURIComponent(courseId)}`, {
+          headers: { "Cookie": cookieHeader, "User-Agent": "Mozilla/5.0 Spectra-Relay/1.0" }
+        });
+        if (res.ok) {
+          const html = await res.text();
+          checkedCourses++;
 
-        const assignUrl = linkMatch[1];
-        const cmid = linkMatch[2];
-        const rawTitle = linkMatch[3].replace(/<[^>]+>/g, "").trim();
+          const rowRegex = /<tr[^>]*>([\s\S]*?)<\/tr>/gi;
+          let rowMatch;
+          while ((rowMatch = rowRegex.exec(html)) !== null) {
+            const rowHtml = rowMatch[1];
+            const linkMatch = rowHtml.match(/<a[^>]+href=["']([^"']*mod\/assign\/view\.php\?id=(\d+)[^"']*)["'][^>]*>([\s\S]*?)<\/a>/i);
+            if (!linkMatch) continue;
 
-        if (alertedDeadlineIds.has(cmid)) continue;
-        if (isAttendanceWorkerActivity(rawTitle, assignUrl)) continue;
-        if (!matchesOccurrence("", studentOcc, rawTitle)) continue;
+            const assignUrl = linkMatch[1];
+            const cmid = linkMatch[2];
+            const rawTitle = linkMatch[3].replace(/<[^>]+>/g, "").trim();
 
-        const cellRegex = /<td[^>]*>([\s\S]*?)<\/td>/gi;
-        const cells = [];
-        let cM;
-        while ((cM = cellRegex.exec(rowHtml)) !== null) {
-          cells.push(cM[1].replace(/<[^>]+>/g, "").trim());
-        }
+            if (isAttendanceWorkerActivity(rawTitle, assignUrl)) continue;
 
-        let dueDateText = "";
-        let submissionStatusText = "";
-        for (const c of cells) {
-          if (c.includes(rawTitle)) continue;
-          if (!dueDateText && (/\d{1,2}[:.]\d{2}/.test(c) || /\b(?:jan|feb|mar|apr|may|jun|jul|aug|sep|oct|nov|dec|okt|mac|mei|ogo|dis)\b/i.test(c) || /\d{1,2}[\/\.\-]\d{1,2}/.test(c))) {
-            dueDateText = c;
-          } else if (!submissionStatusText && c && !/^(week|minggu|topic|topik|\d+)\$/i.test(c)) {
-            submissionStatusText = c;
+            const cellRegex = /<td[^>]*>([\s\S]*?)<\/td>/gi;
+            const cells = [];
+            let cM;
+            while ((cM = cellRegex.exec(rowHtml)) !== null) {
+              cells.push(cM[1].replace(/<[^>]+>/g, "").trim());
+            }
+
+            let dueDateText = "";
+            let submissionStatusText = "";
+            for (const c of cells) {
+              if (c.includes(rawTitle)) continue;
+              if (!dueDateText && (/\d{1,2}[:.]\d{2}/.test(c) || /\b(?:jan|feb|mar|apr|may|jun|jul|aug|sep|oct|nov|dec|okt|mac|mei|ogo|dis)\b/i.test(c) || /\d{1,2}[\/\.\-]\d{1,2}/.test(c))) {
+                dueDateText = c;
+              } else if (!submissionStatusText && c && !/^(week|minggu|topic|topik|\d+)\$/i.test(c)) {
+                submissionStatusText = c;
+              }
+            }
+
+            const isSubmitted = /submitted|graded|selesai|dihantar/i.test(submissionStatusText) && !/no submission|not submitted|belum/i.test(submissionStatusText);
+
+            foundAssignments.set(cmid, {
+              cmid,
+              title: rawTitle,
+              url: assignUrl,
+              dueDateText,
+              isSubmitted
+            });
           }
         }
+      } catch (_) { }
 
-        const isSubmitted = /submitted|graded|selesai|dihantar/i.test(submissionStatusText) && !/no submission|not submitted|belum/i.test(submissionStatusText);
-        if (isSubmitted) continue;
+      // 2. Fallback: Parse course/view.php to catch assignments inside sub-sections or containers
+      try {
+        const courseRes = await fetch(`https://spectrum.um.edu.my/course/view.php?id=${encodeURIComponent(courseId)}`, {
+          headers: { "Cookie": cookieHeader, "User-Agent": "Mozilla/5.0 Spectra-Relay/1.0" }
+        });
+        if (courseRes.ok) {
+          const courseHtml = await courseRes.text();
+          const assignRegex = /<a[^>]+href=["']([^"']*\/mod\/assign\/view\.php\?id=(\d+)[^"']*)["'][^>]*>([\s\S]*?)<\/a>/gi;
+          let aMatch;
+          while ((aMatch = assignRegex.exec(courseHtml)) !== null) {
+            const assignUrl = aMatch[1];
+            const cmid = aMatch[2];
+            const rawTitle = aMatch[3].replace(/<[^>]+>/g, "").trim();
 
-        const dueTimestamp = dueDateText ? parseWorkerDateString(dueDateText) : null;
+            if (!rawTitle || isAttendanceWorkerActivity(rawTitle, assignUrl)) continue;
+
+            if (!foundAssignments.has(cmid)) {
+              foundAssignments.set(cmid, {
+                cmid,
+                title: rawTitle,
+                url: assignUrl,
+                dueDateText: "",
+                isSubmitted: false
+              });
+            }
+          }
+        }
+      } catch (_) { }
+
+      // 3. Process assignments
+      for (const [cmid, assign] of foundAssignments.entries()) {
+        if (alertedDeadlineIds.has(cmid)) continue;
+        if (studentOcc && !matchesOccurrence("", studentOcc, assign.title)) continue;
+        if (assign.isSubmitted) continue;
+
+        let dueTimestamp = assign.dueDateText ? parseWorkerDateString(assign.dueDateText) : null;
+        let dueDateDisplay = assign.dueDateText;
+
+        if (!dueTimestamp) {
+          try {
+            const fullViewUrl = assign.url.startsWith("http") ? assign.url : `https://spectrum.um.edu.my/${assign.url.replace(/^\//, "")}`;
+            const viewRes = await fetch(fullViewUrl, {
+              headers: { "Cookie": cookieHeader, "User-Agent": "Mozilla/5.0 Spectra-Relay/1.0" }
+            });
+            if (viewRes.ok) {
+              const viewHtml = await viewRes.text();
+              if (/submitted for grading|telah dihantar/i.test(viewHtml)) continue;
+
+              const dueMatch = viewHtml.match(/<th[^>]*class=["'][^"']*cell[^"']*header[^"']*>\s*(?:Due date|Tarikh akhir)\s*<\/th>\s*<td[^>]*class=["'][^"']*cell[^"']*lastcol[^"']*>([\s\S]*?)<\/td>/i) ||
+                viewHtml.match(/(?:Due date|Tarikh akhir)[:\s]*<[^>]*>([\s\S]*?)<\/[^>]*>/i);
+              if (dueMatch) {
+                dueDateDisplay = dueMatch[1].replace(/<[^>]+>/g, "").trim();
+                dueTimestamp = parseWorkerDateString(dueDateDisplay);
+              }
+            }
+          } catch (_) { }
+        }
+
         if (!dueTimestamp) continue;
-
         if (now - dueTimestamp > 100 * 24 * 60 * 60 * 1000) continue;
 
         const diffHours = (dueTimestamp - now) / (1000 * 60 * 60);
         if (diffHours > 0 && diffHours <= 24) {
           const hoursLeft = Math.max(1, Math.round(diffHours));
-          const fullUrl = assignUrl.startsWith("http") ? assignUrl : `https://spectrum.um.edu.my/${assignUrl.replace(/^\//, "")}`;
+          const fullUrl = assign.url.startsWith("http") ? assign.url : `https://spectrum.um.edu.my/${assign.url.replace(/^\//, "")}`;
 
           await dispatchTelegram(
             botToken,
             chatId,
             `⏰ <b>Spectra Urgent Submission Deadline!</b>\n` +
             `<b>Course:</b> ${courseCode}\n` +
-            `<b>Task:</b> ${rawTitle}\n` +
-            `<b>Due:</b> ${dueDateText} (${hoursLeft}h remaining)\n` +
+            `<b>Task:</b> ${assign.title}\n` +
+            `<b>Due:</b> ${dueDateDisplay} (${hoursLeft}h remaining)\n` +
             `<b>Status:</b> No submission recorded\n` +
             `🔗 <a href="${fullUrl}">Open Submission Dropbox on SPeCTRUM</a>`
           );
@@ -639,6 +714,7 @@ async function checkCloudDeadlines(env, sessionData) {
     }
   }
 
+  // 4. Permanent iCal fallback
   if (sessionData.calendarIcalUrl) {
     try {
       const icsRes = await checkCloudDeadlinesViaIcs(env, sessionData);
@@ -713,13 +789,16 @@ async function checkCloudDeadlinesViaIcs(env, sessionData) {
       if (!cmid || alertedDeadlineIds.has(cmid)) continue;
       if (isAttendanceWorkerActivity(summary, url)) continue;
 
-      let courseCode = categories || "";
-      const cMatch = summary.match(/\b([A-Z]{3,4}\s*\d{4})\b/i);
-      if (cMatch) courseCode = cMatch[1];
-      if (!courseCode) courseCode = "Course";
+      let courseCode = "";
+      const cMatch = categories.match(/\b([A-Z]{3,4}\s*\d{4})\b/i) || summary.match(/\b([A-Z]{3,4}\s*\d{4})\b/i);
+      if (cMatch) {
+        courseCode = cMatch[1].replace(/\s+/g, "");
+      } else {
+        courseCode = categories || "Course";
+      }
 
-      const studentOcc = occurrences[courseCode] || "";
-      if (!matchesOccurrence("", studentOcc, summary)) continue;
+      const studentOcc = occurrences[courseCode] || occurrences[courseCode.toLowerCase()] || "";
+      if (studentOcc && !matchesOccurrence("", studentOcc, summary)) continue;
 
       let dueTimestamp = null;
       const utcMatch = dateStr.match(/^(\d{4})(\d{2})(\d{2})T(\d{2})(\d{2})(\d{2})Z\$/i);
@@ -745,7 +824,7 @@ async function checkCloudDeadlinesViaIcs(env, sessionData) {
         await dispatchTelegram(
           botToken,
           chatId,
-          `⏰ <b>Spectra Urgent Submission Deadline (via Permanent iCal)!</b>\n` +
+          `⏰ <b>Spectra Urgent Submission Deadline!</b>\n` +
           `<b>Course:</b> ${courseCode}\n` +
           `<b>Task:</b> ${summary.replace(/\s+is due(?:\s+to submit)?$/i, "")}\n` +
           `<b>Due:</b> ${formattedDate} (${hoursLeft}h remaining)\n` +
@@ -874,8 +953,9 @@ async function checkCloudAnnouncements(env, sessionData) {
   let checkedCourses = 0;
 
   for (const course of courses) {
-    const courseId = course.id;
-    const courseCode = course.code || course.id;
+    const courseId = typeof course === "object" ? (course.id || course.courseId) : course;
+    const courseCode = typeof course === "object" ? (course.code || courseId) : course;
+    if (!courseId) continue;
 
     try {
       const forumUrls = new Set();
