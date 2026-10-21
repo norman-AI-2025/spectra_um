@@ -426,8 +426,12 @@ export function normalizeHydratedDeadlines(events = [], rawCalendarEvents = [], 
         const title = cleanMoodleTitle(item.title || item.name || "");
         if (!title) continue;
 
-        // Strictly eliminate dummy placeholder assignments
-        if (title.toLowerCase() === "assignment" && (!item.url || item.url.includes("/my/") || !item.cmid)) {
+        // Strictly eliminate synthetic ghost items created by old fallback bugs
+        const isSyntheticGhost = (
+          (item.id && String(item.id).startsWith("scraped-") && (!item.url || item.url.includes("/my/"))) ||
+          (item.courseCode === "UM" && (!item.url || !item.url.includes("view.php?id=")))
+        );
+        if (isSyntheticGhost) {
           continue;
         }
 

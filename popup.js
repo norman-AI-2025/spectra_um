@@ -999,9 +999,12 @@ async function syncLiveSession() {
         const cleanCached = stored.cached_deadlines.filter((d) => {
           if (!d || typeof d !== "object") return false;
           const title = (d.title || d.name || "").trim();
-          if (!title || title.toLowerCase() === "assignment") return false;
-          if (d.courseCode === "UM" && (!d.url || !d.url.includes("id="))) return false;
-          return true;
+          if (!title) return false;
+          const isSynthetic = (
+            (d.id && String(d.id).startsWith("scraped-") && (!d.url || d.url.includes("/my/"))) ||
+            (d.courseCode === "UM" && (!d.url || !d.url.includes("view.php?id=")))
+          );
+          return !isSynthetic;
         });
 
         if (cleanCached.length !== stored.cached_deadlines.length) {
@@ -1187,9 +1190,12 @@ async function loadLiveDeadlines() {
       if (isAttendanceActivity(item)) return false;
       if (isOverdueMoreThan100Days(item.dueTimestamp)) return false;
       const title = (item.title || item.name || "").trim();
-      if (!title || title.toLowerCase() === "assignment") return false;
-      if (item.courseCode === "UM" && (!item.url || !item.url.includes("id="))) return false;
-      return true;
+      if (!title) return false;
+      const isSynthetic = (
+        (item.id && String(item.id).startsWith("scraped-") && (!item.url || item.url.includes("/my/"))) ||
+        (item.courseCode === "UM" && (!item.url || !item.url.includes("view.php?id=")))
+      );
+      return !isSynthetic;
     });
 
     state.deadlines.sort((a, b) => {

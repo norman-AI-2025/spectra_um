@@ -543,7 +543,7 @@ console.log("\n--- Sub-test 5E: Synthetic Dummy Assignment Elimination ---");
 const corruptCandidateList = [
   {}, // completely empty object
   { courseCode: "UM" }, // object without title or task
-  { title: "Assignment", url: "https://spectrum.um.edu.my/my/" }, // dummy placeholder
+  { id: "scraped-0-Assignment", title: "Assignment", courseCode: "UM", url: "https://spectrum.um.edu.my/my/" }, // synthetic ghost from old bug
   { "Course Code": "GIG1013" }, // legacy table item without Assignment / Task
   {
     id: "777",
@@ -552,6 +552,14 @@ const corruptCandidateList = [
     courseCode: "WIX2001",
     // No due date specified
     url: "https://spectrum.um.edu.my/mod/assign/view.php?id=777"
+  },
+  {
+    id: "888",
+    cmid: "888",
+    title: "Assignment", // Real lecturer named it "Assignment"
+    courseCode: "WIX2002",
+    dueTimestamp: Date.now() + 86400000,
+    url: "https://spectrum.um.edu.my/mod/assign/view.php?id=888"
   }
 ];
 
@@ -559,12 +567,18 @@ const sanitizedHydration = normalizeHydratedDeadlines(corruptCandidateList, [], 
   studentOccurrence: "Occ 1"
 });
 
-assert(sanitizedHydration.length === 1, `Expected exactly 1 valid item (Real Lab Report), got ${sanitizedHydration.length}`);
-assert(sanitizedHydration[0].title === "Real Lab Report", "Only real assignment with valid title is preserved");
-assert(sanitizedHydration[0].dueTimestamp === null, "Missing due date does NOT synthesize 24h urgency");
-assert(sanitizedHydration[0].formattedTime === "No due date", "Formatted time reflects no due date");
-assert(!sanitizedHydration.some(d => d.title === "Assignment"), "Dummy title 'Assignment' is strictly rejected");
-assert(!sanitizedHydration.some(d => d.courseCode === "UM" && d.title === "Assignment"), "Fake 'UM' 'Assignment' is eliminated");
+assert(sanitizedHydration.length === 2, `Expected exactly 2 valid items, got ${sanitizedHydration.length}`);
+const labReport = sanitizedHydration.find(d => d.id === "777");
+assert(Boolean(labReport), "Real Lab Report is preserved");
+assert(labReport.dueTimestamp === null, "Missing due date does NOT synthesize 24h urgency");
+assert(labReport.formattedTime === "No due date", "Formatted time reflects no due date");
+
+const realAssignment = sanitizedHydration.find(d => d.id === "888");
+assert(Boolean(realAssignment), "Legitimate assignment titled 'Assignment' with real Moodle URL is NOT dropped");
+assert(realAssignment.courseCode === "WIX2002", "Preserves genuine course code WIX2002");
+
+assert(!sanitizedHydration.some(d => d.id === "scraped-0-Assignment"), "Synthetic ghost 'scraped-0-Assignment' is eliminated");
+assert(!sanitizedHydration.some(d => d.courseCode === "UM" && d.url.includes("/my/")), "Fake 'UM' ghost pointing to /my/ is eliminated");
 
 console.log(`\n=== All Deadlines Tests Finished: ${passed} passed, ${failed} failed ===`);
 if (failed > 0) {

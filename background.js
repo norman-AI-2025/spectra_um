@@ -490,9 +490,12 @@ async function checkUpcomingDeadlines() {
         if (isAttendanceActivity(d)) return false;
         if (isOverdueMoreThan100Days(d.dueTimestamp)) return false;
         const title = (d.title || d.name || "").trim();
-        if (!title || title.toLowerCase() === "assignment") return false;
-        if (d.courseCode === "UM" && (!d.url || !d.url.includes("id="))) return false;
-        return true;
+        if (!title) return false;
+        const isSynthetic = (
+          (d.id && String(d.id).startsWith("scraped-") && (!d.url || d.url.includes("/my/"))) ||
+          (d.courseCode === "UM" && (!d.url || !d.url.includes("view.php?id=")))
+        );
+        return !isSynthetic;
       });
       await chrome.storage.local.set({ cached_deadlines: validDeadlines });
     }
