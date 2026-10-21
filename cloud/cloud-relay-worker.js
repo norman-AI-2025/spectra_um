@@ -19,6 +19,7 @@ export default {
   // HTTP Endpoint Handler
   async fetch(request, env, ctx) {
     const url = new URL(request.url);
+    const path = url.pathname.replace(/\/+\$/, "") || "/";
 
     // CORS Headers for Chrome Extension
     const corsHeaders = {
@@ -41,10 +42,22 @@ export default {
       });
     }
 
-    // Route: POST /sync (Called by Spectra Extension on cookie change)
-    if (url.pathname === "/sync" && request.method === "POST") {
+    // Route: POST /sync (or root POST called by Spectra Extension on cookie change)
+    if ((path === "/sync" || path === "/") && request.method === "POST") {
       try {
-        const { sessionToken, expires, domain, courses, occurrences, passwords, sesskey, telegramToken, telegramChatId, calendarIcalUrl } = body;
+        const body = await request.json().catch(() => ({}));
+        const {
+          sessionToken,
+          expires,
+          domain,
+          courses,
+          occurrences,
+          passwords,
+          sesskey,
+          telegramToken,
+          telegramChatId,
+          calendarIcalUrl
+        } = body;
 
         if (!sessionToken) {
           return new Response(JSON.stringify({ error: "Missing sessionToken" }), {
@@ -70,6 +83,8 @@ export default {
 
         if (env.SPECTRA_KV) {
           await env.SPECTRA_KV.put("moodle_session", JSON.stringify(sessionRecord));
+        } else {
+          console.warn("[Spectra Relay] SPECTRA_KV binding is missing. Session not persisted.");
         }
 
         return new Response(JSON.stringify({
@@ -89,7 +104,7 @@ export default {
     }
 
     // Route: GET /status
-    if (url.pathname === "/status") {
+    if ((path === "/status" || path === "/") && request.method === "GET") {
       let record = null;
       if (env.SPECTRA_KV) {
         const raw = await env.SPECTRA_KV.get("moodle_session");
@@ -101,27 +116,27 @@ export default {
         hasSession: Boolean(record?.sessionToken),
         coursesCount: record?.courses?.length || 0,
         updatedAt: record?.updatedAt ? new Date(record.updatedAt).toISOString() : null,
-        cronSchedule: "Every 1 minute"
+        cronSchedule: "Every 15 minutes"
       }), {
         headers: { "Content-Type": "application/json", ...corsHeaders }
       });
     }
 
     // Route: POST /poll (Manual Polling Trigger)
-    if (url.pathname === "/poll" && request.method === "POST") {
+    if (path === "/poll" && request.method === "POST") {
       const result = await runSpectrumPollingJob(env);
       return new Response(JSON.stringify(result), {
         headers: { "Content-Type": "application/json", ...corsHeaders }
       });
     }
 
-    return new Response(JSON.stringify({ error: "Endpoint not found" }), {
+    return new Response(JSON.stringify({ error: "Endpoint not found", requestedPath: path }), {
       status: 404,
       headers: { "Content-Type": "application/json", ...corsHeaders }
     });
   },
 
-  // Cron Trigger Handler (Every 15 mins)
+  // Cron Trigger Handler
   async scheduled(event, env, ctx) {
     console.log("[Spectra Relay] Cron triggered at:", event.cron);
     ctx.waitUntil(runSpectrumPollingJob(env));
@@ -227,7 +242,7 @@ async function checkAndRecordCloudAttendance(env, sessionData) {
     if (rawRecorded) {
       try {
         recordedSessids = new Set(JSON.parse(rawRecorded));
-      } catch (_) {}
+      } catch (_) { }
     }
   }
 
@@ -241,14 +256,12 @@ async function checkAndRecordCloudAttendance(env, sessionData) {
     const storedPwd = passwords[courseId] || passwords[courseCode] || "";
 
     try {
-      // 1. Discover attendance view URL via /mod/attendance/index.php
       const indexRes = await fetch(`https://spectrum.um.edu.my/mod/attendance/index.php?id=${encodeURIComponent(courseId)}`, {
         headers: { "Cookie": cookieHeader, "User-Agent": "Mozilla/5.0 Spectra-Relay/1.0" }
       });
       if (!indexRes.ok) continue;
       const indexHtml = await indexRes.text();
 
-      // Extract attendance view link(s)
       const viewMatches = indexHtml.match(/href=["']([^"']*\/mod\/attendance\/view\.php\?[^"']*)["']/gi) || [];
       if (viewMatches.length === 0) continue;
 
@@ -262,7 +275,6 @@ async function checkAndRecordCloudAttendance(env, sessionData) {
           viewUrl = `https://spectrum.um.edu.my/${viewUrl.replace(/^\//, "")}`;
         }
 
-        // Fetch All sessions view (view=5)
         const allViewUrl = viewUrl.includes("view=") ? viewUrl.replace(/view=\d+/, "view=5") : `${viewUrl}&view=5`;
 
         const viewRes = await fetch(allViewUrl, {
@@ -271,7 +283,6 @@ async function checkAndRecordCloudAttendance(env, sessionData) {
         if (!viewRes.ok) continue;
         const viewHtml = await viewRes.text();
 
-        // Check for self-recording submit links: attendance.php?sessid=...
         const rowRegex = /<tr[^>]*>([\s\S]*?)<\/tr>/gi;
         let rowM;
         while ((rowM = rowRegex.exec(viewHtml)) !== null) {
@@ -282,10 +293,8 @@ async function checkAndRecordCloudAttendance(env, sessionData) {
           const submitUrl = submitM[1];
           const sessid = submitM[2];
 
-          // Skip if already submitted
           if (recordedSessids.has(sessid)) continue;
 
-          // Extract table cells
           const cellRegex = /<td[^>]*>([\s\S]*?)<\/td>/gi;
           const cells = [];
           let cM;
@@ -298,12 +307,10 @@ async function checkAndRecordCloudAttendance(env, sessionData) {
           const groupText = cells.length >= 6 ? cells[2] : "All students";
           const descText = cells.length >= 6 ? cells[3] : cells[2] || "Class Session";
 
-          // Occurrence filter check
           if (studentOcc && !matchesOccurrence(groupText, studentOcc, descText)) {
             continue;
           }
 
-          // Fetch attendance form
           const formTargetUrl = submitUrl.startsWith("http")
             ? submitUrl
             : `https://spectrum.um.edu.my/${submitUrl.replace(/^\//, "")}`;
@@ -314,14 +321,13 @@ async function checkAndRecordCloudAttendance(env, sessionData) {
           if (!formRes.ok) continue;
           const formHtml = await formRes.text();
 
-          // Extract sesskey, sessid, and statusId for Present
           const sesskeyM = formHtml.match(/name=["']sesskey["'][^>]*value=["']([^"']+)["']/i) ||
-                           formHtml.match(/value=["']([^"']+)["'][^>]*name=["']sesskey["']/i) ||
-                           formHtml.match(/"sesskey":"([^"]+)"/);
+            formHtml.match(/value=["']([^"']+)["'][^>]*name=["']sesskey["']/i) ||
+            formHtml.match(/"sesskey":"([^"]+)"/);
           const formSesskey = sesskeyM ? sesskeyM[1] : (sessionData.sesskey || "");
 
           const formSessidM = formHtml.match(/name=["']sessid["'][^>]*value=["']([^"']+)["']/i) ||
-                              formHtml.match(/value=["']([^"']+)["'][^>]*name=["']sessid["']/i);
+            formHtml.match(/value=["']([^"']+)["'][^>]*name=["']sessid["']/i);
           const formSessid = formSessidM ? formSessidM[1] : sessid;
 
           let statusId = null;
@@ -363,13 +369,12 @@ async function checkAndRecordCloudAttendance(env, sessionData) {
 
           if (!statusId) {
             const anyRadio = formHtml.match(/name=["']status["'][^>]*value=["'](\d+)["']/i) ||
-                             formHtml.match(/value=["'](\d+)["'][^>]*name=["']status["']/i);
+              formHtml.match(/value=["'](\d+)["'][^>]*name=["']status["']/i);
             if (anyRadio) statusId = anyRadio[1];
           }
 
           if (!statusId) continue;
 
-          // Check if password required
           const requiresPassword = /<input[^>]+name=["'](studentpassword|password)["']/i.test(formHtml);
           if (requiresPassword && !storedPwd) {
             if (botToken && chatId) {
@@ -385,7 +390,6 @@ async function checkAndRecordCloudAttendance(env, sessionData) {
             continue;
           }
 
-          // Submit check-in POST
           let bodyStr = "";
           if (typeof URLSearchParams !== "undefined") {
             const postParams = new URLSearchParams();
@@ -548,7 +552,7 @@ async function checkCloudDeadlines(env, sessionData) {
     if (rawAlerted) {
       try {
         alertedDeadlineIds = new Set(JSON.parse(rawAlerted));
-      } catch (_) {}
+      } catch (_) { }
     }
   }
 
@@ -562,7 +566,6 @@ async function checkCloudDeadlines(env, sessionData) {
     const studentOcc = occurrences[courseId] || occurrences[courseCode] || "";
 
     try {
-      // Check /mod/assign/index.php?id=...
       const res = await fetch(`https://spectrum.um.edu.my/mod/assign/index.php?id=${encodeURIComponent(courseId)}`, {
         headers: { "Cookie": cookieHeader, "User-Agent": "Mozilla/5.0 Spectra-Relay/1.0" }
       });
@@ -581,16 +584,10 @@ async function checkCloudDeadlines(env, sessionData) {
         const cmid = linkMatch[2];
         const rawTitle = linkMatch[3].replace(/<[^>]+>/g, "").trim();
 
-        // Skip if already alerted
         if (alertedDeadlineIds.has(cmid)) continue;
-
-        // Strictly exclude attendance activities from submissions
         if (isAttendanceWorkerActivity(rawTitle, assignUrl)) continue;
-
-        // Occurrence filter
         if (!matchesOccurrence("", studentOcc, rawTitle)) continue;
 
-        // Extract cells
         const cellRegex = /<td[^>]*>([\s\S]*?)<\/td>/gi;
         const cells = [];
         let cM;
@@ -604,7 +601,7 @@ async function checkCloudDeadlines(env, sessionData) {
           if (c.includes(rawTitle)) continue;
           if (!dueDateText && (/\d{1,2}[:.]\d{2}/.test(c) || /\b(?:jan|feb|mar|apr|may|jun|jul|aug|sep|oct|nov|dec|okt|mac|mei|ogo|dis)\b/i.test(c) || /\d{1,2}[\/\.\-]\d{1,2}/.test(c))) {
             dueDateText = c;
-          } else if (!submissionStatusText && c && !/^(week|minggu|topic|topik|\d+)$/i.test(c)) {
+          } else if (!submissionStatusText && c && !/^(week|minggu|topic|topik|\d+)\$/i.test(c)) {
             submissionStatusText = c;
           }
         }
@@ -615,12 +612,10 @@ async function checkCloudDeadlines(env, sessionData) {
         const dueTimestamp = dueDateText ? parseWorkerDateString(dueDateText) : null;
         if (!dueTimestamp) continue;
 
-        // Strictly exclude items overdue by more than 100 days
         if (now - dueTimestamp > 100 * 24 * 60 * 60 * 1000) continue;
 
         const diffHours = (dueTimestamp - now) / (1000 * 60 * 60);
         if (diffHours > 0 && diffHours <= 24) {
-          // Urgent deadline (< 24h)
           const hoursLeft = Math.max(1, Math.round(diffHours));
           const fullUrl = assignUrl.startsWith("http") ? assignUrl : `https://spectrum.um.edu.my/${assignUrl.replace(/^\//, "")}`;
 
@@ -649,7 +644,7 @@ async function checkCloudDeadlines(env, sessionData) {
       const icsRes = await checkCloudDeadlinesViaIcs(env, sessionData);
       alertedCount += icsRes.alerted;
       if (icsRes.checked > 0) checkedCourses += icsRes.checked;
-    } catch (_) {}
+    } catch (_) { }
   }
 
   if (env.SPECTRA_KV && alertedCount > 0) {
@@ -660,7 +655,7 @@ async function checkCloudDeadlines(env, sessionData) {
 }
 
 /**
- * 24/7 Permanent iCal Deadline Scanner (Runs even when session cookie expires!)
+ * 24/7 Permanent iCal Deadline Scanner
  */
 async function checkCloudDeadlinesViaIcs(env, sessionData) {
   const { calendarIcalUrl, occurrences = {} } = sessionData;
@@ -676,7 +671,7 @@ async function checkCloudDeadlinesViaIcs(env, sessionData) {
     if (rawAlerted) {
       try {
         alertedDeadlineIds = new Set(JSON.parse(rawAlerted));
-      } catch (_) {}
+      } catch (_) { }
     }
   }
 
@@ -727,7 +722,7 @@ async function checkCloudDeadlinesViaIcs(env, sessionData) {
       if (!matchesOccurrence("", studentOcc, summary)) continue;
 
       let dueTimestamp = null;
-      const utcMatch = dateStr.match(/^(\d{4})(\d{2})(\d{2})T(\d{2})(\d{2})(\d{2})Z$/i);
+      const utcMatch = dateStr.match(/^(\d{4})(\d{2})(\d{2})T(\d{2})(\d{2})(\d{2})Z\$/i);
       if (utcMatch) {
         const [, y, m, d, h, min, sec] = utcMatch;
         dueTimestamp = Date.UTC(parseInt(y, 10), parseInt(m, 10) - 1, parseInt(d, 10), parseInt(h, 10), parseInt(min, 10), parseInt(sec, 10));
@@ -778,7 +773,6 @@ function parseWorkerDateString(dateStr) {
   const lower = raw.toLowerCase();
   const now = new Date();
 
-  // Extract time
   let hours = 23, minutes = 59;
   const timeMatch = raw.match(/(\d{1,2})[:.](\d{2})\s*(am|pm)?/i);
   if (timeMatch) {
@@ -791,7 +785,6 @@ function parseWorkerDateString(dateStr) {
     minutes = m;
   }
 
-  // Today / Tomorrow
   if (lower.includes("today") || lower.includes("hari ini")) {
     const d = new Date(now);
     d.setHours(hours, minutes, 0, 0);
@@ -804,7 +797,6 @@ function parseWorkerDateString(dateStr) {
     return d.getTime();
   }
 
-  // Normalize Malay months
   let cleaned = raw
     .replace(/\b(isnin|selasa|rabu|khamis|jumaat|sabtu|ahad)\b/gi, "")
     .replace(/\b(monday|tuesday|wednesday|thursday|friday|saturday|sunday)\b/gi, "")
@@ -824,7 +816,6 @@ function parseWorkerDateString(dateStr) {
     .replace(/\s+/g, " ")
     .trim();
 
-  // DD/MM/YYYY
   const slashMatch = cleaned.match(/^(\d{1,2})[\.\/\-](\d{1,2})(?:[\.\/\-](\d{2,4}))?/);
   if (slashMatch) {
     const day = parseInt(slashMatch[1], 10);
@@ -834,7 +825,6 @@ function parseWorkerDateString(dateStr) {
     return new Date(year, month, day, hours, minutes, 0, 0).getTime();
   }
 
-  // DD Month YYYY
   const monthMap = { jan: 0, feb: 1, mar: 2, apr: 3, may: 4, jun: 5, jul: 6, aug: 7, sep: 8, oct: 9, nov: 10, dec: 11 };
   const wordMatch = cleaned.match(/(\d{1,2})\s+([A-Za-z]+)(?:\s+(\d{2,4}))?/);
   if (wordMatch) {
@@ -853,8 +843,6 @@ function parseWorkerDateString(dateStr) {
 
 /**
  * 24/7 Cloud Announcement Scanner & Telegram Alert Routine
- * Discovers course forums, parses new instructor announcements,
- * and sends instant Telegram alerts with direct discussion links.
  */
 async function checkCloudAnnouncements(env, sessionData) {
   const { sessionToken, courses = [] } = sessionData;
@@ -876,7 +864,7 @@ async function checkCloudAnnouncements(env, sessionData) {
     if (rawSent) {
       try {
         sentAnnouncementIds = new Set(JSON.parse(rawSent));
-      } catch (_) {}
+      } catch (_) { }
     } else {
       isFirstRun = true;
     }
@@ -890,7 +878,6 @@ async function checkCloudAnnouncements(env, sessionData) {
     const courseCode = course.code || course.id;
 
     try {
-      // 1. Discover forum view URLs: first try /mod/forum/index.php, then /course/view.php
       const forumUrls = new Set();
 
       try {
@@ -909,9 +896,8 @@ async function checkCloudAnnouncements(env, sessionData) {
             }
           }
         }
-      } catch (_) {}
+      } catch (_) { }
 
-      // Fallback: check course page if index gave no forums
       if (forumUrls.size === 0) {
         try {
           const courseRes = await fetch(`https://spectrum.um.edu.my/course/view.php?id=${encodeURIComponent(courseId)}`, {
@@ -929,13 +915,12 @@ async function checkCloudAnnouncements(env, sessionData) {
               }
             }
           }
-        } catch (_) {}
+        } catch (_) { }
       }
 
       if (forumUrls.size === 0) continue;
       checkedCourses++;
 
-      // 2. Scan discussions in each forum
       for (const fUrl of forumUrls) {
         const forumRes = await fetch(fUrl, {
           headers: { "Cookie": cookieHeader, "User-Agent": "Mozilla/5.0 Spectra-Relay/1.0" }
@@ -943,7 +928,6 @@ async function checkCloudAnnouncements(env, sessionData) {
         if (!forumRes.ok) continue;
         const forumHtml = await forumRes.text();
 
-        // Parse discussion rows
         const rowRegex = /<tr[^>]*>([\s\S]*?)<\/tr>/gi;
         let rowM;
         while ((rowM = rowRegex.exec(forumHtml)) !== null) {
@@ -956,16 +940,13 @@ async function checkCloudAnnouncements(env, sessionData) {
           const rawSubject = topicMatch[3].replace(/<[^>]+>/g, "").trim();
           if (!rawSubject) continue;
 
-          // If already sent, skip
           if (sentAnnouncementIds.has(discussionId)) continue;
 
-          // If this is the initial run with empty KV, seed existing announcements without blasting spam
           if (isFirstRun) {
             sentAnnouncementIds.add(discussionId);
             continue;
           }
 
-          // Extract author & date if available
           const cellRegex = /<td[^>]*>([\s\S]*?)<\/td>/gi;
           const cells = [];
           let cM;
@@ -1003,5 +984,3 @@ async function checkCloudAnnouncements(env, sessionData) {
 
   return { checked: checkedCourses, sent: sentCount };
 }
-
-
