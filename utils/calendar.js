@@ -419,24 +419,31 @@ export function normalizeHydratedDeadlines(events = [], rawCalendarEvents = [], 
         matchesOccurrence: true
       });
     } else {
-      // Branch 2: Item from cached_deadlines or table scraper
-      if ((item.title !== undefined || item.name !== undefined) && (item.dueTimestamp || item.dueDate)) {
+      // Branch 2: Item from cached_deadlines or legacy table scraper
+      if (item && (item.title !== undefined || item.name !== undefined)) {
         // Standard live deadline object
         if (isAttendanceActivity(item)) continue;
-        const timestamp = item.dueTimestamp || (item.dueDate ? Date.parse(item.dueDate) : Date.now());
-        if (isOverdueMoreThan100Days(timestamp)) continue;
+        const title = cleanMoodleTitle(item.title || item.name || "");
+        if (!title) continue;
+
+        // Strictly eliminate dummy placeholder assignments
+        if (title.toLowerCase() === "assignment" && (!item.url || item.url.includes("/my/") || !item.cmid)) {
+          continue;
+        }
+
+        const timestamp = item.dueTimestamp || (item.dueDate ? Date.parse(item.dueDate) : null);
+        if (timestamp && isOverdueMoreThan100Days(timestamp)) continue;
 
         const courseCode = item.courseCode || extractCourseCode(item.courseName || item.title || item.name || "");
         const courseId = item.courseId ? String(item.courseId) : "";
         const studentOcc = (courseOccurrences && (courseOccurrences[courseId] || courseOccurrences[courseCode])) || studentOccurrence || "";
-        const title = cleanMoodleTitle(item.title || item.name || "");
 
         // Strict occurrence filter
         if (!isRespectiveOccurrence("", studentOcc, title)) {
           continue;
         }
 
-        const eventId = String(item.id || `deadline-${idx}`);
+        const eventId = String(item.id || (item.cmid ? `deadline-${item.cmid}` : `deadline-${idx}`));
         const cmid = item.cmid ? String(item.cmid) : "";
 
         // Preserve verified submission statuses
@@ -452,35 +459,37 @@ export function normalizeHydratedDeadlines(events = [], rawCalendarEvents = [], 
           title,
           courseCode: courseCode || "N/A",
           courseName: item.courseName || item.courseCode || "N/A",
-          dueDate: item.dueDate || new Date(timestamp).toISOString(),
-          dueTimestamp: timestamp,
-          formattedTime: item.formattedTime || new Date(timestamp).toLocaleString("en-MY", {
+          dueDate: timestamp ? (item.dueDate || new Date(timestamp).toISOString()) : "",
+          dueTimestamp: timestamp || null,
+          formattedTime: item.formattedTime || (timestamp ? new Date(timestamp).toLocaleString("en-MY", {
             month: "short",
             day: "numeric",
             hour: "2-digit",
             minute: "2-digit"
-          }),
+          }) : "No due date"),
           url: item.url || (item.courseId ? `${SPECTRUM_BASE_URL}/course/view.php?id=${item.courseId}` : `${SPECTRUM_BASE_URL}/my/`),
           type: item.type || "assign",
-          urgency: calculateUrgency(timestamp),
+          urgency: timestamp ? calculateUrgency(timestamp) : "upcoming",
           isSubmittedOnSpectrum,
           isCompleted,
           submissionStatus: isSubmittedOnSpectrum ? (statusText || "Submitted") : (statusText || "No submission"),
           weight: item.weight || "",
           matchesOccurrence: true
         });
-      } else {
-        // Old table scraper format
+      } else if (item && item["Assignment / Task"] && item["Due Date"]) {
+        // Valid legacy table scraper item with explicit title and due date
+        const title = cleanMoodleTitle(item["Assignment / Task"]);
+        if (!title || title.toLowerCase() === "assignment") continue;
+
+        const dueTs = Date.parse(item["Due Date"]);
+        if (!dueTs || isNaN(dueTs) || isOverdueMoreThan100Days(dueTs)) continue;
+
         const code = extractCourseCode(item["Course Code"] || "") || item["Course Code"] || "N/A";
-        const title = cleanMoodleTitle(item["Assignment / Task"] || "Assignment");
         const studentOcc = (courseOccurrences && courseOccurrences[code]) || studentOccurrence || "";
 
         if (!isRespectiveOccurrence("", studentOcc, title)) {
           continue;
         }
-
-        const dueTs = Date.parse(item["Due Date"]) || (Date.now() + 86400000);
-        if (isOverdueMoreThan100Days(dueTs)) continue;
 
         const subText = item["Submitted?"] || "";
         const isSubmitted = /\b(?:submitted|graded|dihantar|selesai|dinilai|diserahkan)\b/i.test(subText) && !/\b(?:pending|belum|tiada|tidak)\b/i.test(subText);

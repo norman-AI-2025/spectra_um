@@ -538,6 +538,33 @@ assert(task3002 && task3002.isSubmittedOnSpectrum === true, "'Dihantar untuk din
 const task3003 = malayTasks.find(t => t.cmid === "3003");
 assert(task3003 && task3003.isSubmittedOnSpectrum === false, "'Tiada penghantaran' marked isSubmittedOnSpectrum: false");
 
+// Test 5E: Strictly reject dummy/corrupted objects and eliminate synthetic fake assignments
+console.log("\n--- Sub-test 5E: Synthetic Dummy Assignment Elimination ---");
+const corruptCandidateList = [
+  {}, // completely empty object
+  { courseCode: "UM" }, // object without title or task
+  { title: "Assignment", url: "https://spectrum.um.edu.my/my/" }, // dummy placeholder
+  { "Course Code": "GIG1013" }, // legacy table item without Assignment / Task
+  {
+    id: "777",
+    cmid: "777",
+    title: "Real Lab Report",
+    courseCode: "WIX2001",
+    // No due date specified
+    url: "https://spectrum.um.edu.my/mod/assign/view.php?id=777"
+  }
+];
+
+const sanitizedHydration = normalizeHydratedDeadlines(corruptCandidateList, [], {
+  studentOccurrence: "Occ 1"
+});
+
+assert(sanitizedHydration.length === 1, `Expected exactly 1 valid item (Real Lab Report), got ${sanitizedHydration.length}`);
+assert(sanitizedHydration[0].title === "Real Lab Report", "Only real assignment with valid title is preserved");
+assert(sanitizedHydration[0].dueTimestamp === null, "Missing due date does NOT synthesize 24h urgency");
+assert(sanitizedHydration[0].formattedTime === "No due date", "Formatted time reflects no due date");
+assert(!sanitizedHydration.some(d => d.title === "Assignment"), "Dummy title 'Assignment' is strictly rejected");
+assert(!sanitizedHydration.some(d => d.courseCode === "UM" && d.title === "Assignment"), "Fake 'UM' 'Assignment' is eliminated");
 
 console.log(`\n=== All Deadlines Tests Finished: ${passed} passed, ${failed} failed ===`);
 if (failed > 0) {

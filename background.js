@@ -485,7 +485,15 @@ async function checkUpcomingDeadlines() {
       store.studentOccurrence
     );
     if (Array.isArray(deadlines)) {
-      const validDeadlines = deadlines.filter((d) => !isAttendanceActivity(d) && !isOverdueMoreThan100Days(d.dueTimestamp));
+      const validDeadlines = deadlines.filter((d) => {
+        if (!d || typeof d !== "object") return false;
+        if (isAttendanceActivity(d)) return false;
+        if (isOverdueMoreThan100Days(d.dueTimestamp)) return false;
+        const title = (d.title || d.name || "").trim();
+        if (!title || title.toLowerCase() === "assignment") return false;
+        if (d.courseCode === "UM" && (!d.url || !d.url.includes("id="))) return false;
+        return true;
+      });
       await chrome.storage.local.set({ cached_deadlines: validDeadlines });
     }
   } catch (err) {

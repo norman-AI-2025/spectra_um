@@ -996,7 +996,23 @@ async function syncLiveSession() {
       chrome.storage.local.remove(["cached_raw_events"]).catch(() => {});
 
       if (Array.isArray(stored.cached_deadlines)) {
-        hydrateDeadlinesFromScrape(stored.cached_deadlines, []);
+        const cleanCached = stored.cached_deadlines.filter((d) => {
+          if (!d || typeof d !== "object") return false;
+          const title = (d.title || d.name || "").trim();
+          if (!title || title.toLowerCase() === "assignment") return false;
+          if (d.courseCode === "UM" && (!d.url || !d.url.includes("id="))) return false;
+          return true;
+        });
+
+        if (cleanCached.length !== stored.cached_deadlines.length) {
+          chrome.storage.local.set({ cached_deadlines: cleanCached }).catch(() => {});
+        }
+
+        if (cleanCached.length > 0) {
+          hydrateDeadlinesFromScrape(cleanCached, []);
+        } else {
+          state.deadlines = [];
+        }
       }
       if (Array.isArray(stored.cached_announcements) && stored.cached_announcements.length > 0) {
         state.announcements = stored.cached_announcements;
@@ -1167,8 +1183,12 @@ async function loadLiveDeadlines() {
   try {
     const liveEvents = await fetchLiveDeadlines(state.sesskey, state.courses, state.courseOccurrences, state.studentOccurrence);
     state.deadlines = (liveEvents || []).filter((item) => {
+      if (!item || typeof item !== "object") return false;
       if (isAttendanceActivity(item)) return false;
       if (isOverdueMoreThan100Days(item.dueTimestamp)) return false;
+      const title = (item.title || item.name || "").trim();
+      if (!title || title.toLowerCase() === "assignment") return false;
+      if (item.courseCode === "UM" && (!item.url || !item.url.includes("id="))) return false;
       return true;
     });
 
