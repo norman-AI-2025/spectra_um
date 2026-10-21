@@ -18,7 +18,8 @@
     "https://spectrum.um.edu.my/*",
     "https://login.microsoftonline.com/*",
     "https://api.telegram.org/*",
-    "https://ntfy.sh/*"
+    "https://ntfy.sh/*",
+    "https://*.workers.dev/*"
   ],
   "background": {
     "service_worker": "background.js",
