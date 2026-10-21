@@ -2022,6 +2022,7 @@ export function parseCourseContentsModules(sectionsJson, courseCode = "", course
 
     for (const mod of modules) {
       if (!mod || !mod.modname) continue;
+      if (mod.uservisible === false) continue;
 
       const modType = String(mod.modname).toLowerCase();
       const cmid = String(mod.id);

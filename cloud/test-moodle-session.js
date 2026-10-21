@@ -254,8 +254,7 @@ async function runTests() {
   assert(scrapeResult.success === true, "inPageSpectrumScraper executed successfully");
   assert(scrapeResult.sesskey === "test_sesskey_12345", "inPageSpectrumScraper extracted sesskey");
   assert(scrapeResult.userName === "Norman Lee", "inPageSpectrumScraper extracted userName");
-  assert(scrapeResult.events.length === 1, "inPageSpectrumScraper scraped calendar event");
-  assert(scrapeResult.events[0]["Assignment / Task"] === "WIX2002 Lab Submission", "Scraped event name matches");
+  assert(scrapeResult.events.length === 0, "inPageSpectrumScraper cleanly decoupled from calendar API");
   assert(scrapeResult.courses.length === 1, "inPageSpectrumScraper scraped enrolled course");
   assert(scrapeResult.courses[0]["Code"] === "WIX2002", "Scraped course code matches");
 

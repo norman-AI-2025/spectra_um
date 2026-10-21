@@ -206,54 +206,8 @@
       return { success: false, error: err.message };
     }
 
-    // [3/4] Scrape Live Deadlines & Assignments
-    console.log("%c[3/4] Fetching live upcoming deadlines...", "color: #3b82f6; font-weight: bold;");
-    let events = [];
-    let rawCalendarData = null;
-    try {
-      const calendarPayload = [{
-        index: 0,
-        methodname: "core_calendar_get_action_events_by_timesort",
-        args: {
-          limitnum: 15,
-          timesortfrom: Math.floor(Date.now() / 1000) - 86400
-        }
-      }];
-
-      const calendarRes = await fetch(`https://spectrum.um.edu.my/lib/ajax/service.php?sesskey=${sesskey}&info=core_calendar_get_action_events_by_timesort`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        credentials: "include",
-        body: JSON.stringify(calendarPayload)
-      });
-
-      const [calendarData] = await calendarRes.json();
-      rawCalendarData = calendarData;
-
-      if (calendarData.error) {
-        console.warn("Calendar API returned an error:", calendarData.exception);
-      } else {
-        events = (calendarData.data?.events || []).map(event => ({
-          "Course Code": event.course ? event.course.shortname : "N/A",
-          "Assignment / Task": event.name,
-          "Due Date": new Date(event.timesort * 1000).toLocaleString(),
-          "Submitted?": event.action ? (event.action.actionable ? "Pending" : "Submitted") : "Unknown",
-          "Direct Link": event.action ? event.action.url : event.url
-        }));
-
-        if (events.length === 0) {
-          console.log("%cNo upcoming deadlines found.", "color: #f59e0b;");
-        } else {
-          console.log("%cUpcoming Deadlines:", "color: #10b981; font-weight: bold;");
-          console.table(events);
-        }
-      }
-    } catch (err) {
-      console.error("Failed to query calendar deadlines:", err);
-    }
-
-    // [4/4] Scrape Enrolled Courses
-    console.log("%c[4/4] Fetching enrolled courses...", "color: #3b82f6; font-weight: bold;");
+    // [3/3] Scrape Enrolled Courses
+    console.log("%c[3/3] Fetching enrolled courses...", "color: #3b82f6; font-weight: bold;");
     let courses = [];
     let rawCourseData = null;
     try {
@@ -301,9 +255,9 @@
       success: true,
       sesskey,
       userName,
-      events,
+      events: [],
       courses,
-      rawCalendarEvents: rawCalendarData?.data?.events || [],
+      rawCalendarEvents: [],
       rawCourses: rawCourseData?.data?.courses || []
     };
 

@@ -801,12 +801,7 @@ async function handleSaveAndTestSession() {
 
     showToast("Session Injected & Scraping Complete!", "success");
 
-    // Connect scraped data directly to frontend UI
-    if (Array.isArray(verified.events) && verified.events.length > 0) {
-      hydrateDeadlinesFromScrape(verified.events, []);
-    } else if (Array.isArray(verified.rawCalendarEvents) && verified.rawCalendarEvents.length > 0) {
-      hydrateDeadlinesFromScrape([], verified.rawCalendarEvents);
-    }
+    // Trigger live deadlines fetch directly from authoritative course pages
     await loadLiveDeadlines();
 
     if ((verified.rawCourses && verified.rawCourses.length > 0) || (verified.courses && verified.courses.length > 0)) {
@@ -898,12 +893,7 @@ async function handleAutoDetectSession() {
 
     showToast("Session Auto-Detected Successfully!", "success");
 
-    // Connect scraped data directly to frontend UI
-    if (Array.isArray(verified.events) && verified.events.length > 0) {
-      hydrateDeadlinesFromScrape(verified.events, []);
-    } else if (Array.isArray(verified.rawCalendarEvents) && verified.rawCalendarEvents.length > 0) {
-      hydrateDeadlinesFromScrape([], verified.rawCalendarEvents);
-    }
+    // Trigger live deadlines fetch directly from authoritative course pages
     await loadLiveDeadlines();
 
     if ((verified.rawCourses && verified.rawCourses.length > 0) || (verified.courses && verified.courses.length > 0)) {
@@ -948,7 +938,6 @@ async function syncLiveSession() {
         "manual_moodle_session",
         "cached_deadlines",
         "cached_courses",
-        "cached_raw_events",
         "cached_raw_courses",
         "cached_announcements",
         "cached_attendance",
@@ -996,10 +985,12 @@ async function syncLiveSession() {
       if ((stored.cached_raw_courses && stored.cached_raw_courses.length > 0) || (stored.cached_courses && stored.cached_courses.length > 0)) {
         await hydrateCoursesFromScrape(stored.cached_courses, stored.cached_raw_courses);
       }
+
+      // Explicitly purge legacy raw calendar cache to eliminate ghost tasks
+      chrome.storage.local.remove(["cached_raw_events"]).catch(() => {});
+
       if (Array.isArray(stored.cached_deadlines)) {
         hydrateDeadlinesFromScrape(stored.cached_deadlines, []);
-      } else if (Array.isArray(stored.cached_raw_events) && stored.cached_raw_events.length > 0) {
-        hydrateDeadlinesFromScrape([], stored.cached_raw_events);
       }
       if (Array.isArray(stored.cached_announcements) && stored.cached_announcements.length > 0) {
         state.announcements = stored.cached_announcements;
