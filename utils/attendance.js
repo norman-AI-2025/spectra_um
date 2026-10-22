@@ -548,16 +548,17 @@ export async function autoSubmitAttendance({
   }
 
   const resText = await postRes.text();
+  if (/incorrect password|wrong password|password is incorrect/i.test(resText)) {
+    return {
+      success: false,
+      requiresPassword: true,
+      error: "Incorrect attendance password. Please verify with your lecturer."
+    };
+  }
 
-  // If page contains "Attendance has been successfully recorded" or redirected back to view.php
-  if (
-    postRes.ok ||
-    postRes.redirected ||
-    resText.includes("recorded") ||
-    resText.includes("view.php") ||
-    resText.includes("Present") ||
-    resText.includes("Hadir")
-  ) {
+  const redirectedToView = postRes.redirected && /\/mod\/attendance\/view\.php(?:\?|$)/i.test(postRes.url || "");
+  const confirmationText = /(?:your attendance has been (?:successfully )?recorded|attendance (?:has been|was) successfully recorded|kehadiran anda telah direkodkan|attendance recorded successfully)/i.test(resText);
+  if (postRes.ok && (redirectedToView || confirmationText)) {
     return {
       success: true,
       sessid: finalSessid,
@@ -566,20 +567,13 @@ export async function autoSubmitAttendance({
     };
   }
 
-  // Check for password mismatch
-  if (resText.includes("Incorrect password") || resText.includes("wrong password")) {
-    return {
-      success: false,
-      requiresPassword: true,
-      error: "Incorrect attendance password. Please verify with your lecturer."
-    };
+  if (!postRes.ok) {
+    throw new Error(`SPeCTRUM attendance submission failed (HTTP ${postRes.status}).`);
   }
 
   return {
-    success: true,
-    sessid: finalSessid,
-    status: "Present",
-    message: "Submission sent to SPeCTRUM."
+    success: false,
+    error: "SPeCTRUM did not confirm that attendance was recorded. Please check the attendance page."
   };
 }
 

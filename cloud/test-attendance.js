@@ -468,6 +468,23 @@ const autoResult3 = await autoSubmitAttendance({
 assert(autoResult3.success === false, "Auto attendance: Pauses check-in when password is required");
 assert(autoResult3.requiresPassword === true, "Auto attendance: Correctly flags requiresPassword: true");
 
+const successfulFetch = globalThis.fetch;
+globalThis.fetch = async (_url, options = {}) => options.method === "POST"
+  ? { ok: true, status: 200, redirected: false, text: async () => "Incorrect password" }
+  : { ok: true, status: 200, redirected: false, text: async () => samplePasswordReqForm };
+const wrongPasswordResult = await autoSubmitAttendance({
+  sessid: "7703",
+  sesskey: "sess123",
+  attendanceUrl: "https://spectrum.um.edu.my/mod/attendance/attendance.php?sessid=7703",
+  password: "wrong-password",
+  isOpen: true,
+  sessionGroup: "Occ 1",
+  studentOccurrence: "Occ 1"
+});
+assert(wrongPasswordResult.success === false, "HTTP 200 password errors are not reported as successful attendance");
+assert(wrongPasswordResult.requiresPassword === true, "HTTP 200 password errors request a corrected password");
+globalThis.fetch = successfulFetch;
+
 // 9.4: Password submission succeeds when password provided
 postPayloadReceived = null;
 const autoResult4 = await autoSubmitAttendance({

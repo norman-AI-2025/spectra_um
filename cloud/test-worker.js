@@ -116,8 +116,20 @@ class MockExecutionContext {
 
 // Global fetch mock for SPeCTRUM & Telegram
 const networkCalls = [];
+let attendanceGroup = "Occ 1";
+let attendancePostCount = 0;
 globalThis.fetch = async function mockFetch(url, options = {}) {
   networkCalls.push({ url, method: options.method || "GET", headers: options.headers, body: options.body });
+
+  if (url.includes("spectrum.um.edu.my/mod/attendance/attendance.php") && options.method === "POST") {
+    attendancePostCount++;
+    return {
+      status: 200,
+      ok: true,
+      redirected: false,
+      text: async () => "Your attendance has been successfully recorded."
+    };
+  }
 
   // Mock SPeCTRUM calendar endpoint
   if (url.includes("spectrum.um.edu.my/calendar/view.php")) {
@@ -148,7 +160,7 @@ globalThis.fetch = async function mockFetch(url, options = {}) {
           <tr>
             <td>Mon 21 Oct 2024</td>
             <td>2:00PM - 4:00PM</td>
-            <td>Occ 1</td>
+            <td>${attendanceGroup}</td>
             <td>Lecture 4</td>
             <td><a href="https://spectrum.um.edu.my/mod/attendance/attendance.php?sessid=7701">Submit attendance</a></td>
           </tr>
@@ -326,6 +338,11 @@ async function runTestSuite() {
   assert(body6.updatedAt !== null, "Includes ISO updatedAt timestamp");
   assert(body6.cronSchedule === "Every 1 minute", "Reports active 1m cron schedule");
 
+  const missingSecret = await worker.fetch(new MockRequest("https://worker.spectra.dev/status", {
+    headers: { "Authorization": "Bearer worker-auth-secret-key" }
+  }), { SPECTRA_KV: kv }, new MockExecutionContext());
+  assert(missingSecret.status === 503, "Rejects requests when RELAY_SECRET_KEY is not configured");
+
   // Test 7: Error Validation - Missing sessionToken in POST /sync
   print("\nTest 7: Error Validation (Missing sessionToken in POST /sync)");
   const req7 = new MockRequest("https://worker.spectra.dev/sync", {
@@ -352,7 +369,7 @@ async function runTestSuite() {
   // Test 9: Cron Trigger Execution (scheduled event)
   print("\nTest 9: Cron Trigger Execution (scheduled event)");
   const ctx = new MockExecutionContext();
-  await worker.scheduled({ cron: "*/15 * * * *" }, env, ctx);
+  await worker.scheduled({ cron: "* * * * *" }, env, ctx);
   assert(ctx.promises.length > 0, "ctx.waitUntil registered the background polling promise");
   await Promise.all(ctx.promises);
   assert(true, "Cron background polling job resolved successfully");
@@ -381,6 +398,18 @@ async function runTestSuite() {
   const storedRecorded = await kv.get("recorded_sessids");
   assert(storedRecorded !== null && storedRecorded.includes("7701"), "Sessid 7701 stored in recorded_sessids in KV");
 
+  attendanceGroup = "Occ 2";
+  await kv.delete("recorded_sessids");
+  const postsBeforeMismatch = attendancePostCount;
+  const mismatchPoll = await worker.fetch(new MockRequest("https://worker.spectra.dev/poll", {
+    method: "POST",
+    headers: { "Authorization": "Bearer test-auth-secret-123" }
+  }), env, new MockExecutionContext());
+  const mismatchBody = await mismatchPoll.json();
+  assert(mismatchBody.attendanceRecorded === 0, "Skips attendance belonging to another occurrence");
+  assert(attendancePostCount === postsBeforeMismatch, "Does not POST for a different occurrence");
+  attendanceGroup = "Occ 1";
+
   // Test 12: 24/7 Cloud Announcement Polling & Telegram Alert
   print("\nTest 12: 24/7 Cloud Announcement Polling");
   // Seed initial KV so next poll triggers alert for new announcement
@@ -408,6 +437,4 @@ async function runTestSuite() {
 }
 
 // Execute test suite
-runTestSuite().catch((err) => {
-  print("\n[ERROR] Test suite encountered an unhandled error:\n" + err);
-});
+await runTestSuite();

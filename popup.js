@@ -417,8 +417,6 @@ function initDOMListeners() {
 
   // Settings: Test Buttons
   document.getElementById("testTelegramBtn").addEventListener("click", handleTestTelegram);
-  const testNtfyBtn = document.getElementById("testNtfyBtn");
-  if (testNtfyBtn) testNtfyBtn.addEventListener("click", handleTestNtfy);
   document.getElementById("syncCloudNowBtn").addEventListener("click", handleManualCloudSync);
   document.getElementById("saveSettingsBtn").addEventListener("click", handleSaveSettings);
   const autoDiscoverIcalBtn = document.getElementById("autoDiscoverIcalBtn");
@@ -2611,32 +2609,6 @@ async function handleTestTelegram() {
   }
 }
 
-async function handleTestNtfy() {
-  const topic = document.getElementById("ntfyTopic").value.trim();
-  if (!topic) {
-    showToast("Please enter an ntfy topic name", "error");
-    return;
-  }
-
-  const btn = document.getElementById("testNtfyBtn");
-  const origText = btn.innerHTML;
-  btn.disabled = true;
-  btn.textContent = "Sending ntfy alert...";
-
-  chrome.runtime.sendMessage({
-    action: "SEND_TEST_NTFY",
-    payload: { topic }
-  }, (response) => {
-    btn.disabled = false;
-    btn.innerHTML = origText;
-    if (response && response.success) {
-      showToast("ntfy.sh notification delivered!", "success");
-    } else {
-      showToast(`ntfy error: ${response?.error || "Failed"}`, "error");
-    }
-  });
-}
-
 async function handleManualCloudSync() {
   const relayUrl = document.getElementById("cloudRelayUrl").value.trim();
   const secretKey = document.getElementById("cloudRelaySecret").value.trim();
@@ -2685,8 +2657,6 @@ async function handleSaveSettings() {
   if (tokenInput && botToken) tokenInput.value = botToken;
   if (chatInput && chatId) chatInput.value = chatId;
 
-  const ntfyInput = document.getElementById("ntfyTopic");
-  const ntfyTopic = ntfyInput ? ntfyInput.value.trim() : "";
   const icalInput = document.getElementById("calendarIcalUrl");
   const icalUrl = icalInput ? icalInput.value.trim() : "";
   const cloudEnabled = document.getElementById("cloudRelayToggle").checked;
@@ -2700,7 +2670,6 @@ async function handleSaveSettings() {
     await chrome.storage.local.set({
       telegram_bot_token: botToken,
       telegram_chat_id: chatId,
-      ntfy_topic: ntfyTopic,
       calendarIcalUrl: icalUrl,
       calendar_ical_url: icalUrl,
       cloud_relay_enabled: cloudEnabled,
@@ -2914,7 +2883,6 @@ async function loadStoredPreferences() {
     stored = await chrome.storage.local.get([
       "telegram_bot_token",
       "telegram_chat_id",
-      "ntfy_topic",
       "cloud_relay_enabled",
       "cloud_relay_url",
       "cloud_relay_secret",
@@ -2964,9 +2932,6 @@ async function loadStoredPreferences() {
 
   if (stored.telegram_bot_token) document.getElementById("telegramToken").value = stored.telegram_bot_token;
   if (stored.telegram_chat_id) document.getElementById("telegramChatId").value = stored.telegram_chat_id;
-  const ntfyInput = document.getElementById("ntfyTopic");
-  if (ntfyInput && stored.ntfy_topic) ntfyInput.value = stored.ntfy_topic;
-
   const icalInput = document.getElementById("calendarIcalUrl");
   if (icalInput && (stored.calendarIcalUrl || stored.calendar_ical_url)) {
     icalInput.value = stored.calendarIcalUrl || stored.calendar_ical_url;

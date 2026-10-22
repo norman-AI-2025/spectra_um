@@ -2,7 +2,7 @@
  * Spectra - Universiti Malaya SPeCTRUM Companion
  * Background Service Worker (Manifest V3) - Zero-Mock Production
  * Handles cookie synchronization, periodic alarms, cloud relay,
- * live forum announcement polling, and Telegram / ntfy notification pipeline.
+ * live forum announcement polling, and Telegram notification pipeline.
  */
 
 import {
@@ -43,7 +43,6 @@ chrome.runtime.onInstalled.addListener(async (details) => {
   const defaults = {
     telegram_bot_token: "",
     telegram_chat_id: "",
-    ntfy_topic: "",
     custom_webhook_url: "",
     cloud_relay_enabled: false,
     cloud_relay_url: "",
@@ -52,8 +51,6 @@ chrome.runtime.onInstalled.addListener(async (details) => {
     notify_announcements: true,
     notify_urgent_deadlines: true,
     completed_assignment_ids: [],
-    seen_announcement_ids: [],
-    seen_deadline_alert_ids: [],
     telegram_sent_announcement_ids: [],
     telegram_sent_deadline_ids: [],
     last_sync_timestamp: null,
@@ -61,6 +58,7 @@ chrome.runtime.onInstalled.addListener(async (details) => {
   };
 
   const stored = await chrome.storage.local.get(Object.keys(defaults));
+  await chrome.storage.local.remove(["ntfy_topic", "seen_announcement_ids", "seen_deadline_alert_ids"]);
   const toSet = {};
   for (const [key, val] of Object.entries(defaults)) {
     if (stored[key] === undefined) {
@@ -315,36 +313,9 @@ async function syncSessionToCloudRelay(sessionData, relayUrl, secretKey) {
 }
 
 // -------------------------------------------------------------
-// Notification Dispatchers (Telegram & ntfy)
+// Notification Dispatcher (Telegram)
 // -------------------------------------------------------------
 export { sendTelegramMessage };
-
-export async function sendNtfyMessage(topic, title, message, clickUrl = "") {
-  if (!topic) {
-    throw new Error("Missing ntfy topic");
-  }
-
-  const endpoint = `https://ntfy.sh/${topic.trim()}`;
-  const headers = {
-    "Title": title,
-    "Priority": "high",
-    "Tags": "loudspeaker,mortarboard"
-  };
-  if (clickUrl) {
-    headers["Click"] = clickUrl;
-  }
-
-  const response = await fetch(endpoint, {
-    method: "POST",
-    headers,
-    body: message
-  });
-
-  if (!response.ok) {
-    throw new Error(`ntfy.sh returned HTTP ${response.status}`);
-  }
-  return true;
-}
 
 // -------------------------------------------------------------
 // Live Announcement Polling Workflow
@@ -353,17 +324,14 @@ async function pollAnnouncements() {
   const store = await chrome.storage.local.get([
     "telegram_bot_token",
     "telegram_chat_id",
-    "ntfy_topic",
     "notify_announcements",
-    "seen_announcement_ids",
     "telegram_sent_announcement_ids"
   ]);
 
   if (!store.notify_announcements) return;
 
   const hasTelegram = Boolean(store.telegram_bot_token && store.telegram_chat_id);
-  const hasNtfy = Boolean(store.ntfy_topic);
-  if (!hasTelegram && !hasNtfy) return;
+  if (!hasTelegram) return;
 
   // 1. Verify live session
   let sessionContext;
@@ -374,7 +342,6 @@ async function pollAnnouncements() {
     return;
   }
 
-  const seenIds = new Set(store.seen_announcement_ids || []);
   const telegramSentIds = new Set(store.telegram_sent_announcement_ids || []);
   let announcements = [];
 
@@ -387,7 +354,7 @@ async function pollAnnouncements() {
     return;
   }
 
-  // 3. Dispatch to Telegram and ntfy (ONLY send announcements that haven't been flagged!)
+  // Dispatch only announcements that have not been confirmed sent to Telegram.
   for (const item of announcements) {
     const itemIdStr = String(item.id);
 
@@ -408,20 +375,6 @@ async function pollAnnouncements() {
       }
     }
 
-    if (hasNtfy && !seenIds.has(itemIdStr)) {
-      try {
-        await sendNtfyMessage(
-          store.ntfy_topic,
-          `Spectra Alert: [${item.courseCode}] ${item.subject}`,
-          `By ${item.author || "Instructor"}: ${item.subject}`,
-          item.url
-        );
-      } catch (ntfyErr) {
-        console.error("[Spectra] ntfy dispatch failed:", ntfyErr);
-      }
-    }
-
-    seenIds.add(itemIdStr);
   }
 
   // Cache current announcements for popup UI with telegramSent flag annotated
@@ -432,7 +385,6 @@ async function pollAnnouncements() {
 
   await chrome.storage.local.set({
     cached_announcements: annotatedAnnouncements,
-    seen_announcement_ids: Array.from(seenIds),
     telegram_sent_announcement_ids: Array.from(telegramSentIds),
     last_sync_timestamp: Date.now()
   });
@@ -446,9 +398,7 @@ async function checkUpcomingDeadlines() {
     "notify_urgent_deadlines",
     "telegram_bot_token",
     "telegram_chat_id",
-    "ntfy_topic",
     "completed_assignment_ids",
-    "seen_deadline_alert_ids",
     "telegram_sent_deadline_ids",
     "cached_courses",
     "courses",
@@ -460,8 +410,7 @@ async function checkUpcomingDeadlines() {
   if (!store.notify_urgent_deadlines) return;
 
   const hasTelegram = Boolean(store.telegram_bot_token && store.telegram_chat_id);
-  const hasNtfy = Boolean(store.ntfy_topic);
-  if (!hasTelegram && !hasNtfy) return;
+  if (!hasTelegram) return;
 
   let sessionContext;
   try {
@@ -471,7 +420,6 @@ async function checkUpcomingDeadlines() {
   }
 
   const completed = new Set(store.completed_assignment_ids || []);
-  const alerted = new Set(store.seen_deadline_alert_ids || []);
   const telegramSentDeadlineIds = new Set(store.telegram_sent_deadline_ids || []);
   const occMap = store.course_occurrences || store.courseOccurrences || {};
   const courseList = store.courses || store.cached_courses || [];
@@ -536,24 +484,9 @@ async function checkUpcomingDeadlines() {
       }
     }
 
-    if (hasNtfy && !alerted.has(itemIdStr)) {
-      try {
-        await sendNtfyMessage(
-          store.ntfy_topic,
-          `⏰ URGENT: [${item.courseCode}] due in ${hoursLeft}h`,
-          `${item.title}\nDue: ${item.formattedTime || "Soon"}`,
-          item.url
-        );
-      } catch (e) {
-        console.error("[Spectra] ntfy deadline alert failed:", e);
-      }
-    }
-
-    alerted.add(itemIdStr);
   }
 
   await chrome.storage.local.set({
-    seen_deadline_alert_ids: Array.from(alerted),
     telegram_sent_deadline_ids: Array.from(telegramSentDeadlineIds)
   });
 }
@@ -582,7 +515,6 @@ async function checkAutoAttendance() {
       "recorded_attendance_sessids",
       "telegram_bot_token",
       "telegram_chat_id",
-      "ntfy_topic",
       "cached_courses",
       "courses",
       "moodle_session"
@@ -593,7 +525,6 @@ async function checkAutoAttendance() {
     if (!autoAttendanceEnabled) return;
 
     const hasTelegram = Boolean(store.telegram_bot_token && store.telegram_chat_id);
-    const hasNtfy = Boolean(store.ntfy_topic);
 
     let sessionContext;
     try {
@@ -666,18 +597,6 @@ async function checkAutoAttendance() {
           }
         }
 
-        if (hasNtfy) {
-          try {
-            await sendNtfyMessage(
-              store.ntfy_topic,
-              `Spectra Auto-Attendance: [${act.courseCode}] Present!`,
-              `Recorded Present for ${act.occurrence} - ${act.session?.description || "Lecture"}`,
-              act.session?.submitUrl || "https://spectrum.um.edu.my"
-            );
-          } catch (ntfyErr) {
-            console.error("[Spectra] ntfy auto-attendance dispatch error:", ntfyErr);
-          }
-        }
       } else if (act.result?.requiresPassword) {
         if (hasTelegram && !recordedSessids.has(`pwd_${sessid}`)) {
           recordedSessids.add(`pwd_${sessid}`);
@@ -775,18 +694,6 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
           const { botToken, chatId } = payload || {};
           const result = await sendTelegramTestMessage(botToken, chatId);
           sendResponse({ success: true, message: "Telegram test notification delivered successfully!", data: result });
-          break;
-        }
-
-        case "SEND_TEST_NTFY": {
-          const { topic } = payload || {};
-          await sendNtfyMessage(
-            topic,
-            "Spectra Notification Verified",
-            "SPeCTRUM alerts will be dispatched directly to your mobile device.",
-            "https://spectrum.um.edu.my"
-          );
-          sendResponse({ success: true, message: "ntfy.sh test notification delivered successfully!" });
           break;
         }
 
@@ -901,8 +808,7 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
           const store = await chrome.storage.local.get([
             "recorded_attendance_sessids",
             "telegram_bot_token",
-            "telegram_chat_id",
-            "ntfy_topic"
+            "telegram_chat_id"
           ]);
 
           const recorded = new Set(store.recorded_attendance_sessids || []);
@@ -926,16 +832,6 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
               }
             }
 
-            if (store.ntfy_topic) {
-              try {
-                await sendNtfyMessage(
-                  store.ntfy_topic,
-                  `Spectra Auto-Attendance: ${courseCode || "Class"} Present!`,
-                  `Recorded Present automatically on SPeCTRUM.`,
-                  url || "https://spectrum.um.edu.my"
-                );
-              } catch (_) {}
-            }
           }
           sendResponse({ success: true });
           break;

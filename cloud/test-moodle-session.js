@@ -261,6 +261,4 @@ async function runTests() {
   print(`\n=== All Tests Finished: ${testsPassed} passed, ${testsFailed} failed ===`);
 }
 
-runTests().catch((e) => {
-  print("Fatal Error in tests: " + e + "\n" + e.stack);
-});
+await runTests();

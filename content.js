@@ -163,7 +163,10 @@
   }
 
   async function runSpectrumScraperInPage(moodleSession) {
-    const MOODLE_SESSION = moodleSession || "uhe4fg1agh90g925grgtk22ob0";
+    const MOODLE_SESSION = String(moodleSession || "").trim();
+    if (!MOODLE_SESSION) {
+      return { success: false, error: "A MoodleSession token is required." };
+    }
 
     console.log("%c[1/4] Setting session cookie...", "color: #3b82f6; font-weight: bold;");
     document.cookie = `MoodleSession=${MOODLE_SESSION}; path=/; domain=spectrum.um.edu.my`;
@@ -320,6 +323,17 @@
   function handleAttendanceFormPage(store) {
     console.log("[Spectra Attendance] Active on attendance form page:", window.location.href);
 
+    const sessidMatch = window.location.href.match(/sessid=(\d+)/);
+    let navigationContext = null;
+    try {
+      navigationContext = JSON.parse(sessionStorage.getItem("spectra_attendance_navigation") || "null");
+      sessionStorage.removeItem("spectra_attendance_navigation");
+    } catch (_) {}
+    if (!navigationContext || navigationContext.sessid !== sessidMatch?.[1] || Date.now() - navigationContext.timestamp > 120000) {
+      console.log("[Spectra Attendance] Automatic submission skipped: no recent occurrence-checked navigation.");
+      return;
+    }
+
     // Check if attendance is already recorded
     const bodyText = document.body ? document.body.innerText : "";
     if (
@@ -328,7 +342,6 @@
       bodyText.includes("Attendance has been recorded")
     ) {
       showSpectraToast("Attendance recorded as Present! ✅", "success");
-      const sessidMatch = window.location.href.match(/sessid=(\d+)/);
       if (sessidMatch) {
         chrome.runtime.sendMessage({
           action: "RECORD_ATTENDANCE_SUCCESS",
@@ -343,7 +356,6 @@
 
     // Extract sessid
     const sessidInput = form.querySelector('input[name="sessid"]');
-    const sessidMatch = window.location.href.match(/sessid=(\d+)/);
     const sessid = sessidInput ? sessidInput.value : (sessidMatch ? sessidMatch[1] : null);
 
     // Find Present / Hadir radio button
@@ -416,17 +428,20 @@
       const submitLinks = document.querySelectorAll('a[href*="attendance.php?sessid="]');
       if (submitLinks.length === 0) return false;
 
-      // Extract course code or occurrence context if available
-      const courseIdMatch = window.location.href.match(/id=(\d+)/);
-      const courseId = courseIdMatch ? courseIdMatch[1] : "";
-      const preferredOcc = (store.course_occurrences && store.course_occurrences[courseId]) || "";
+      const preferredOcc = findPageOccurrence(store);
 
       for (const link of submitLinks) {
         const row = link.closest("tr");
-        const rowText = row ? row.innerText : "";
+        const cells = row ? Array.from(row.querySelectorAll("td")) : [];
+        const groupText = cells.length >= 6 ? cells[2].innerText.trim() : "";
+        const description = cells.length >= 6 ? cells[3].innerText.trim() : (row?.innerText || "");
         const linkText = link.innerText.trim();
 
-        if (/submit|hantar|rekod/i.test(linkText) || /submit|hantar|rekod/i.test(rowText)) {
+        if ((/submit|hantar|rekod/i.test(linkText) || /submit|hantar|rekod/i.test(row?.innerText || "")) &&
+            matchesPageOccurrence(groupText, description, preferredOcc)) {
+          const sessid = link.href.match(/sessid=(\d+)/)?.[1];
+          if (!sessid) continue;
+          sessionStorage.setItem("spectra_attendance_navigation", JSON.stringify({ sessid, timestamp: Date.now() }));
           console.log("[Spectra Attendance] Open session detected! Navigating to form:", link.href);
           showSpectraToast("Open attendance session found! Auto-submitting... 🚀", "success");
           window.location.href = link.href;
@@ -451,13 +466,60 @@
 
   function handleCourseViewPage(store) {
     const directAttendanceLinks = document.querySelectorAll('a[href*="/mod/attendance/attendance.php?sessid="]');
-    if (directAttendanceLinks.length > 0) {
-      console.log("[Spectra Attendance] Direct attendance link found on course page:", directAttendanceLinks[0].href);
+    const courseId = new URL(window.location.href).searchParams.get("id") || "";
+    const preferredOcc = findPageOccurrence(store, courseId);
+    for (const link of directAttendanceLinks) {
+      const activity = link.closest("li.activity, .activityinstance, div.activity");
+      const description = activity?.innerText || link.innerText;
+      if (!matchesPageOccurrence("", description, preferredOcc)) continue;
+
+      const sessid = link.href.match(/sessid=(\d+)/)?.[1];
+      if (!sessid) continue;
+      console.log("[Spectra Attendance] Matching attendance link found on course page:", link.href);
       showSpectraToast("Active attendance link detected! Auto-navigating... 🚀", "success");
+      sessionStorage.setItem("spectra_attendance_navigation", JSON.stringify({ sessid, timestamp: Date.now() }));
       setTimeout(() => {
-        window.location.href = directAttendanceLinks[0].href;
+        window.location.href = link.href;
       }, 500);
+      return;
     }
+  }
+
+  function findPageOccurrence(store, knownCourseId = "") {
+    const occurrences = store.course_occurrences || {};
+    if (knownCourseId && occurrences[knownCourseId]) return occurrences[knownCourseId];
+
+    const breadcrumb = document.querySelector("#page-navbar, .breadcrumb, nav[aria-label='Breadcrumb']");
+    if (!breadcrumb) return "";
+    const courseLinks = breadcrumb.querySelectorAll('a[href*="course/view.php?id="]');
+    for (let index = courseLinks.length - 1; index >= 0; index--) {
+      const link = courseLinks[index];
+      const id = link.href.match(/[?&]id=(\d+)/)?.[1];
+      const code = link.textContent.match(/\b[A-Z]{3,4}\s*\d{4}[A-Z]?\b/i)?.[0]?.replace(/\s+/g, "").toUpperCase();
+      const occurrence = occurrences[id] || occurrences[code];
+      if (occurrence) return occurrence;
+    }
+    return "";
+  }
+
+  function matchesPageOccurrence(groupText, description, studentOccurrence) {
+    const group = String(groupText || "").trim().toLowerCase();
+    const occurrence = String(studentOccurrence || "").trim().toLowerCase();
+    const detail = String(description || "").toLowerCase().replace(
+      /\b(?:tutorial|tut|lab|assignment|tugasan)\s+\d+\s+(?:submission|link|dropbox|box|handin|hantar|due)\b/gi,
+      ""
+    );
+    if (occurrence === "all") return true;
+
+    const universal = !group || group === "all" || group.includes("all students") || group.includes("semua pelajar");
+    const marker = /\b(?:occ(?:urrence)?|kumpulan|group|tutorial|tut)\s*#?\s*0*(\d+)\b/i;
+    const studentNumber = occurrence.match(marker) || occurrence.match(/\b0*(\d+)\b/);
+    const target = universal ? detail : group;
+    const targetNumber = target.match(marker) || (!universal ? target.match(/^\s*0*(\d+)\s*$/) : null);
+
+    if (universal && !targetNumber) return true;
+    if (!studentNumber || !targetNumber) return Boolean(occurrence && !universal && (group === occurrence || group.includes(occurrence)));
+    return parseInt(studentNumber[1] || studentNumber[0], 10) === parseInt(targetNumber[1] || targetNumber[0], 10);
   }
 
   function showSpectraToast(message, type = "info") {

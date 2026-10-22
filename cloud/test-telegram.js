@@ -375,6 +375,4 @@ async function runTelegramTests() {
   print(`\n=== All Telegram Tests Finished: ${passed} passed, ${failed} failed ===`);
 }
 
-runTelegramTests().catch((e) => {
-  print("Fatal Telegram Test Error: " + e + "\n" + e.stack);
-});
+await runTelegramTests();

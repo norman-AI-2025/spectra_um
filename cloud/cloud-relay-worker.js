@@ -11,15 +11,14 @@
  *   - TELEGRAM_BOT_TOKEN
  *   - TELEGRAM_CHAT_ID
  *   - RELAY_SECRET_KEY
- *   - NTFY_TOPIC (optional)
- * - Cron Trigger: `* /15 * * * *` (Runs every 15 minutes)
+ * - Cron Trigger: `* * * * *` (Runs every minute)
  */
 
 export default {
   // HTTP Endpoint Handler
   async fetch(request, env, ctx) {
     const url = new URL(request.url);
-    const path = url.pathname.replace(/\/+\$/, "") || "/";
+    const path = url.pathname.replace(/\/+$/, "") || "/";
 
     // CORS Headers for Chrome Extension
     const corsHeaders = {
@@ -34,7 +33,13 @@ export default {
 
     // Verify Bearer Secret Token
     const authHeader = request.headers.get("Authorization") || "";
-    const expectedSecret = env.RELAY_SECRET_KEY || "worker-auth-secret-key";
+    const expectedSecret = env.RELAY_SECRET_KEY;
+    if (!expectedSecret) {
+      return new Response(JSON.stringify({ error: "Worker relay secret is not configured" }), {
+        status: 503,
+        headers: { "Content-Type": "application/json", ...corsHeaders }
+      });
+    }
     if (authHeader !== `Bearer ${expectedSecret}`) {
       return new Response(JSON.stringify({ error: "Unauthorized: Invalid or missing Bearer token" }), {
         status: 401,
@@ -116,7 +121,7 @@ export default {
         hasSession: Boolean(record?.sessionToken),
         coursesCount: record?.courses?.length || 0,
         updatedAt: record?.updatedAt ? new Date(record.updatedAt).toISOString() : null,
-        cronSchedule: "Every 15 minutes"
+        cronSchedule: "Every 1 minute"
       }), {
         headers: { "Content-Type": "application/json", ...corsHeaders }
       });
@@ -430,7 +435,10 @@ async function checkAndRecordCloudAttendance(env, sessionData) {
             body: bodyStr
           });
 
-          if (postRes.ok) {
+          const postText = await postRes.text();
+          const redirectedToView = postRes.redirected && /\/mod\/attendance\/view\.php(?:\?|$)/i.test(postRes.url || "");
+          const confirmationText = /(?:your attendance has been (?:successfully )?recorded|attendance (?:has been|was) successfully recorded|kehadiran anda telah direkodkan|attendance recorded successfully)/i.test(postText);
+          if (postRes.ok && (redirectedToView || confirmationText)) {
             recordedSessids.add(sessid);
             recordedCount++;
 
@@ -462,32 +470,25 @@ async function checkAndRecordCloudAttendance(env, sessionData) {
 }
 
 function matchesOccurrence(groupStr, studentOcc, descStr = "") {
-  if (!studentOcc || studentOcc.trim().toLowerCase() === "all") return true;
-  const targetOcc = studentOcc.trim().toLowerCase();
-  const targetNum = targetOcc.replace(/\D+/g, "");
-
+  const targetOcc = String(studentOcc || "").trim().toLowerCase();
+  if (targetOcc === "all") return true;
   const g = String(groupStr || "").trim().toLowerCase();
   let d = String(descStr || "").trim().toLowerCase();
 
   // Strip task titles so "Tutorial 3 Submission" isn't treated as occurrence 3
   d = d.replace(/\b(?:tutorial|tut|lab|assignment|tugasan)\s+\d+\s+(?:submission|link|dropbox|box|handin|hantar|due)\b/gi, "");
+  const universalGroup = !g || g === "all" || g.includes("all students") || g.includes("semua pelajar");
+  const occurrencePattern = /\b(?:occ(?:urrence)?|kumpulan|group|tutorial|tut)\s*#?\s*0*(\d+)\b/i;
+  const studentNumberMatch = targetOcc.match(occurrencePattern) || targetOcc.match(/\b0*(\d+)\b/);
+  const targetText = universalGroup ? d : g;
+  const targetNumberMatch = targetText.match(occurrencePattern) || (!universalGroup ? targetText.match(/^\s*0*(\d+)\s*$/) : null);
 
-  if (g.includes(targetOcc) || d.includes(targetOcc)) return true;
-
-  if (targetNum) {
-    const numRegex = new RegExp(`\\b(?:occ|occurrence|kumpulan|group)\\s*#?\\s*0*${targetNum}\\b`, "i");
-    if (numRegex.test(g) || numRegex.test(d)) return true;
+  if (universalGroup && !targetNumberMatch) return true;
+  if (!studentNumberMatch || !targetNumberMatch) {
+    return Boolean(targetOcc && !universalGroup && (g === targetOcc || g.includes(targetOcc)));
   }
-
-  if (g === "all students" || g === "semua pelajar" || g === "" || g === "all") {
-    const otherOccRegex = /\b(?:occ|occurrence|kumpulan|group)\s*#?\s*\d+\b/i;
-    if (otherOccRegex.test(d)) {
-      return targetNum ? new RegExp(`\\b(?:occ|occurrence|kumpulan|group)\\s*#?\\s*0*${targetNum}\\b`, "i").test(d) : false;
-    }
-    return true;
-  }
-
-  return true;
+  return parseInt(studentNumberMatch[1] || studentNumberMatch[0], 10) ===
+    parseInt(targetNumberMatch[1] || targetNumberMatch[0], 10);
 }
 
 function isAttendanceWorkerActivity(title, url = "") {
@@ -520,19 +521,20 @@ function isAttendanceWorkerActivity(title, url = "") {
 async function dispatchTelegram(botToken, chatId, textHtml) {
   const cleanToken = (botToken || "").trim().replace(/^bot/i, "");
   const url = `https://api.telegram.org/bot${cleanToken}/sendMessage`;
-  try {
-    await fetch(url, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({
-        chat_id: chatId,
-        text: textHtml,
-        parse_mode: "HTML"
-      })
-    });
-  } catch (e) {
-    console.error("[Spectra Relay] Telegram dispatch error:", e);
+  const response = await fetch(url, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({
+      chat_id: chatId,
+      text: textHtml,
+      parse_mode: "HTML"
+    })
+  });
+  const result = await response.json().catch(() => null);
+  if (!response.ok || !result?.ok) {
+    throw new Error(`Telegram delivery failed (HTTP ${response.status}): ${result?.description || "no confirmation"}`);
   }
+  return true;
 }
 
 /**

@@ -161,9 +161,9 @@ To enable attendance auto-filling, deadline alerts, and announcement notificatio
      - `TELEGRAM_BOT_TOKEN`: your Telegram bot token from Step 4
      - `TELEGRAM_CHAT_ID`: your numeric Telegram chat ID from Step 4
    - Click **Save and deploy**.
-5. **Verify the 15-Minute Cron Trigger:**
-   - In worker **Settings** → **Triggers**, verify that a Cron Trigger `*/15 * * * *` is active.
-   - *(If missing, click **Add Cron Trigger** and enter `*/15 * * * *`)*.
+5. **Verify the 1-Minute Cron Trigger:**
+   - In worker **Settings** → **Triggers**, verify that a Cron Trigger `* * * * *` is active.
+   - *(If missing, click **Add Cron Trigger** and enter `* * * * *`)*.
 6. **Connect the Extension to Cloudflare:**
    - Copy your worker URL (e.g. `https://spectra_um-relay.<your-subdomain>.workers.dev`).
    - Open Spectra → **Settings** → toggle **"Enable Cloud Relay Sync"** to ON.

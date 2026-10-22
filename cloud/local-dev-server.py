@@ -72,7 +72,7 @@ class CloudRelayHandler(BaseHTTPRequestHandler):
                 "status": "online",
                 "hasSession": has_session,
                 "updatedAt": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime(updated_at / 1000)) if updated_at else None,
-                "cronSchedule": "Every 15 minutes",
+                "cronSchedule": "Every 1 minute",
                 "server": "Spectra Local Relay Dev Server"
             }
 
