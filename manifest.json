@@ -12,7 +12,8 @@
     "downloads",
     "tabs",
     "scripting",
-    "declarativeNetRequest"
+    "declarativeNetRequest",
+    "idle"
   ],
   "host_permissions": [
     "https://spectrum.um.edu.my/*",

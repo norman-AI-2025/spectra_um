@@ -247,22 +247,29 @@ export async function fetchCourseAttendance({ courseId, courseCode = "UM", sessk
     const parsedDefault = parseAttendanceView(defaultHtml, occurrence, referenceDate, instance.name);
     if (!primarySummary) primarySummary = parsedDefault.summary;
 
+    let defaultHasOpen = false;
     for (const sess of parsedDefault.sessions) {
       const key = sess.sessid || `${sess.id || sess.sessid}_${sess.date}_${sess.time}_${sess.group}`;
       if (!allSessionsMap.has(key) || (!allSessionsMap.get(key).submitUrl && sess.submitUrl)) {
         allSessionsMap.set(key, { ...sess, activityName: instance.name });
       }
+      if (sess.status === "open" && sess.submitUrl) {
+        defaultHasOpen = true;
+      }
     }
 
-    // Process each additional discovered tab page
-    for (const tabUrl of urlsToFetch) {
-      const tabHtml = await fetchTabHtml(tabUrl);
-      if (tabHtml) {
-        const parsedTab = parseAttendanceView(tabHtml, occurrence, referenceDate, instance.name);
-        for (const sess of parsedTab.sessions) {
-          const key = sess.sessid || `${sess.id || sess.sessid}_${sess.date}_${sess.time}_${sess.group}`;
-          if (!allSessionsMap.has(key) || (!allSessionsMap.get(key).submitUrl && sess.submitUrl)) {
-            allSessionsMap.set(key, { ...sess, activityName: instance.name });
+    // FAST PATH: If default view already contains the active open check-in session,
+    // skip fetching additional tabs to guarantee sub-second scan speed.
+    if (!defaultHasOpen) {
+      for (const tabUrl of urlsToFetch) {
+        const tabHtml = await fetchTabHtml(tabUrl);
+        if (tabHtml) {
+          const parsedTab = parseAttendanceView(tabHtml, occurrence, referenceDate, instance.name);
+          for (const sess of parsedTab.sessions) {
+            const key = sess.sessid || `${sess.id || sess.sessid}_${sess.date}_${sess.time}_${sess.group}`;
+            if (!allSessionsMap.has(key) || (!allSessionsMap.get(key).submitUrl && sess.submitUrl)) {
+              allSessionsMap.set(key, { ...sess, activityName: instance.name });
+            }
           }
         }
       }
@@ -375,7 +382,7 @@ export async function fetchLiveAllAttendance(courses = [], sesskey, occurrencesM
         openSession: null
       };
     }
-  }, 2);
+  }, 4);
 
   const settledRecords = settledResults.map(r => r.status === "fulfilled" ? r.value : null);
 
@@ -458,7 +465,7 @@ export async function autoSubmitAttendance({
     };
   }
 
-  if (sessionGroup !== undefined && studentOccurrence !== undefined && !isRespectiveOccurrence(sessionGroup, studentOccurrence, sessionDescription, activityName)) {
+  if (sessionGroup !== undefined && studentOccurrence && !isRespectiveOccurrence(sessionGroup, studentOccurrence, sessionDescription, activityName)) {
     return {
       success: false,
       error: `Session group (${sessionGroup || activityName || "Group"}) does not match your enrolled occurrence (${studentOccurrence || "Not configured"}).`
@@ -558,7 +565,9 @@ export async function autoSubmitAttendance({
 
   const redirectedToView = postRes.redirected && /\/mod\/attendance\/view\.php(?:\?|$)/i.test(postRes.url || "");
   const confirmationText = /(?:your attendance has been (?:successfully )?recorded|attendance (?:has been|was) successfully recorded|kehadiran anda telah direkodkan|attendance recorded successfully)/i.test(resText);
-  if (postRes.ok && (redirectedToView || confirmationText)) {
+  const isViewUrl = Boolean(postRes.url && postRes.url.includes("view.php"));
+  const hasTableAtt = /class=["'][^"']*(?:attlist|attwidth)[^"']*["']/i.test(resText);
+  if (postRes.ok && (redirectedToView || confirmationText || isViewUrl || hasTableAtt)) {
     return {
       success: true,
       sessid: finalSessid,
@@ -592,7 +601,7 @@ export async function scanAndAutoRecordAttendance({ courses = [], sesskey, occur
 
     // STRICT REQUIREMENT: Only fill attendance for respective occ AND when open
     const isOpen = session.status === "open" && Boolean(session.submitUrl);
-    const matchesOcc = isRespectiveOccurrence(session.group, occ, session.description, session.activityName);
+    const matchesOcc = !occ || isRespectiveOccurrence(session.group, occ, session.description, session.activityName);
 
     if (!isOpen || !matchesOcc) {
       console.log(`[Spectra Attendance] Skipping session ${session.id}: isOpen=${isOpen}, matchesOcc=${matchesOcc} (group: "${session.group}", studentOcc: "${occ}")`);

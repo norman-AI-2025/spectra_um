@@ -1,4 +1,19 @@
-import assert from "assert";
+if (typeof console === "undefined") {
+  globalThis.console = {
+    log: typeof print !== "undefined" ? print : () => {},
+    warn: typeof print !== "undefined" ? print : () => {},
+    error: typeof print !== "undefined" ? print : () => {}
+  };
+}
+
+const assert = function (cond, msg) {
+  if (!cond) throw new Error(`Assertion failed: ${msg}`);
+};
+assert.strictEqual = function (actual, expected, message) {
+  if (actual !== expected) {
+    throw new Error(`Assertion failed: ${message} (expected ${expected}, got ${actual})`);
+  }
+};
 import { parseMoodleIcsCalendar } from "../utils/parser.js";
 import {
   getTaskFingerprint,

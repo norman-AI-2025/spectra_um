@@ -129,14 +129,42 @@ async function setupAlarms(intervalMinutes = 15) {
   });
 
   // Auto-attendance scanner alarm:
-  // Scans frequently (every 1-2 mins) so short attendance windows are never missed!
-  const attInterval = Math.max(1, Math.min(intervalMinutes, 2));
+  // Runs every 1 minute so attendance windows (typically 10-15 mins) are caught and filled immediately!
   chrome.alarms.create("spectra_check_attendance", {
-    periodInMinutes: attInterval,
+    periodInMinutes: 1,
     delayInMinutes: 0.1
   });
 
-  console.log(`[Spectra] Alarms registered: Attendance=${attInterval}m, Announcements=${intervalMinutes}m.`);
+  console.log(`[Spectra] Alarms registered: Attendance=1m, Announcements=${intervalMinutes}m.`);
+}
+
+// Active wake-up triggers for instant attendance check (< 10 min guarantee)
+chrome.tabs.onActivated?.addListener(async () => {
+  const now = Date.now();
+  if (now - lastAttendanceScanTime > 45000) {
+    await checkAutoAttendance();
+  }
+});
+
+chrome.windows.onFocusChanged?.addListener(async (windowId) => {
+  if (windowId !== chrome.windows.WINDOW_ID_NONE) {
+    const now = Date.now();
+    if (now - lastAttendanceScanTime > 45000) {
+      await checkAutoAttendance();
+    }
+  }
+});
+
+if (chrome.idle?.onStateChanged) {
+  chrome.idle.onStateChanged.addListener(async (newState) => {
+    if (newState === "active") {
+      const now = Date.now();
+      if (now - lastAttendanceScanTime > 30000) {
+        console.log("[Spectra] Laptop became active. Running immediate attendance check.");
+        await checkAutoAttendance();
+      }
+    }
+  });
 }
 
 // -------------------------------------------------------------
@@ -526,29 +554,33 @@ async function checkAutoAttendance() {
 
     const hasTelegram = Boolean(store.telegram_bot_token && store.telegram_chat_id);
 
-    let sessionContext;
-    try {
-      sessionContext = await getSessionContext();
-    } catch (err) {
-      console.log("[Spectra] Attendance scan skipped: not authenticated.");
-      return;
+    let sesskey = store.moodle_session?.sesskey || store.verifiedSesskey || "";
+    let cookieVal = store.moodle_session?.value || store.manualMoodleSession || "";
+
+    // Fast check: if session is cached and valid, reuse it without full /my/ roundtrip
+    if (!sesskey || !cookieVal) {
+      try {
+        const sessionContext = await getSessionContext();
+        sesskey = sessionContext.sesskey;
+        cookieVal = sessionContext.session?.value || cookieVal;
+      } catch (err) {
+        console.log("[Spectra] Attendance scan skipped: not authenticated.");
+        return;
+      }
     }
 
-    // Ensure DeclarativeNetRequest dynamic cookie rule is attached
-    if (store.moodle_session?.value) {
-      await setupDeclarativeCookieRule(store.moodle_session.value);
+    if (cookieVal) {
+      await setupDeclarativeCookieRule(cookieVal);
     }
 
-    let courses = [];
-    try {
-      courses = await getLiveEnrolledCourses(sessionContext.sesskey);
-    } catch (err) {
-      console.warn("[Spectra] Error loading live courses for attendance check:", err);
-    }
-
-    // Fallback to cached courses if live query returned empty
+    // Fast course lookup: use cached courses to complete scan in <2s and prevent MV3 service worker timeout
+    let courses = store.cached_courses || store.courses || [];
     if (!courses || courses.length === 0) {
-      courses = store.cached_courses || store.courses || [];
+      try {
+        courses = await getLiveEnrolledCourses(sesskey);
+      } catch (err) {
+        console.warn("[Spectra] Error loading live courses for attendance check:", err);
+      }
     }
 
     if (!courses || courses.length === 0) {
@@ -562,7 +594,7 @@ async function checkAutoAttendance() {
 
     const { attendance, actions } = await scanAndAutoRecordAttendance({
       courses,
-      sesskey: sessionContext.sesskey,
+      sesskey,
       occurrencesMap,
       autoSubmit: true,
       passwordsMap

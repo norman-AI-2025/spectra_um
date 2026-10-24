@@ -1450,7 +1450,7 @@ export function isRespectiveOccurrence(sessionGroup, studentOccurrence, sessionD
   }
 
   // Extract occurrence number specifically associated with occ/kumpulan/group/tutorial keywords if present
-  const occNumberMatch = targetText.match(/\b(?:occ|occurrence|kumpulan|group|tutorial|tut)\s*#?\s*(\d+)\b/i);
+  const occNumberMatch = targetText.match(/\b(?:occ|occurrence|kumpulan|group|tutorial|tut|kump|lec|kuliah|[ktgl])\s*#?\s*(\d+)\b/i);
   let textNum = null;
   if (occNumberMatch) {
     textNum = occNumberMatch[1];
@@ -1463,7 +1463,7 @@ export function isRespectiveOccurrence(sessionGroup, studentOccurrence, sessionD
     return true;
   }
 
-  const occDigits = occ.match(/\b(?:occ|occurrence|kumpulan|group|tutorial|tut)\s*#?\s*(\d+)\b/i) || occ.match(/\b\d+\b/) || occ.match(/\d+/);
+  const occDigits = occ.match(/\b(?:occ|occurrence|kumpulan|group|tutorial|tut|kump|lec|kuliah|[ktgl])\s*#?\s*(\d+)\b/i) || occ.match(/\b\d+\b/) || occ.match(/\d+/);
   const studentNum = occDigits ? (occDigits[1] || occDigits[0]) : null;
 
   if (studentNum && textNum) {
