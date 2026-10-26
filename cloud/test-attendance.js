@@ -766,7 +766,76 @@ const malayFormHtml = `
 const parsedMalay = parseAttendanceForm(malayFormHtml);
 assert(parsedMalay.statusId === "601", "Recognizes Hadir as Present");
 
+// -------------------------------------------------------------
+// 15. Attendance Filter: Upcoming vs History vs All Classification & Occurrence
+// -------------------------------------------------------------
+console.log("\n=== Testing Attendance Filter (Upcoming vs History vs All) ===");
+
+const mixedAttendanceHtml = `
+  <table class="generaltable attlist">
+    <tbody>
+      <tr>
+        <td>Mon 7 Oct 2024</td><td>10:00AM</td><td>Occ 1</td><td>Past Lecture 1</td><td>Present</td><td>2 / 2</td><td></td>
+      </tr>
+      <tr>
+        <td>Mon 14 Oct 2024</td><td>10:00AM</td><td>Occ 1</td><td>Past Lecture 2</td><td>Absent</td><td>0 / 2</td><td></td>
+      </tr>
+      <tr>
+        <td>Mon 21 Oct 2024</td><td>10:00AM</td><td>Occ 1</td><td>Today Active Check-in</td><td><a href="attendance.php?sessid=7701">Submit attendance</a></td><td>?</td><td></td>
+      </tr>
+      <tr>
+        <td>Mon 28 Oct 2024</td><td>10:00AM</td><td>Occ 1</td><td>Future Week Class</td><td>?</td><td>?</td><td></td>
+      </tr>
+      <tr>
+        <td>Mon 28 Oct 2024</td><td>10:00AM</td><td>Occ 2</td><td>Future Week Class Occ 2</td><td>?</td><td>?</td><td></td>
+      </tr>
+    </tbody>
+  </table>
+`;
+
+const mockToday = new Date("2024-10-21T11:00:00");
+globalThis.fetch = async (url) => {
+  if (url.includes("index.php")) {
+    return {
+      ok: true,
+      text: async () => `<a href="https://spectrum.um.edu.my/mod/attendance/view.php?id=123">Attendance</a>`
+    };
+  }
+  return {
+    ok: true,
+    text: async () => mixedAttendanceHtml
+  };
+};
+
+const courseAttResult = await fetchCourseAttendance({
+  courseId: "123",
+  courseCode: "WIX2002",
+  occurrence: "Occ 1",
+  referenceDate: mockToday
+});
+
+assert(courseAttResult.sessions.length === 4, "Occ 1 fetches 4 matching sessions (Occ 2 excluded)");
+assert(courseAttResult.sessions.every(s => s.group !== "Occ 2"), "Strict occurrence check: Occ 2 excluded");
+
+const upcoming = courseAttResult.sessions.filter(s => s.isUpcoming);
+const history = courseAttResult.sessions.filter(s => s.isHistory);
+
+assert(upcoming.length === 2, "Upcoming filter returns exactly 2 sessions (Open check-in + Future scheduled)");
+assert(upcoming.some(s => s.description === "Today Active Check-in" && s.status === "open"), "Upcoming contains open check-in session");
+assert(upcoming.some(s => s.description === "Future Week Class" && !s.isPastOrCurrent), "Upcoming contains future scheduled session");
+
+assert(history.length === 2, "History filter returns exactly 2 sessions (Past Lecture 1 and 2)");
+assert(history.some(s => s.description === "Past Lecture 1" && s.status === "present"), "History contains Present session");
+assert(history.some(s => s.description === "Past Lecture 2" && s.status === "absent"), "History contains Absent session");
+
+// Verify metrics do not penalize upcoming future sessions
+assert(courseAttResult.summary.takenSessions === 2, "Metrics takenSessions is 2 (strictly computed from past/completed)");
+assert(courseAttResult.summary.presentCount === 1, "Present count is 1");
+assert(courseAttResult.summary.absentCount === 1, "Absent count is 1");
+assert(courseAttResult.summary.percentage === "50.0%", "Attendance score is 50.0% (not penalized by upcoming sessions)");
+
 console.log(`\n=== All Attendance Tests Finished: ${passed} passed, ${failed} failed ===`);
 if (failed > 0) {
   throw new Error(`${failed} tests failed`);
 }
+

@@ -732,3 +732,209 @@ export function normalizeHydratedDeadlines(events = [], rawCalendarEvents = [], 
   return deduplicated;
 }
 
+/**
+ * Robustly parses and extracts the permanent Moodle iCal URL from HTML content.
+ * Handles HTML entities (&amp;), relative paths, and separate userid/authtoken attributes.
+ *
+ * @param {string} html - Raw HTML from SPeCTRUM calendar export page
+ * @returns {string|null} - Clean absolute iCal export URL or null
+ */
+export function extractIcalUrlFromHtml(html) {
+  if (!html || typeof html !== "string") return null;
+
+  // 1. Direct match for export_execute.php URL
+  const urlMatch = html.match(/(https?:\/\/[^\s"'<>]+\/calendar\/export_execute\.php\?[^\s"'<>]+)/i) ||
+    html.match(/["'](https?:\/\/[^"']*calendar\/export_execute\.php\?[^"']+)["']/i) ||
+    html.match(/href=["']([^"']*calendar\/export_execute\.php\?[^"']+)["']/i) ||
+    html.match(/value=["']([^"']*calendar\/export_execute\.php\?[^"']+)["']/i) ||
+    html.match(/(\/calendar\/export_execute\.php\?[^\s"'<>]+)/i);
+
+  if (urlMatch) {
+    let rawUrl = urlMatch[1] || urlMatch[0];
+    rawUrl = rawUrl.replace(/\\/g, "").replace(/&amp;/g, "&").replace(/&#038;/g, "&");
+    if (rawUrl.startsWith("/")) {
+      rawUrl = `${SPECTRUM_BASE_URL}${rawUrl}`;
+    }
+    if (rawUrl.includes("authtoken") || rawUrl.includes("userid")) {
+      return rawUrl;
+    }
+  }
+
+  // 2. Fallback: match userid and authtoken separately
+  const userIdMatch = html.match(/name=["']userid["'][^>]*value=["'](\d+)["']/i) ||
+    html.match(/value=["'](\d+)["'][^>]*name=["']userid["']/i) ||
+    html.match(/userid=(\d+)/i) ||
+    html.match(/"userid"\s*:\s*(\d+)/i);
+
+  const tokenMatch = html.match(/name=["']authtoken["'][^>]*value=["']([a-f0-9]{16,})["']/i) ||
+    html.match(/value=["']([a-f0-9]{16,})["'][^>]*name=["']authtoken["']/i) ||
+    html.match(/authtoken=([a-f0-9]{16,})/i) ||
+    html.match(/"authtoken"\s*:\s*"([a-f0-9]{16,})"/i);
+
+  if (userIdMatch && tokenMatch) {
+    return `${SPECTRUM_BASE_URL}/calendar/export_execute.php?userid=${userIdMatch[1]}&authtoken=${tokenMatch[1]}&preset_what=all&preset_time=recentupcoming`;
+  }
+
+  return null;
+}
+
+/**
+ * Fully automatic detection and extraction of Moodle's permanent iCal export URL.
+ * 
+ * 1. Checks GET /calendar/export.php.
+ * 2. If export_execute.php is not yet generated, extracts CSRF sesskey and QuickForms metadata,
+ *    and POSTs with generateurl="Get calendar URL" to command Moodle to produce the permanent feed URL.
+ * 3. Handles HTML entity unescaping (&amp; -> &) and absolute URL resolution.
+ * 4. Falls back to tab-level execution if direct fetch encounters authentication/credential isolation.
+ *
+ * @param {string} [sesskey] - Optional CSRF sesskey from active session
+ * @returns {Promise<string>} - Resolves with the clean export_execute.php URL
+ */
+export async function autoDiscoverMoodleIcalUrl(sesskey = "") {
+  const exportPageUrl = `${SPECTRUM_BASE_URL}/calendar/export.php`;
+
+  // Step 1: Perform GET request to export.php
+  let getHtml = "";
+  try {
+    const res = await fetch(exportPageUrl, {
+      method: "GET",
+      credentials: "include",
+      headers: {
+        "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8"
+      }
+    });
+
+    if (res.ok) {
+      getHtml = await res.text();
+      // Check if URL is already visible on GET
+      const existingUrl = extractIcalUrlFromHtml(getHtml);
+      if (existingUrl) {
+        return existingUrl;
+      }
+    }
+  } catch (err) {
+    console.warn("[Spectra] GET export.php error:", err);
+  }
+
+  // Step 2: If not found on GET, construct POST to trigger generateurl
+  try {
+    let effectiveSesskey = sesskey;
+    let qfValue = "1";
+    let genVal = "Get calendar URL";
+
+    if (getHtml) {
+      // Extract sesskey from HTML if not provided or to ensure accuracy
+      const mSess = getHtml.match(/name=["']sesskey["'][^>]*value=["']([a-zA-Z0-9]+)["']/i) ||
+        getHtml.match(/value=["']([a-zA-Z0-9]+)["'][^>]*name=["']sesskey["']/i) ||
+        getHtml.match(/sesskey=([a-zA-Z0-9]+)/i) ||
+        getHtml.match(/M\.cfg\.sesskey\s*=\s*"([^"]+)"/i);
+      if (mSess && mSess[1]) {
+        effectiveSesskey = mSess[1];
+      }
+
+      const mQf = getHtml.match(/name=["']_qf__core_calendar_export_form["'][^>]*value=["']([^"']+)["']/i);
+      if (mQf && mQf[1]) qfValue = mQf[1];
+
+      const mGen = getHtml.match(/name=["']generateurl["'][^>]*value=["']([^"']+)["']/i);
+      if (mGen && mGen[1]) genVal = mGen[1];
+    }
+
+    if (!effectiveSesskey && typeof chrome !== "undefined" && chrome.storage?.local) {
+      const stored = await chrome.storage.local.get(["spectrum_live_session", "moodle_sesskey"]);
+      effectiveSesskey = stored.spectrum_live_session?.sesskey || stored.moodle_sesskey || "";
+    }
+
+    // Build form POST parameters
+    const postData = new URLSearchParams();
+    if (effectiveSesskey) {
+      postData.set("sesskey", effectiveSesskey);
+    }
+    postData.set("_qf__core_calendar_export_form", qfValue);
+    postData.set("events[exportevents]", "all");
+    postData.set("period[timeperiod]", "recentupcoming");
+    postData.set("generateurl", genVal);
+
+    const postRes = await fetch(exportPageUrl, {
+      method: "POST",
+      credentials: "include",
+      headers: {
+        "Content-Type": "application/x-www-form-urlencoded",
+        "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8"
+      },
+      body: postData.toString()
+    });
+
+    if (postRes.ok) {
+      const postHtml = await postRes.text();
+      const generatedUrl = extractIcalUrlFromHtml(postHtml);
+      if (generatedUrl) {
+        return generatedUrl;
+      }
+    }
+  } catch (err) {
+    console.warn("[Spectra] POST export.php error:", err);
+  }
+
+  // Step 3: Tab In-Page Script Fallback if direct fetch had cookie/CORS limitations
+  if (typeof chrome !== "undefined" && chrome.tabs?.query && chrome.scripting?.executeScript) {
+    try {
+      const tabs = await chrome.tabs.query({ url: "*://spectrum.um.edu.my/*" });
+      for (const tab of tabs) {
+        if (!tab.id) continue;
+        const results = await chrome.scripting.executeScript({
+          target: { tabId: tab.id },
+          func: async () => {
+            try {
+              const urlRegex = /(https?:\/\/[^\s"'<>]+\/calendar\/export_execute\.php\?[^\s"'<>]+)/i;
+              const link = document.querySelector('a[href*="export_execute.php"]');
+              if (link && link.href) return link.href.replace(/&amp;/g, "&");
+
+              const getRes = await fetch("https://spectrum.um.edu.my/calendar/export.php");
+              const getHtml = await getRes.text();
+              const m1 = getHtml.match(urlRegex);
+              if (m1) return m1[1].replace(/&amp;/g, "&");
+
+              const mSess = getHtml.match(/name=["']sesskey["'][^>]*value=["']([a-zA-Z0-9]+)["']/i) ||
+                (window.M && window.M.cfg && window.M.cfg.sesskey ? [null, window.M.cfg.sesskey] : null);
+              const sesskey = mSess ? mSess[1] : "";
+
+              const params = new URLSearchParams();
+              if (sesskey) params.set("sesskey", sesskey);
+              params.set("_qf__core_calendar_export_form", "1");
+              params.set("events[exportevents]", "all");
+              params.set("period[timeperiod]", "recentupcoming");
+              params.set("generateurl", "Get calendar URL");
+
+              const postRes = await fetch("https://spectrum.um.edu.my/calendar/export.php", {
+                method: "POST",
+                headers: { "Content-Type": "application/x-www-form-urlencoded" },
+                body: params.toString()
+              });
+              const postHtml = await postRes.text();
+              const m2 = postHtml.match(urlRegex);
+              if (m2) return m2[1].replace(/&amp;/g, "&");
+
+              const uid = postHtml.match(/name=["']userid["'][^>]*value=["'](\d+)["']/i) || postHtml.match(/userid=(\d+)/i);
+              const tok = postHtml.match(/name=["']authtoken["'][^>]*value=["']([a-f0-9]{16,})["']/i) || postHtml.match(/authtoken=([a-f0-9]{16,})/i);
+              if (uid && tok) {
+                return `https://spectrum.um.edu.my/calendar/export_execute.php?userid=${uid[1]}&authtoken=${tok[1]}&preset_what=all&preset_time=recentupcoming`;
+              }
+              return null;
+            } catch (e) {
+              return null;
+            }
+          }
+        });
+
+        if (results && results[0] && results[0].result) {
+          return results[0].result;
+        }
+      }
+    } catch (tabErr) {
+      console.warn("[Spectra] Tab execution fallback error:", tabErr);
+    }
+  }
+
+  throw new Error("Could not automatically retrieve Moodle iCal URL. Please ensure you are logged in to SPeCTRUM.");
+}
+

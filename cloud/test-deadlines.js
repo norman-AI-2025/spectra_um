@@ -6,9 +6,9 @@
 
 if (typeof console === "undefined") {
   globalThis.console = {
-    log: typeof print !== "undefined" ? print : () => {},
-    warn: typeof print !== "undefined" ? print : () => {},
-    error: typeof print !== "undefined" ? print : () => {}
+    log: typeof print !== "undefined" ? print : () => { },
+    warn: typeof print !== "undefined" ? print : () => { },
+    error: typeof print !== "undefined" ? print : () => { }
   };
 }
 
@@ -26,7 +26,8 @@ import {
   formatDueCalendarDate,
   parseAssignmentViewPage,
   parseMoodleDateString,
-  cleanMoodleTitle
+  cleanMoodleTitle,
+  parseNoticeTimestamp
 } from "../utils/parser.js";
 import { fetchLiveDeadlines, normalizeHydratedDeadlines } from "../utils/calendar.js";
 
@@ -756,6 +757,34 @@ assert(quizzesOcc1[0].dateLabel === "Closes", "Quiz items receive dateLabel 'Clo
 // 7. formatDueCalendarDate fallback parsing
 const formattedFallback = formatDueCalendarDate(null, "Closed date: Friday, 31 October 2026, 11:59 PM");
 assert(formattedFallback.includes("Oct") && formattedFallback.includes("31"), `formatDueCalendarDate parsed fallbackText date (got '${formattedFallback}')`);
+
+// 8. Notices sorting by latest across all enrolled subjects
+console.log("\n--- Sub-test 8: parseNoticeTimestamp & Notices Sorting by Latest ---");
+const ts1 = parseNoticeTimestamp("24 Oct 2026, 2:32 PM", "1001");
+const ts2 = parseNoticeTimestamp("25 Oct 2026, 9:15 AM", "1002");
+const ts3 = parseNoticeTimestamp("Wed, 21 Oct 2026, 8:00 AM", "1003");
+const ts4 = parseNoticeTimestamp("26/10/2026, 11:00 AM", "1004");
+assert(ts2 > ts1, "25 Oct > 24 Oct timestamp");
+assert(ts1 > ts3, "24 Oct > 21 Oct timestamp");
+assert(ts4 > ts2, "26 Oct > 25 Oct timestamp");
+
+const mockNotices = [
+  { id: "101", courseCode: "WIX1001", subject: "Older notice course 1", date: "20 Oct 2026, 10:00 AM", timestamp: parseNoticeTimestamp("20 Oct 2026, 10:00 AM", "101") },
+  { id: "201", courseCode: "WIX2002", subject: "Latest notice course 2", date: "26 Oct 2026, 8:00 AM", timestamp: parseNoticeTimestamp("26 Oct 2026, 8:00 AM", "201") },
+  { id: "301", courseCode: "WIX3001", subject: "Mid notice course 3", date: "24 Oct 2026, 1:00 PM", timestamp: parseNoticeTimestamp("24 Oct 2026, 1:00 PM", "301") }
+];
+
+// Sort mockNotices starting with the latest
+mockNotices.sort((a, b) => {
+  const tA = a.timestamp || parseNoticeTimestamp(a.date, a.id) || 0;
+  const tB = b.timestamp || parseNoticeTimestamp(b.date, b.id) || 0;
+  if (tA !== tB) return tB - tA;
+  return (parseInt(b.id, 10) || 0) - (parseInt(a.id, 10) || 0);
+});
+
+assert(mockNotices[0].courseCode === "WIX2002", "First notice is the latest across all enrolled subjects (WIX2002 on 26 Oct)");
+assert(mockNotices[1].courseCode === "WIX3001", "Second notice is WIX3001 on 24 Oct");
+assert(mockNotices[2].courseCode === "WIX1001", "Third notice is oldest on 20 Oct");
 
 console.log(`\n=== All Deadlines Tests Finished: ${passed} passed, ${failed} failed ===`);
 if (failed > 0) {

@@ -281,6 +281,16 @@ export async function fetchLiveAnnouncements(courses = [], sesskey = null) {
     }
   }
 
+  // Sort all enrolled course announcements starting with the latest
+  deduped.sort((a, b) => {
+    const tsA = a.timestamp || 0;
+    const tsB = b.timestamp || 0;
+    if (tsA !== tsB) return tsB - tsA;
+    const idA = parseInt(a.id, 10) || 0;
+    const idB = parseInt(b.id, 10) || 0;
+    return idB - idA;
+  });
+
   return deduped;
 }
 
@@ -342,7 +352,9 @@ export async function fetchCourseContentsViaAjax(courseId, sesskey = null) {
     }
   } catch (err) {
     if (err?.name !== "AbortError" && !err?.message?.includes("aborted")) {
-      console.debug(`[Spectra] core_course_get_contents note for course ${courseId}:`, err?.message || err);
+      if (typeof console !== "undefined" && typeof console.debug === "function") {
+        console.debug(`[Spectra] core_course_get_contents note for course ${courseId}:`, err?.message || err);
+      }
     }
   }
 

@@ -7,9 +7,9 @@
 
 if (typeof console === "undefined") {
   globalThis.console = {
-    log: typeof print !== "undefined" ? print : () => {},
-    warn: typeof print !== "undefined" ? print : () => {},
-    error: typeof print !== "undefined" ? print : () => {}
+    log: typeof print !== "undefined" ? print : () => { },
+    warn: typeof print !== "undefined" ? print : () => { },
+    error: typeof print !== "undefined" ? print : () => { }
   };
 }
 
@@ -21,6 +21,7 @@ import {
   isAttendanceActivity,
   isRespectiveOccurrence
 } from "../utils/parser.js";
+import { extractIcalUrlFromHtml } from "../utils/calendar.js";
 
 let passed = 0;
 let failed = 0;
@@ -276,6 +277,48 @@ const gradeAtt = parseGradebookAttendance(sampleGradebookHtml);
 assert(gradeAtt !== null, "Successfully parsed gradebook attendance");
 assert(gradeAtt.hasAttendance === true, "Flags hasAttendance: true");
 assert(gradeAtt.percentage.includes("92.86"), `Parsed percentage 92.86% (got ${gradeAtt.percentage})`);
+
+// -------------------------------------------------------------
+// Test 5: extractIcalUrlFromHtml Automatic Discovery
+// -------------------------------------------------------------
+console.log("\n--- Test 5: extractIcalUrlFromHtml Automatic Discovery ---");
+
+// Case A: Anchor tag with HTML entity unescaping (&amp; -> &)
+const htmlAnchor = `
+<div class="calendar_url">
+  <p>Here is your calendar URL:</p>
+  <a href="https://spectrum.um.edu.my/calendar/export_execute.php?userid=12345&amp;authtoken=abcdef0123456789abcdef0123456789&amp;preset_what=all&amp;preset_time=recentupcoming">Get URL</a>
+</div>`;
+const urlA = extractIcalUrlFromHtml(htmlAnchor);
+assert(urlA !== null, "Extracts URL from anchor tag");
+assert(urlA.includes("userid=12345"), "Contains userid=12345");
+assert(urlA.includes("authtoken=abcdef0123456789abcdef0123456789"), "Contains valid authtoken");
+assert(!urlA.includes("&amp;"), "Unescapes &amp; to plain &");
+
+// Case B: Input value attribute with relative path
+const htmlRelative = `
+<form>
+  <input type="text" name="url" value="/calendar/export_execute.php?userid=9876&amp;authtoken=fedcba9876543210fedcba9876543210&amp;preset_what=all&amp;preset_time=recentupcoming">
+</form>`;
+const urlB = extractIcalUrlFromHtml(htmlRelative);
+assert(urlB !== null, "Extracts relative URL from input value");
+assert(urlB.startsWith("https://spectrum.um.edu.my/calendar/export_execute.php"), "Prepends base URL to relative path");
+assert(urlB.includes("userid=9876"), "Contains userid=9876");
+
+// Case C: Fallback token and userid inputs in raw HTML
+const htmlTokens = `
+<div class="mform">
+  <input type="hidden" name="userid" value="55555">
+  <input type="hidden" name="authtoken" value="11223344556677889900aabbccddeeff">
+</div>`;
+const urlC = extractIcalUrlFromHtml(htmlTokens);
+assert(urlC !== null, "Assembles URL from userid and authtoken fields");
+assert(urlC === "https://spectrum.um.edu.my/calendar/export_execute.php?userid=55555&authtoken=11223344556677889900aabbccddeeff&preset_what=all&preset_time=recentupcoming", "Assembles exact standard URL");
+
+// Case D: Empty or invalid HTML without tokens returns null
+const htmlEmpty = `<form action="export.php"><input type="submit" name="generateurl" value="Get calendar URL"></form>`;
+const urlD = extractIcalUrlFromHtml(htmlEmpty);
+assert(urlD === null, "Returns null when no authtoken is present in HTML");
 
 // -------------------------------------------------------------
 // Summary

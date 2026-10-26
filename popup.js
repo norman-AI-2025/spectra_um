@@ -22,7 +22,7 @@ import {
   AuthExpiredError
 } from "./utils/moodleApi.js";
 
-import { fetchLiveDeadlines, normalizeHydratedDeadlines, getTaskFingerprint, deduplicateDeadlinesList } from "./utils/calendar.js";
+import { fetchLiveDeadlines, normalizeHydratedDeadlines, getTaskFingerprint, deduplicateDeadlinesList, autoDiscoverMoodleIcalUrl } from "./utils/calendar.js";
 
 import {
   formatTimeRemaining,
@@ -35,7 +35,8 @@ import {
   isAttendanceSessionPastOrCurrent,
   isAttendanceActivity,
   isOverdueMoreThan40Days,
-  isOverdueMoreThan100Days
+  isOverdueMoreThan100Days,
+  parseNoticeTimestamp
 } from "./utils/parser.js";
 
 import {
@@ -66,6 +67,7 @@ const state = {
   attendance: null,
   courseOccurrences: {},
   selectedAttendanceSubject: "all",
+  attendanceFilter: "upcoming",
   autoAttendanceEnabled: true,
   telegramSentAnnouncementIds: new Set(),
   telegramSentDeadlineIds: new Set(),
@@ -89,10 +91,29 @@ function openExternalUrl(url) {
 // Initialization
 // ===================================================================
 document.addEventListener("DOMContentLoaded", async () => {
-  initDOMListeners();
-  await loadStoredPreferences();
-  await syncLiveSession();
-  startLiveCountdowns();
+  try {
+    initDOMListeners();
+  } catch (err) {
+    console.error("[Spectra] Error initializing DOM listeners:", err);
+  }
+
+  try {
+    await loadStoredPreferences();
+  } catch (err) {
+    console.error("[Spectra] Error loading stored preferences:", err);
+  }
+
+  try {
+    await syncLiveSession();
+  } catch (err) {
+    console.error("[Spectra] Error syncing live session:", err);
+  }
+
+  try {
+    startLiveCountdowns();
+  } catch (err) {
+    console.error("[Spectra] Error starting live countdowns:", err);
+  }
 });
 
 // ===================================================================
@@ -100,12 +121,24 @@ document.addEventListener("DOMContentLoaded", async () => {
 // ===================================================================
 function initDOMListeners() {
   // Tab Switching
-  document.querySelectorAll(".nav-tab").forEach((tabBtn) => {
+  document.querySelectorAll(".nav-tab-pill, .nav-tab").forEach((tabBtn) => {
     tabBtn.addEventListener("click", () => {
       const targetTab = tabBtn.dataset.tab;
       switchTab(targetTab);
     });
   });
+
+  // Header quick settings button
+  const quickSettingsBtn = document.getElementById("quickSettingsBtn");
+  if (quickSettingsBtn) {
+    quickSettingsBtn.addEventListener("click", () => switchTab("settings"));
+  }
+
+  // Footer Demo preview button
+  const footerDemoBtn = document.getElementById("footerDemoBtn");
+  if (footerDemoBtn) {
+    footerDemoBtn.addEventListener("click", enableDemoPreview);
+  }
 
   // Top Bar Refresh Button
   const refreshBtn = document.getElementById("refreshBtn");
@@ -208,39 +241,52 @@ function initDOMListeners() {
   const searchInput = document.getElementById("deadlineSearch");
   const clearBtn = document.getElementById("clearSearchBtn");
 
-  searchInput.addEventListener("input", (e) => {
-    state.searchQuery = e.target.value.trim().toLowerCase();
-    clearBtn.classList.toggle("hidden", !state.searchQuery);
-    renderDeadlines();
-  });
+  if (searchInput && clearBtn) {
+    searchInput.addEventListener("input", (e) => {
+      state.searchQuery = e.target.value.trim().toLowerCase();
+      clearBtn.classList.toggle("hidden", !state.searchQuery);
+      renderDeadlines();
+    });
 
-  clearBtn.addEventListener("click", () => {
-    searchInput.value = "";
-    state.searchQuery = "";
-    clearBtn.classList.add("hidden");
-    renderDeadlines();
-  });
+    clearBtn.addEventListener("click", () => {
+      searchInput.value = "";
+      state.searchQuery = "";
+      clearBtn.classList.add("hidden");
+      renderDeadlines();
+    });
+  }
 
-  document.querySelectorAll(".pill-btn").forEach((pill) => {
+  // Deadlines filter pills
+  document.querySelectorAll("#sectionDeadlines .pill-btn[data-filter]").forEach((pill) => {
     pill.addEventListener("click", () => {
-      document.querySelectorAll(".pill-btn").forEach((p) => p.classList.remove("active"));
+      document.querySelectorAll("#sectionDeadlines .pill-btn[data-filter]").forEach((p) => p.classList.remove("active"));
       pill.classList.add("active");
       state.activeFilter = pill.dataset.filter;
       renderDeadlines();
     });
   });
 
-  // Course Selector in Class Prep
-  const courseSelect = document.getElementById("courseSelect");
-  courseSelect.addEventListener("change", async (e) => {
-    const selectedId = e.target.value;
-    const found = state.courses.find((c) => c.id === selectedId);
-    if (found) {
-      state.selectedCourse = found;
-      updateFolderPreview();
-      await loadLiveWeekMaterials();
-    }
+  // Attendance filter pills (Upcoming, History, All)
+  document.querySelectorAll(".att-pill-btn").forEach((pill) => {
+    pill.addEventListener("click", () => {
+      document.querySelectorAll(".att-pill-btn").forEach((p) => p.classList.remove("active"));
+      pill.classList.add("active");
+      state.attendanceFilter = pill.dataset.attFilter || "upcoming";
+      renderAttendanceRecords();
+    });
   });
+
+  // Course Selector in Class Prep (guarded if removed)
+  const courseSelect = document.getElementById("courseSelect");
+  if (courseSelect) {
+    courseSelect.addEventListener("change", async (e) => {
+      const selectedId = e.target.value;
+      const found = state.courses.find((c) => c.id === selectedId);
+      if (found) {
+        state.selectedCourse = found;
+      }
+    });
+  }
 
   // Subject Dropdown Filter in Announcements Tab
   const announcementSelect = document.getElementById("announcementSubjectSelect");
@@ -391,34 +437,49 @@ function initDOMListeners() {
     });
   }
 
-  // Download Week Pack Button
+  // Download Week Pack Button (guarded if removed or hidden)
   const downloadPackBtn = document.getElementById("downloadWeekPackBtn");
-  downloadPackBtn.addEventListener("click", handleDownloadWeekPack);
+  if (downloadPackBtn) {
+    downloadPackBtn.addEventListener("click", handleDownloadWeekPack);
+  }
 
   // Settings: Password Visibility Toggle
   const toggleTokenBtn = document.getElementById("toggleTokenVisibility");
   const tokenInput = document.getElementById("telegramToken");
-  toggleTokenBtn.addEventListener("click", () => {
-    if (tokenInput.type === "password") {
-      tokenInput.type = "text";
-      toggleTokenBtn.textContent = "🔒";
-    } else {
-      tokenInput.type = "password";
-      toggleTokenBtn.textContent = "👁️";
-    }
-  });
+  if (toggleTokenBtn && tokenInput) {
+    toggleTokenBtn.addEventListener("click", () => {
+      if (tokenInput.type === "password") {
+        tokenInput.type = "text";
+        toggleTokenBtn.textContent = "🔒";
+      } else {
+        tokenInput.type = "password";
+        toggleTokenBtn.textContent = "👁️";
+      }
+    });
+  }
 
   // Settings: Cloud Relay Toggle
   const cloudToggle = document.getElementById("cloudRelayToggle");
   const cloudFields = document.getElementById("cloudRelayFields");
-  cloudToggle.addEventListener("change", (e) => {
-    cloudFields.classList.toggle("hidden", !e.target.checked);
-  });
+  if (cloudToggle && cloudFields) {
+    cloudToggle.addEventListener("change", (e) => {
+      cloudFields.classList.toggle("hidden", !e.target.checked);
+    });
+  }
 
   // Settings: Test Buttons
-  document.getElementById("testTelegramBtn").addEventListener("click", handleTestTelegram);
-  document.getElementById("syncCloudNowBtn").addEventListener("click", handleManualCloudSync);
-  document.getElementById("saveSettingsBtn").addEventListener("click", handleSaveSettings);
+  const testTelegramBtn = document.getElementById("testTelegramBtn");
+  if (testTelegramBtn) {
+    testTelegramBtn.addEventListener("click", handleTestTelegram);
+  }
+  const syncCloudNowBtn = document.getElementById("syncCloudNowBtn");
+  if (syncCloudNowBtn) {
+    syncCloudNowBtn.addEventListener("click", handleManualCloudSync);
+  }
+  const saveSettingsBtn = document.getElementById("saveSettingsBtn");
+  if (saveSettingsBtn) {
+    saveSettingsBtn.addEventListener("click", handleSaveSettings);
+  }
   const autoDiscoverIcalBtn = document.getElementById("autoDiscoverIcalBtn");
   if (autoDiscoverIcalBtn) {
     autoDiscoverIcalBtn.addEventListener("click", handleAutoDiscoverIcal);
@@ -428,7 +489,7 @@ function initDOMListeners() {
 function switchTab(tabName) {
   state.currentTab = tabName;
 
-  document.querySelectorAll(".nav-tab").forEach((tab) => {
+  document.querySelectorAll(".nav-tab-pill, .nav-tab").forEach((tab) => {
     const isActive = tab.dataset.tab === tabName;
     tab.classList.toggle("active", isActive);
     tab.setAttribute("aria-selected", isActive ? "true" : "false");
@@ -464,16 +525,8 @@ function switchTab(tabName) {
     renderAttendanceSummaryMetrics();
     renderOpenAttendanceBanner();
     renderAttendanceRecords();
-    if (state.isAuthenticated && !state.attendance) {
+    if (state.isAuthenticated && (!state.attendance || !state.attendance.courses || state.attendance.courses.length === 0)) {
       loadLiveAttendanceData(false);
-    }
-  }
-
-  if (tabName === "materials") {
-    updateFolderPreview();
-    renderWeekPills();
-    if (state.selectedCourse && state.weekMaterials.slides.length === 0 && state.weekMaterials.tutorials.length === 0 && state.weekMaterials.labs.length === 0 && state.isAuthenticated) {
-      loadLiveWeekMaterials();
     }
   }
 }
@@ -604,9 +657,8 @@ function renderUnauthenticatedStates(isUnset) {
   const courseSelect = document.getElementById("courseSelect");
   const coursesBadge = document.getElementById("detectedCoursesBadge");
   if (courseSelect) {
-    courseSelect.innerHTML = `<option value="">${
-      isUnset ? "Session required - configure in Settings" : "Session expired - please update in Settings"
-    }</option>`;
+    courseSelect.innerHTML = `<option value="">${isUnset ? "Session required - configure in Settings" : "Session expired - please update in Settings"
+      }</option>`;
   }
   if (coursesBadge) coursesBadge.textContent = "0 Courses";
 }
@@ -700,34 +752,26 @@ async function hydrateCoursesFromScrape(courses = [], rawCourses = []) {
   }
 
   if (badge) badge.textContent = `${state.courses.length} Courses`;
-  if (!select) return;
-  select.innerHTML = "";
-
-  if (state.courses.length === 0) {
-    select.innerHTML = `<option value="">No enrolled courses detected on SPeCTRUM</option>`;
-    return;
+  if (select) {
+    select.innerHTML = "";
+    if (state.courses.length === 0) {
+      select.innerHTML = `<option value="">No enrolled courses detected on SPeCTRUM</option>`;
+    } else {
+      state.courses.forEach((c, idx) => {
+        const opt = document.createElement("option");
+        opt.value = c.id;
+        opt.textContent = `${c.code} - ${c.name}`;
+        if (idx === 0) {
+          opt.selected = true;
+          state.selectedCourse = c;
+        }
+        select.appendChild(opt);
+      });
+    }
   }
 
-  state.courses.forEach((c, idx) => {
-    const opt = document.createElement("option");
-    opt.value = c.id;
-    opt.textContent = `${c.code} - ${c.name}`;
-    if (idx === 0) {
-      opt.selected = true;
-      state.selectedCourse = c;
-    }
-    select.appendChild(opt);
-  });
-
-  updateFolderPreview();
-  renderWeekPills();
   populateAnnouncementSubjectDropdown();
   populateAttendanceCourseDropdowns();
-
-  const loading = document.getElementById("materialsLoading");
-  if (loading) loading.classList.add("hidden");
-
-  await loadLiveWeekMaterials();
 }
 
 /**
@@ -808,16 +852,37 @@ async function handleSaveAndTestSession() {
     showToast("Session Injected & Scraping Complete!", "success");
 
     // Trigger live deadlines fetch directly from authoritative course pages
-    await loadLiveDeadlines();
-
-    if ((verified.rawCourses && verified.rawCourses.length > 0) || (verified.courses && verified.courses.length > 0)) {
-      await hydrateCoursesFromScrape(verified.courses, verified.rawCourses);
-    } else {
-      await loadLiveEnrolledCourses();
+    try {
+      await loadLiveDeadlines();
+    } catch (e) {
+      console.warn("[Spectra] Deadlines loading notice:", e);
     }
 
-    // Load announcements
-    await loadLiveAnnouncements();
+    try {
+      if ((verified.rawCourses && verified.rawCourses.length > 0) || (verified.courses && verified.courses.length > 0)) {
+        await hydrateCoursesFromScrape(verified.courses, verified.rawCourses);
+      } else {
+        await loadLiveEnrolledCourses();
+      }
+    } catch (e) {
+      console.warn("[Spectra] Courses loading notice:", e);
+    }
+
+    try {
+      // Load announcements
+      await loadLiveAnnouncements();
+    } catch (e) {
+      console.warn("[Spectra] Announcements loading notice:", e);
+    }
+
+    // Auto-discover permanent Moodle iCal calendar feed in background if not already set
+    if (typeof chrome !== "undefined" && chrome.storage?.local) {
+      chrome.storage.local.get(["calendarIcalUrl", "calendar_ical_url"]).then((st) => {
+        if (!st.calendarIcalUrl && !st.calendar_ical_url) {
+          handleAutoDiscoverIcal(true);
+        }
+      }).catch(() => { });
+    }
 
   } catch (err) {
     console.error("%c✖ Session Handshake Failed:", "color: #ef4444; font-weight: bold;", err.message || err);
@@ -900,16 +965,28 @@ async function handleAutoDetectSession() {
     showToast("Session Auto-Detected Successfully!", "success");
 
     // Trigger live deadlines fetch directly from authoritative course pages
-    await loadLiveDeadlines();
-
-    if ((verified.rawCourses && verified.rawCourses.length > 0) || (verified.courses && verified.courses.length > 0)) {
-      await hydrateCoursesFromScrape(verified.courses, verified.rawCourses);
-    } else {
-      await loadLiveEnrolledCourses();
+    try {
+      await loadLiveDeadlines();
+    } catch (e) {
+      console.warn("[Spectra] Deadlines loading notice after auto-detect:", e);
     }
 
-    // Load announcements
-    await loadLiveAnnouncements();
+    try {
+      if ((verified.rawCourses && verified.rawCourses.length > 0) || (verified.courses && verified.courses.length > 0)) {
+        await hydrateCoursesFromScrape(verified.courses, verified.rawCourses);
+      } else {
+        await loadLiveEnrolledCourses();
+      }
+    } catch (e) {
+      console.warn("[Spectra] Courses loading notice after auto-detect:", e);
+    }
+
+    try {
+      // Load announcements
+      await loadLiveAnnouncements();
+    } catch (e) {
+      console.warn("[Spectra] Announcements loading notice after auto-detect:", e);
+    }
   } catch (err) {
     console.warn("[Spectra] Auto-detect session failed:", err);
     state.isAuthenticated = false;
@@ -993,7 +1070,7 @@ async function syncLiveSession() {
       }
 
       // Explicitly purge legacy raw calendar cache to eliminate ghost tasks
-      chrome.storage.local.remove(["cached_raw_events"]).catch(() => {});
+      chrome.storage.local.remove(["cached_raw_events"]).catch(() => { });
 
       if (Array.isArray(stored.cached_deadlines)) {
         const cleanCached = stored.cached_deadlines.filter((d) => {
@@ -1011,7 +1088,7 @@ async function syncLiveSession() {
         const dedupedCached = deduplicateDeadlinesList(cleanCached, state.completedIds);
 
         if (dedupedCached.length !== stored.cached_deadlines.length) {
-          chrome.storage.local.set({ cached_deadlines: dedupedCached }).catch(() => {});
+          chrome.storage.local.set({ cached_deadlines: dedupedCached }).catch(() => { });
         }
 
         if (dedupedCached.length > 0) {
@@ -1085,16 +1162,28 @@ async function syncLiveSession() {
     const sesskeyEl = document.getElementById("sesskeyDisplay");
     if (sesskeyEl) sesskeyEl.textContent = `${sessionContext.sesskey.substring(0, 5)}••••••`;
 
-    // Step 1: Ensure enrolled courses are loaded first
-    if (!state.courses || state.courses.length === 0) {
-      await loadLiveEnrolledCourses();
-    } else {
-      // Non-blocking refresh of courses
-      loadLiveEnrolledCourses().catch((e) => console.warn("[Spectra] Background course refresh notice:", e));
+    // Step 1: Ensure enrolled courses are loaded first (non-blocking for session state)
+    try {
+      if (!state.courses || state.courses.length === 0) {
+        await loadLiveEnrolledCourses();
+      } else {
+        loadLiveEnrolledCourses().catch((e) => console.warn("[Spectra] Background course refresh notice:", e));
+      }
+    } catch (courseErr) {
+      console.warn("[Spectra] Course loading notice:", courseErr);
     }
 
     // Step 2: Load live deadlines with populated state.courses
-    await loadLiveDeadlines();
+    try {
+      await loadLiveDeadlines();
+    } catch (deadlineErr) {
+      console.warn("[Spectra] Deadlines loading notice:", deadlineErr);
+    }
+
+    // Step 3: Pre-fetch live attendance in background
+    try {
+      loadLiveAttendanceData(false).catch((e) => console.warn("[Spectra] Attendance preload notice:", e));
+    } catch (_) { }
 
   } catch (err) {
     console.warn("[Spectra] Live session authentication check:", err);
@@ -1122,7 +1211,7 @@ function updateSessionIndicator(status, label) {
   sessionPill.className = "session-pill";
 
   if (status === "connected") {
-    sessionPill.classList.add("session-active");
+    sessionPill.classList.add("session-connected", "session-active");
     sessionStatusText.textContent = label;
     if (cookieStatusLabel) {
       cookieStatusLabel.textContent = "Live Moodle Active";
@@ -1136,7 +1225,7 @@ function updateSessionIndicator(status, label) {
       cookieStatusLabel.className = "status-indicator-badge";
     }
   } else {
-    sessionPill.classList.add("session-offline");
+    sessionPill.classList.add("session-disconnected", "session-offline");
     sessionStatusText.textContent = label;
     if (cookieStatusLabel) {
       cookieStatusLabel.textContent = "Unauthenticated";
@@ -1148,8 +1237,10 @@ function updateSessionIndicator(status, label) {
 function updateUserIdentityUI(userName, avatarUrl) {
   const nameEl = document.getElementById("userName");
   const avatarEl = document.getElementById("userAvatar");
+  const footerName = document.getElementById("studentNameDisplayFooter");
 
   if (nameEl) nameEl.textContent = userName;
+  if (footerName) footerName.textContent = userName;
 
   if (avatarEl) {
     if (avatarUrl) {
@@ -1495,6 +1586,14 @@ async function loadLiveAnnouncements() {
       }
       if (Array.isArray(stored.cached_announcements) && stored.cached_announcements.length > 0) {
         announcements = stored.cached_announcements;
+        announcements.sort((a, b) => {
+          const tsA = a.timestamp || parseNoticeTimestamp(a.date, a.id) || 0;
+          const tsB = b.timestamp || parseNoticeTimestamp(b.date, b.id) || 0;
+          if (tsA !== tsB) return tsB - tsA;
+          const idA = parseInt(a.id, 10) || 0;
+          const idB = parseInt(b.id, 10) || 0;
+          return idB - idA;
+        });
         state.announcements = announcements;
         populateAnnouncementSubjectDropdown();
         renderAnnouncements();
@@ -1516,6 +1615,15 @@ async function loadLiveAnnouncements() {
         ...a,
         telegramSent: state.telegramSentAnnouncementIds.has(String(a.id))
       }));
+
+      announcements.sort((a, b) => {
+        const tsA = a.timestamp || parseNoticeTimestamp(a.date, a.id) || 0;
+        const tsB = b.timestamp || parseNoticeTimestamp(b.date, b.id) || 0;
+        if (tsA !== tsB) return tsB - tsA;
+        const idA = parseInt(a.id, 10) || 0;
+        const idB = parseInt(b.id, 10) || 0;
+        return idB - idA;
+      });
 
       if (typeof chrome !== "undefined" && chrome.storage?.local && announcements.length > 0) {
         await chrome.storage.local.set({ cached_announcements: announcements });
@@ -1605,6 +1713,16 @@ function renderAnnouncements() {
   const filtered = state.announcements.filter((item) => {
     if (selectedSubject === "all") return true;
     return item.courseCode === selectedSubject;
+  });
+
+  // Sort notices starting with the latest (most recent first)
+  filtered.sort((a, b) => {
+    const tsA = a.timestamp || parseNoticeTimestamp(a.date, a.id) || 0;
+    const tsB = b.timestamp || parseNoticeTimestamp(b.date, b.id) || 0;
+    if (tsA !== tsB) return tsB - tsA;
+    const idA = parseInt(a.id, 10) || 0;
+    const idB = parseInt(b.id, 10) || 0;
+    return idB - idA;
   });
 
   if (countBadge) {
@@ -1900,7 +2018,7 @@ function renderActiveOccurrenceBadges() {
  */
 function renderAttendanceSummaryMetrics() {
   const rateBadge = document.getElementById("attendanceOverallRateBadge");
-  const overallRateEl = document.getElementById("attendanceOverallRate");
+  const overallRateEl = document.getElementById("attendanceOverallScore") || document.getElementById("attendanceOverallRate");
   const presentEl = document.getElementById("attendancePresentCount");
   const lateEl = document.getElementById("attendanceLateCount");
   const absentEl = document.getElementById("attendanceAbsentCount");
@@ -1971,12 +2089,15 @@ function renderOpenAttendanceBanner() {
  * Render filtered attendance session history records
  */
 function renderAttendanceRecords() {
-  const container = document.getElementById("attendanceSessionsList");
+  const container = document.getElementById("attendanceSessionsList") || document.getElementById("attendanceLogContainer");
   const emptyState = document.getElementById("attendanceEmptyState");
   const countBadge = document.getElementById("attendanceSessionsCountBadge");
   const statsBar = document.getElementById("subjectAttendanceStatsBar");
   const occBadge = document.getElementById("selectedSubjectOccBadge");
   const openCourseAttBtn = document.getElementById("openCourseAttendancePageBtn");
+  const countUpcomingEl = document.getElementById("countAttUpcoming");
+  const countHistoryEl = document.getElementById("countAttHistory");
+  const countAllEl = document.getElementById("countAttAll");
 
   if (!container) return;
   container.innerHTML = "";
@@ -2041,51 +2162,142 @@ function renderAttendanceRecords() {
   }
 
   // Flatten sessions with courseViewUrl (STRICT: only show attendance according to occurrence for each subject)
-  const allSessions = [];
+  const allMatchingSessions = [];
   targetCourses.forEach((c) => {
     const configuredOcc = state.courseOccurrences[c.courseId] || state.courseOccurrences[c.courseCode] || c.occurrence || "";
     const hasConfiguredOcc = Boolean(configuredOcc && configuredOcc.trim().toLowerCase() !== "all");
     const cViewUrl = c.viewUrl || (c.cmid ? `https://spectrum.um.edu.my/mod/attendance/view.php?id=${c.cmid}` : `https://spectrum.um.edu.my/course/view.php?id=${c.courseId}`);
     (c.sessions || []).forEach((s) => {
-      // STRICT REQUIREMENT: Only show attendance according to occurrence for each subject (past till current date only)
+      // STRICT REQUIREMENT: Only show attendance according to occurrence for each subject
       if (hasConfiguredOcc && !isRespectiveOccurrence(s.group, configuredOcc, s.description, s.activityName)) {
         return;
       }
-      if (s.isPastOrCurrent !== false && isAttendanceSessionPastOrCurrent(s.date, s.time, s.status)) {
-        allSessions.push({
-          ...s,
-          courseCode: c.courseCode,
-          courseId: c.courseId,
-          courseViewUrl: cViewUrl
-        });
-      }
+      const isPast = isAttendanceSessionPastOrCurrent(s.date, s.time, s.status);
+      const isUp = Boolean(s.status === "open" || s.isToday || s.status === "today" || !isPast);
+      const isHist = Boolean(isPast && s.status !== "open" && s.status !== "today");
+
+      allMatchingSessions.push({
+        ...s,
+        isPastOrCurrent: isPast,
+        isUpcoming: isUp,
+        isHistory: isHist,
+        courseCode: c.courseCode,
+        courseId: c.courseId,
+        courseViewUrl: cViewUrl
+      });
     });
   });
 
-  if (countBadge) {
-    countBadge.textContent = `${allSessions.length} Session${allSessions.length === 1 ? "" : "s"}`;
+  // Calculate counts for filter pill badges
+  const upcomingSessions = allMatchingSessions.filter((s) => s.isUpcoming);
+  const historySessions = allMatchingSessions.filter((s) => s.isHistory);
+  const totalAllCount = allMatchingSessions.length;
+
+  if (countUpcomingEl) countUpcomingEl.textContent = upcomingSessions.length;
+  if (countHistoryEl) countHistoryEl.textContent = historySessions.length;
+  if (countAllEl) countAllEl.textContent = totalAllCount;
+
+  // Sync active state on attendance pill buttons
+  const currentFilter = state.attendanceFilter || "upcoming";
+  document.querySelectorAll(".att-pill-btn").forEach((btn) => {
+    if (btn.dataset.attFilter === currentFilter) {
+      btn.classList.add("active");
+    } else {
+      btn.classList.remove("active");
+    }
+  });
+
+  // Filter sessions according to currentFilter
+  let displaySessions = [];
+  if (currentFilter === "upcoming") {
+    // Upcoming: open check-ins first, scheduled today second, then earliest upcoming first
+    displaySessions = [...upcomingSessions].sort((a, b) => {
+      if (a.status === "open" && b.status !== "open") return -1;
+      if (b.status === "open" && a.status !== "open") return 1;
+      if (a.isToday && !b.isToday) return -1;
+      if (b.isToday && !a.isToday) return 1;
+      const tsA = a.timestamp || 0;
+      const tsB = b.timestamp || 0;
+      return tsA - tsB;
+    });
+  } else if (currentFilter === "history") {
+    // History: most recent recorded first (descending)
+    displaySessions = [...historySessions].sort((a, b) => {
+      const tsA = a.timestamp || 0;
+      const tsB = b.timestamp || 0;
+      return tsB - tsA;
+    });
+  } else {
+    // All: open/today on top, then chronologically descending
+    displaySessions = [...allMatchingSessions].sort((a, b) => {
+      if (a.status === "open" && b.status !== "open") return -1;
+      if (b.status === "open" && a.status !== "open") return 1;
+      if (a.isToday && !b.isToday) return -1;
+      if (b.isToday && !a.isToday) return 1;
+      const tsA = a.timestamp || 0;
+      const tsB = b.timestamp || 0;
+      return tsB - tsA;
+    });
   }
 
-  if (allSessions.length === 0) {
-    if (emptyState) emptyState.classList.remove("hidden");
+  if (countBadge) {
+    const filterLabel = currentFilter === "upcoming" ? "Upcoming" : currentFilter === "history" ? "Past" : "Total";
+    countBadge.textContent = `${displaySessions.length} ${filterLabel} Session${displaySessions.length === 1 ? "" : "s"}`;
+  }
+
+  if (displaySessions.length === 0) {
+    if (emptyState) {
+      emptyState.classList.remove("hidden");
+      const titleEl = emptyState.querySelector(".empty-title");
+      const descEl = emptyState.querySelector(".empty-desc");
+      if (titleEl) {
+        titleEl.textContent = currentFilter === "upcoming"
+          ? "No Upcoming Sessions"
+          : currentFilter === "history"
+          ? "No Attendance History"
+          : "No Attendance Sessions";
+      }
+      if (descEl) {
+        descEl.textContent = currentFilter === "upcoming"
+          ? "No upcoming class or open check-in sessions found. Switch to History or All to view past attendance."
+          : "No attendance sessions found matching your enrolled occurrences.";
+      }
+    }
     return;
   }
 
   if (emptyState) emptyState.classList.add("hidden");
 
-  allSessions.forEach((s) => {
+  displaySessions.forEach((s) => {
     const card = document.createElement("div");
-    card.className = `attendance-session-card ${s.status === "open" ? "session-open" : s.status === "today" ? "session-today" : ""}`;
+    const isSpecialCard = s.status === "open" ? "session-open" : s.status === "today" ? "session-today" : (s.isUpcoming && !s.isPastOrCurrent) ? "session-scheduled" : "";
+    card.className = `attendance-session-card ${isSpecialCard}`.trim();
 
     let badgeClass = "badge-unrecorded";
     let statusText = s.statusLabel || "Unrecorded";
 
-    if (s.status === "present") badgeClass = "badge-present";
-    else if (s.status === "late") badgeClass = "badge-late";
-    else if (s.status === "absent") badgeClass = "badge-absent";
-    else if (s.status === "excused") badgeClass = "badge-excused";
-    else if (s.status === "open") badgeClass = "badge-open";
-    else if (s.status === "today") badgeClass = "badge-today";
+    if (s.status === "present") {
+      badgeClass = "badge-present";
+      statusText = "Present";
+    } else if (s.status === "late") {
+      badgeClass = "badge-late";
+      statusText = "Late";
+    } else if (s.status === "absent") {
+      badgeClass = "badge-absent";
+      statusText = "Absent";
+    } else if (s.status === "excused") {
+      badgeClass = "badge-excused";
+      statusText = "Excused";
+    } else if (s.status === "open") {
+      badgeClass = "badge-open";
+      statusText = "Open for Check-In";
+    } else if (s.status === "today") {
+      badgeClass = "badge-today";
+      statusText = s.statusLabel || "Scheduled Today";
+    } else if (s.isUpcoming && !s.isPastOrCurrent) {
+      badgeClass = "badge-scheduled";
+      statusText = "Scheduled";
+    }
 
     card.innerHTML = `
       <div class="attendance-session-header">
@@ -2155,7 +2367,7 @@ async function handleSaveCourseOccurrence() {
     chrome.runtime.sendMessage({
       action: "SYNC_CLOUD_RELAY_NOW",
       payload: { relayUrl: state.cloudRelayUrl, secretKey: state.cloudRelaySecret }
-    }).catch(() => {});
+    }).catch(() => { });
   }
 
   btn.disabled = false;
@@ -2178,13 +2390,44 @@ async function handleSaveCourseOccurrence() {
  */
 async function handleScanAttendanceNow() {
   const btn = document.getElementById("scanAttendanceBtn");
-  if (!btn) return;
+  const loadingEl = document.getElementById("attendanceLoading");
+  const emptyEl = document.getElementById("attendanceEmptyState");
 
-  const origText = btn.innerHTML;
-  btn.disabled = true;
-  btn.innerHTML = `<span>Scanning SPeCTRUM...</span>`;
+  const origText = btn ? btn.innerHTML : "";
+  if (btn) {
+    btn.disabled = true;
+    btn.innerHTML = `<span style="font-size: 11px;">Scanning...</span>`;
+  }
+  if (loadingEl) loadingEl.classList.remove("hidden");
+  if (emptyEl) emptyEl.classList.add("hidden");
 
   try {
+    // 1. Ensure sesskey is available
+    if (!state.sesskey) {
+      try {
+        const sessCtx = await getSessionContext();
+        state.sesskey = sessCtx.sesskey;
+      } catch (e) {
+        console.warn("[Spectra] Could not refresh sesskey for attendance scan:", e);
+      }
+    }
+
+    // 2. Ensure enrolled courses are loaded
+    if (!state.courses || state.courses.length === 0) {
+      if (typeof chrome !== "undefined" && chrome.storage?.local) {
+        const stored = await chrome.storage.local.get(["cached_courses", "courses"]);
+        if (stored?.cached_courses?.length > 0) {
+          state.courses = stored.cached_courses;
+        } else if (stored?.courses?.length > 0) {
+          state.courses = stored.courses;
+        }
+      }
+      if (!state.courses || state.courses.length === 0) {
+        state.courses = await getLiveEnrolledCourses(state.sesskey);
+      }
+    }
+
+    // 3. Scan and auto record attendance
     const scanRes = await scanAndAutoRecordAttendance({
       courses: state.courses,
       sesskey: state.sesskey,
@@ -2193,22 +2436,36 @@ async function handleScanAttendanceNow() {
     });
 
     state.attendance = scanRes.attendance;
+
+    // Cache updated attendance data
+    if (typeof chrome !== "undefined" && chrome.storage?.local) {
+      await chrome.storage.local.set({
+        cached_attendance: scanRes.attendance,
+        last_attendance_sync: Date.now()
+      });
+    }
+
+    populateAttendanceCourseDropdowns();
+    renderActiveOccurrenceBadges();
     renderAttendanceSummaryMetrics();
     renderOpenAttendanceBanner();
     renderAttendanceRecords();
 
     const recordedCount = (scanRes.actions || []).filter((a) => a.result?.success).length;
     if (recordedCount > 0) {
-      showToast(`Auto-Attendance: Marked Present for ${recordedCount} session(s)!`, "success");
+      showToast(`Auto-Attendance: Marked Present for ${recordedCount} session(s)! ✅`, "success");
     } else {
-      showToast("Scan finished: All records up to date.", "info");
+      showToast("Scan finished: Attendance records up to date.", "info");
     }
   } catch (err) {
     console.error("[Spectra] Manual scan error:", err);
     showToast(`Scan error: ${err.message}`, "error");
   } finally {
-    btn.disabled = false;
-    btn.innerHTML = origText;
+    if (loadingEl) loadingEl.classList.add("hidden");
+    if (btn) {
+      btn.disabled = false;
+      btn.innerHTML = origText || `<svg viewBox="0 0 20 20" width="14" height="14" fill="currentColor"><path fill-rule="evenodd" d="M4 2a1 1 0 011 1v2.101a7.002 7.002 0 0111.601 2.566 1 1 0 11-1.885.666A5.002 5.002 0 005.999 7H9a1 1 0 010 2H4a1 1 0 01-1-1V3a1 1 0 011-1zm.008 9.057a1 1 0 011.276.61A5.002 5.002 0 0014.001 13H11a1 1 0 110-2h5a1 1 0 011 1v5a1 1 0 11-2 0v-2.101a7.002 7.002 0 01-11.601-2.566 1 1 0 01.61-1.276z" clip-rule="evenodd"/></svg>`;
+    }
   }
 }
 
@@ -2290,34 +2547,30 @@ async function loadLiveEnrolledCourses() {
     const courses = await getLiveEnrolledCourses(state.sesskey);
     state.courses = courses;
     if (badge) badge.textContent = `${courses.length} Courses`;
-    if (!select) return;
-    select.innerHTML = "";
-
-    if (courses.length === 0) {
-      select.innerHTML = `<option value="">No enrolled courses detected on SPeCTRUM</option>`;
-      return;
-    }
-
-    courses.forEach((c, idx) => {
-      const opt = document.createElement("option");
-      opt.value = c.id;
-      opt.textContent = `${c.code} - ${c.name}`;
-      if (idx === 0) {
-        opt.selected = true;
-        state.selectedCourse = c;
+    if (select) {
+      select.innerHTML = "";
+      if (courses.length === 0) {
+        select.innerHTML = `<option value="">No enrolled courses detected on SPeCTRUM</option>`;
+      } else {
+        courses.forEach((c, idx) => {
+          const opt = document.createElement("option");
+          opt.value = c.id;
+          opt.textContent = `${c.code} - ${c.name}`;
+          if (idx === 0) {
+            opt.selected = true;
+            state.selectedCourse = c;
+          }
+          select.appendChild(opt);
+        });
       }
-      select.appendChild(opt);
-    });
+    }
 
     if (typeof chrome !== "undefined" && chrome.storage?.local && courses.length > 0) {
       await chrome.storage.local.set({ cached_courses: courses, courses: courses });
     }
 
-    updateFolderPreview();
-    renderWeekPills();
     populateAnnouncementSubjectDropdown();
     populateAttendanceCourseDropdowns();
-    await loadLiveWeekMaterials();
   } catch (err) {
     console.error("[Spectra] Failed loading enrolled courses:", err);
     if (err instanceof InvalidSessionError || err.name === "INVALID_SESSION" || err.message?.includes("SESSION_EXPIRED")) {
@@ -2689,61 +2942,58 @@ async function handleSaveSettings() {
   showToast("Settings saved successfully!", "success");
 }
 
-async function handleAutoDiscoverIcal() {
+async function handleAutoDiscoverIcal(silent = false) {
   const btn = document.getElementById("autoDiscoverIcalBtn");
-  const origText = btn.innerHTML;
-  btn.disabled = true;
-  btn.textContent = "Discovering...";
+  const origText = btn ? btn.innerHTML : "";
+  if (btn && !silent) {
+    btn.disabled = true;
+    btn.textContent = "Discovering...";
+  }
 
   try {
-    const res = await fetch("https://spectrum.um.edu.my/calendar/export.php", {
-      credentials: "include"
-    });
-    if (res.ok) {
-      const html = await res.text();
-      const match = html.match(/href=["']([^"']*calendar\/export_execute\.php\?[^"']+)["']/i) ||
-                    html.match(/["'](https?:\/\/[^"']*calendar\/export_execute\.php\?[^"']+)["']/i);
-      if (match) {
-        let icalUrl = match[1];
-        if (!icalUrl.startsWith("http")) {
-          icalUrl = `https://spectrum.um.edu.my/${icalUrl.replace(/^\//, "")}`;
-        }
-        document.getElementById("calendarIcalUrl").value = icalUrl;
-        if (typeof chrome !== "undefined" && chrome.storage?.local) {
-          await chrome.storage.local.set({
-            calendarIcalUrl: icalUrl,
-            calendar_ical_url: icalUrl
-          });
-        }
-        showToast("iCal Calendar Feed URL discovered and saved! ✅", "success");
-        return;
-      }
-
-      const userIdMatch = html.match(/name=["']userid["'][^>]*value=["'](\d+)["']/i) ||
-                          html.match(/value=["'](\d+)["'][^>]*name=["']userid["']/i);
-      const tokenMatch = html.match(/name=["']authtoken["'][^>]*value=["']([a-f0-9]+)["']/i) ||
-                         html.match(/value=["']([a-f0-9]+)["'][^>]*name=["']authtoken["']/i);
-      if (userIdMatch && tokenMatch) {
-        const icalUrl = `https://spectrum.um.edu.my/calendar/export_execute.php?userid=${userIdMatch[1]}&authtoken=${tokenMatch[1]}&preset_what=all&preset_time=recentupcoming`;
-        document.getElementById("calendarIcalUrl").value = icalUrl;
-        if (typeof chrome !== "undefined" && chrome.storage?.local) {
-          await chrome.storage.local.set({
-            calendarIcalUrl: icalUrl,
-            calendar_ical_url: icalUrl
-          });
-        }
-        showToast("iCal Calendar Feed URL generated and saved! ✅", "success");
-        return;
-      }
+    const icalUrl = await autoDiscoverMoodleIcalUrl(state.sesskey);
+    if (!icalUrl) {
+      throw new Error("No iCal URL could be generated or detected.");
     }
-    showToast("Please open the SPeCTRUM Calendar Export page to copy your URL.", "info");
+
+    const icalInput = document.getElementById("calendarIcalUrl");
+    if (icalInput) {
+      icalInput.value = icalUrl;
+    }
+
+    if (typeof chrome !== "undefined" && chrome.storage?.local) {
+      await chrome.storage.local.set({
+        calendarIcalUrl: icalUrl,
+        calendar_ical_url: icalUrl
+      });
+    }
+
+    // Immediately sync to Cloud Relay worker if configured
+    if (state.cloudRelayEnabled && state.cloudRelayUrl && typeof chrome !== "undefined" && chrome.runtime?.sendMessage) {
+      chrome.runtime.sendMessage({ action: "SYNC_CLOUD_RELAY_NOW" }).catch(() => { });
+    }
+
+    // Refresh deadlines tab with live iCal feed
+    loadLiveDeadlines();
+
+    if (!silent) {
+      showToast("iCal Calendar URL automatically detected & saved! ✅", "success");
+    }
+    return icalUrl;
   } catch (err) {
-    showToast("Could not auto-detect iCal URL. Please log in to SPeCTRUM.", "error");
+    console.warn("[Spectra] Auto-discover iCal URL failed:", err);
+    if (!silent) {
+      showToast("Could not auto-detect iCal URL. Please log in to SPeCTRUM in your browser.", "error");
+    }
+    return null;
   } finally {
-    btn.disabled = false;
-    btn.innerHTML = origText;
+    if (btn && !silent) {
+      btn.disabled = false;
+      btn.innerHTML = origText;
+    }
   }
 }
+
 
 // ===================================================================
 // Demo Preview Mode Handler (for testing when off campus)
@@ -2930,26 +3180,36 @@ async function loadStoredPreferences() {
     if (lbl) lbl.textContent = stored.pref_auto_attendance ? "Auto-Checkin Active" : "Auto-Checkin Paused";
   }
 
-  if (stored.telegram_bot_token) document.getElementById("telegramToken").value = stored.telegram_bot_token;
-  if (stored.telegram_chat_id) document.getElementById("telegramChatId").value = stored.telegram_chat_id;
+  const tgTokenInput = document.getElementById("telegramToken");
+  if (tgTokenInput && stored.telegram_bot_token) tgTokenInput.value = stored.telegram_bot_token;
+  const tgChatInput = document.getElementById("telegramChatId");
+  if (tgChatInput && stored.telegram_chat_id) tgChatInput.value = stored.telegram_chat_id;
   const icalInput = document.getElementById("calendarIcalUrl");
   if (icalInput && (stored.calendarIcalUrl || stored.calendar_ical_url)) {
     icalInput.value = stored.calendarIcalUrl || stored.calendar_ical_url;
   }
 
   const cloudEnabled = Boolean(stored.cloud_relay_enabled);
-  document.getElementById("cloudRelayToggle").checked = cloudEnabled;
-  document.getElementById("cloudRelayFields").classList.toggle("hidden", !cloudEnabled);
-  if (stored.cloud_relay_url) document.getElementById("cloudRelayUrl").value = stored.cloud_relay_url;
-  if (stored.cloud_relay_secret) document.getElementById("cloudRelaySecret").value = stored.cloud_relay_secret;
-  if (stored.last_cloud_sync_timestamp) {
+  const cloudToggle = document.getElementById("cloudRelayToggle");
+  if (cloudToggle) cloudToggle.checked = cloudEnabled;
+  const cloudFields = document.getElementById("cloudRelayFields");
+  if (cloudFields) cloudFields.classList.toggle("hidden", !cloudEnabled);
+  const cloudUrl = document.getElementById("cloudRelayUrl");
+  if (cloudUrl && stored.cloud_relay_url) cloudUrl.value = stored.cloud_relay_url;
+  const cloudSecret = document.getElementById("cloudRelaySecret");
+  if (cloudSecret && stored.cloud_relay_secret) cloudSecret.value = stored.cloud_relay_secret;
+  const syncLabel = document.getElementById("lastCloudSyncLabel");
+  if (syncLabel && stored.last_cloud_sync_timestamp) {
     const d = new Date(stored.last_cloud_sync_timestamp);
-    document.getElementById("lastCloudSyncLabel").textContent = `Synced: ${d.toLocaleDateString()} ${d.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })}`;
+    syncLabel.textContent = `Synced: ${d.toLocaleDateString()} ${d.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })}`;
   }
 
-  if (stored.poll_interval_mins) document.getElementById("pollIntervalSelect").value = String(stored.poll_interval_mins);
-  if (stored.notify_announcements !== undefined) document.getElementById("prefAnnouncements").checked = stored.notify_announcements;
-  if (stored.notify_urgent_deadlines !== undefined) document.getElementById("prefDeadlines").checked = stored.notify_urgent_deadlines;
+  const pollInterval = document.getElementById("pollIntervalSelect");
+  if (pollInterval && stored.poll_interval_mins) pollInterval.value = String(stored.poll_interval_mins);
+  const prefAnn = document.getElementById("prefAnnouncements");
+  if (prefAnn && stored.notify_announcements !== undefined) prefAnn.checked = stored.notify_announcements;
+  const prefDead = document.getElementById("prefDeadlines");
+  if (prefDead && stored.notify_urgent_deadlines !== undefined) prefDead.checked = stored.notify_urgent_deadlines;
 
   if (Array.isArray(stored.completed_assignment_ids)) {
     state.completedIds = new Set(stored.completed_assignment_ids.map(String));
@@ -2958,7 +3218,8 @@ async function loadStoredPreferences() {
   const academic = calculateAcademicWeek(stored.semester_start_date || "2026-10-05");
   state.currentAcademicWeek = academic.week;
   state.selectedWeek = academic.week;
-  document.getElementById("weekIndicatorBadge").textContent = `W${academic.week}`;
+  const weekBadge = document.getElementById("weekIndicatorBadge");
+  if (weekBadge) weekBadge.textContent = `W${academic.week}`;
 }
 
 // ===================================================================

@@ -77,7 +77,9 @@ export async function fetchCourseAttendance({ courseId, courseCode = "UM", sessk
     } catch (err) {
       if (err instanceof InvalidSessionError || err.name === "INVALID_SESSION") throw err;
       if (err?.name !== "AbortError" && !err?.message?.includes("aborted")) {
-        console.debug(`[Spectra] Attendance index note for course ${courseId}:`, err?.message || err);
+        if (typeof console !== "undefined" && typeof console.debug === "function") {
+          console.debug(`[Spectra] Attendance index note for course ${courseId}:`, err?.message || err);
+        }
       }
     }
   };
@@ -109,7 +111,9 @@ export async function fetchCourseAttendance({ courseId, courseCode = "UM", sessk
     } catch (err) {
       if (err instanceof InvalidSessionError || err.name === "INVALID_SESSION") throw err;
       if (err?.name !== "AbortError" && !err?.message?.includes("aborted")) {
-        console.debug(`[Spectra] Attendance view note for course ${courseId}:`, err?.message || err);
+        if (typeof console !== "undefined" && typeof console.debug === "function") {
+          console.debug(`[Spectra] Attendance view note for course ${courseId}:`, err?.message || err);
+        }
       }
     }
   };
@@ -176,7 +180,7 @@ export async function fetchCourseAttendance({ courseId, courseCode = "UM", sessk
     fetchedUrls.add(url);
     try {
       const ctrl = typeof AbortController !== "undefined" ? new AbortController() : null;
-      const tid = ctrl ? setTimeout(() => ctrl.abort(), 4500) : null;
+      const tid = ctrl ? setTimeout(() => ctrl.abort(), 12000) : null;
       let res;
       try {
         res = await fetch(url, { method: "GET", credentials: "include", signal: ctrl?.signal });
@@ -248,7 +252,8 @@ export async function fetchCourseAttendance({ courseId, courseCode = "UM", sessk
     if (!primarySummary) primarySummary = parsedDefault.summary;
 
     let defaultHasOpen = false;
-    for (const sess of parsedDefault.sessions) {
+    const defaultSessions = parsedDefault.allSessions || parsedDefault.sessions || [];
+    for (const sess of defaultSessions) {
       const key = sess.sessid || `${sess.id || sess.sessid}_${sess.date}_${sess.time}_${sess.group}`;
       if (!allSessionsMap.has(key) || (!allSessionsMap.get(key).submitUrl && sess.submitUrl)) {
         allSessionsMap.set(key, { ...sess, activityName: instance.name });
@@ -265,7 +270,8 @@ export async function fetchCourseAttendance({ courseId, courseCode = "UM", sessk
         const tabHtml = await fetchTabHtml(tabUrl);
         if (tabHtml) {
           const parsedTab = parseAttendanceView(tabHtml, occurrence, referenceDate, instance.name);
-          for (const sess of parsedTab.sessions) {
+          const tabSessions = parsedTab.allSessions || parsedTab.sessions || [];
+          for (const sess of tabSessions) {
             const key = sess.sessid || `${sess.id || sess.sessid}_${sess.date}_${sess.time}_${sess.group}`;
             if (!allSessionsMap.has(key) || (!allSessionsMap.get(key).submitUrl && sess.submitUrl)) {
               allSessionsMap.set(key, { ...sess, activityName: instance.name });
@@ -276,23 +282,28 @@ export async function fetchCourseAttendance({ courseId, courseCode = "UM", sessk
     }
   }
 
-  // 4. Strictly filter merged sessions: past till current date ONLY, and for respective occurrence ONLY
+  // 4. Occurrence filter: retain all sessions matching student's enrolled occurrence
   const allMergedSessions = Array.from(allSessionsMap.values());
-  const filteredSessions = allMergedSessions.filter((s) => {
-    // 1. Respective Occurrence check
-    const matchesOcc = !isOccSpecified || s.matchesOccurrence || isRespectiveOccurrence(s.group, occurrence, s.description, s.activityName);
-    if (!matchesOcc) return false;
-
-    // 2. Past till Current Date ONLY check
-    const isPastOrCurrent = isAttendanceSessionPastOrCurrent(s.date, s.time, s.status, referenceDate);
-    return isPastOrCurrent;
+  const matchingSessions = allMergedSessions.filter((s) => {
+    return !isOccSpecified || s.matchesOccurrence || isRespectiveOccurrence(s.group, occurrence, s.description, s.activityName);
   });
 
-  // 5. Recalculate summary metrics from the filtered sessions
+  // Tag each session with upcoming, history, and past/current flags
+  matchingSessions.forEach((s) => {
+    const isPast = isAttendanceSessionPastOrCurrent(s.date, s.time, s.status, referenceDate);
+    s.isPastOrCurrent = isPast;
+    s.isUpcoming = Boolean(s.status === "open" || s.isToday || s.status === "today" || !isPast);
+    s.isHistory = Boolean(isPast && s.status !== "open" && s.status !== "today");
+  });
+
+  // Calculate summary metrics strictly from past till current date sessions
+  const pastSessions = matchingSessions.filter((s) => s.isPastOrCurrent);
+
+  // 5. Recalculate summary metrics from pastSessions
   let present = 0, absent = 0, late = 0, excused = 0, unrecorded = 0;
   let openSession = null;
 
-  filteredSessions.forEach((s) => {
+  pastSessions.forEach((s) => {
     if (s.status === "present") present++;
     else if (s.status === "absent") absent++;
     else if (s.status === "late") late++;
@@ -303,7 +314,7 @@ export async function fetchCourseAttendance({ courseId, courseCode = "UM", sessk
   });
 
   // Check for open session genuinely matching the student's occurrence
-  for (const s of filteredSessions) {
+  for (const s of matchingSessions) {
     if (s.status === "open" && s.submitUrl && isRespectiveOccurrence(s.group, occurrence, s.description, s.activityName)) {
       openSession = s;
       break;
@@ -335,7 +346,8 @@ export async function fetchCourseAttendance({ courseId, courseCode = "UM", sessk
     viewUrl: firstViewUrl,
     occurrence,
     summary,
-    sessions: filteredSessions,
+    sessions: matchingSessions,
+    pastSessions,
     hasOpenSession: Boolean(openSession),
     openSession
   };
@@ -368,7 +380,9 @@ export async function fetchLiveAllAttendance(courses = [], sesskey, occurrencesM
       });
     } catch (err) {
       if (err?.name !== "AbortError" && !err?.message?.includes("aborted")) {
-        console.debug(`[Spectra] Attendance fetch note for ${course.code}:`, err?.message || err);
+        if (typeof console !== "undefined" && typeof console.debug === "function") {
+          console.debug(`[Spectra] Attendance fetch note for ${course.code}:`, err?.message || err);
+        }
       }
       return {
         courseId: course.id,

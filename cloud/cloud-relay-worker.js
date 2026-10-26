@@ -203,6 +203,37 @@ async function runSpectrumPollingJob(env) {
 
     console.log("[Spectra Relay] Successfully authenticated to SPeCTRUM via Cloud Relay.");
 
+    // Auto-discover enrolled courses if not yet populated in sessionData
+    if (!sessionData.courses || sessionData.courses.length === 0) {
+      try {
+        const myRes = await fetch("https://spectrum.um.edu.my/my/", {
+          headers: { "Cookie": cookieHeader, "User-Agent": "Mozilla/5.0 Spectra-Relay/1.0" }
+        });
+        if (myRes.ok) {
+          const myHtml = await myRes.text();
+          const discoveredCourses = [];
+          const seenIds = new Set();
+          const cRegex = /href=["'][^"']*\/course\/view\.php\?id=(\d+)[^"']*["'][^>]*>([\s\S]*?)<\/a>/gi;
+          let cm;
+          while ((cm = cRegex.exec(myHtml)) !== null) {
+            const cid = cm[1];
+            if (cid === "1" || seenIds.has(cid)) continue;
+            seenIds.add(cid);
+            const rawText = cm[2].replace(/<[^>]+>/g, "").trim();
+            const codeM = rawText.match(/\b([A-Z]{3,4}\d{4})\b/i);
+            const code = codeM ? codeM[1].toUpperCase() : `C${cid}`;
+            discoveredCourses.push({ id: cid, code, name: rawText });
+          }
+          if (discoveredCourses.length > 0) {
+            sessionData.courses = discoveredCourses;
+            if (env.SPECTRA_KV) {
+              env.SPECTRA_KV.put("moodle_session", JSON.stringify(sessionData)).catch(() => {});
+            }
+          }
+        }
+      } catch (_) { }
+    }
+
     // 2. 24/7 Cloud Attendance Scanner & Auto-Submission
     const attendanceResult = await checkAndRecordCloudAttendance(env, sessionData);
 
@@ -263,13 +294,26 @@ async function checkAndRecordCloudAttendance(env, sessionData) {
     const storedPwd = passwords[courseId] || passwords[courseCode] || "";
 
     try {
+      let viewMatches = [];
       const indexRes = await fetch(`https://spectrum.um.edu.my/mod/attendance/index.php?id=${encodeURIComponent(courseId)}`, {
         headers: { "Cookie": cookieHeader, "User-Agent": "Mozilla/5.0 Spectra-Relay/1.0" }
       });
-      if (!indexRes.ok) continue;
-      const indexHtml = await indexRes.text();
+      if (indexRes.ok) {
+        const indexHtml = await indexRes.text();
+        viewMatches = indexHtml.match(/href=["']([^"']*\/mod\/attendance\/view\.php\?[^"']*)["']/gi) || [];
+      }
 
-      const viewMatches = indexHtml.match(/href=["']([^"']*\/mod\/attendance\/view\.php\?[^"']*)["']/gi) || [];
+      // Fallback: If index didn't yield attendance views, inspect course view page directly
+      if (viewMatches.length === 0) {
+        const courseRes = await fetch(`https://spectrum.um.edu.my/course/view.php?id=${encodeURIComponent(courseId)}`, {
+          headers: { "Cookie": cookieHeader, "User-Agent": "Mozilla/5.0 Spectra-Relay/1.0" }
+        });
+        if (courseRes.ok) {
+          const courseHtml = await courseRes.text();
+          viewMatches = courseHtml.match(/href=["']([^"']*\/mod\/attendance\/view\.php\?[^"']*)["']/gi) || [];
+        }
+      }
+
       if (viewMatches.length === 0) continue;
 
       checkedCourses++;

@@ -1253,6 +1253,88 @@ export function parseEnrolledCourses(html) {
 }
 
 /**
+ * Parses diverse Moodle forum date strings into unix epoch timestamp (milliseconds).
+ * Handles ISO timestamps, full dates, missing-year dates, day-of-week prefixes,
+ * relative dates ('Today', 'Yesterday'), and falls back to Moodle discussion ID.
+ *
+ * @param {string} dateStr - Raw date string from SPeCTRUM forum
+ * @param {string|number} [discussionId] - Moodle discussion ID for sequential fallback
+ * @returns {number} - Unix timestamp in milliseconds
+ */
+export function parseNoticeTimestamp(dateStr, discussionId = null) {
+  if (typeof dateStr === "number" && !isNaN(dateStr) && dateStr > 0) {
+    return dateStr < 1e11 ? dateStr * 1000 : dateStr;
+  }
+
+  const str = String(dateStr || "").trim();
+  const currentYear = new Date().getFullYear();
+
+  if (str) {
+    // 1. Direct standard parse
+    let ts = Date.parse(str);
+    if (!isNaN(ts) && ts > 0) return ts;
+
+    // 2. Remove day of week (e.g. "Wed, 21 Oct 2026, 09:15 AM" -> "21 Oct 2026, 09:15 AM")
+    const noDay = str.replace(/^(?:mon|tue|wed|thu|fri|sat|sun)[a-z]*[,\s]+/i, "").trim();
+    ts = Date.parse(noDay);
+    if (!isNaN(ts) && ts > 0) return ts;
+
+    // 3. Handle dates without year (e.g. "21 Oct, 09:15" or "21 Oct 09:15 AM")
+    if (/\b(?:jan|feb|mar|apr|may|jun|jul|aug|sep|oct|nov|dec)[a-z]*\b/i.test(noDay) && !/\b20\d\d\b/.test(noDay)) {
+      const withYear = noDay.replace(/(\b(?:jan|feb|mar|apr|may|jun|jul|aug|sep|oct|nov|dec)[a-z]*\b)/i, `$1 ${currentYear}`);
+      ts = Date.parse(withYear);
+      if (!isNaN(ts) && ts > 0) return ts;
+    }
+
+    // 4. Handle DD/MM/YYYY or DD-MM-YYYY format
+    const dmyMatch = noDay.match(/^(\d{1,2})[\/\-\.](\d{1,2})[\/\-\.](\d{2,4})(?:[,\s]+(\d{1,2}):(\d{2})(?::(\d{2}))?(?:\s*([ap]m))?)?/i);
+    if (dmyMatch) {
+      const day = parseInt(dmyMatch[1], 10);
+      const month = parseInt(dmyMatch[2], 10) - 1;
+      let yr = parseInt(dmyMatch[3], 10);
+      if (yr < 100) yr += 2000;
+      let hr = dmyMatch[4] ? parseInt(dmyMatch[4], 10) : 0;
+      const min = dmyMatch[5] ? parseInt(dmyMatch[5], 10) : 0;
+      const sec = dmyMatch[6] ? parseInt(dmyMatch[6], 10) : 0;
+      const ampm = dmyMatch[7] ? dmyMatch[7].toUpperCase() : null;
+      if (ampm === "PM" && hr < 12) hr += 12;
+      if (ampm === "AM" && hr === 12) hr = 0;
+      const d = new Date(yr, month, day, hr, min, sec);
+      if (!isNaN(d.getTime())) return d.getTime();
+    }
+
+    // 5. Handle "Today, 10:30 AM" or "Yesterday, 4:15 PM"
+    const now = new Date();
+    if (/\btoday\b/i.test(noDay)) {
+      const tMatch = noDay.match(/(\d{1,2}):(\d{2})(?:\s*([ap]m))?/i);
+      let hr = tMatch ? parseInt(tMatch[1], 10) : 12;
+      const min = tMatch ? parseInt(tMatch[2], 10) : 0;
+      const ampm = tMatch && tMatch[3] ? tMatch[3].toUpperCase() : null;
+      if (ampm === "PM" && hr < 12) hr += 12;
+      if (ampm === "AM" && hr === 12) hr = 0;
+      return new Date(now.getFullYear(), now.getMonth(), now.getDate(), hr, min).getTime();
+    }
+    if (/\byesterday\b/i.test(noDay)) {
+      const tMatch = noDay.match(/(\d{1,2}):(\d{2})(?:\s*([ap]m))?/i);
+      let hr = tMatch ? parseInt(tMatch[1], 10) : 12;
+      const min = tMatch ? parseInt(tMatch[2], 10) : 0;
+      const ampm = tMatch && tMatch[3] ? tMatch[3].toUpperCase() : null;
+      if (ampm === "PM" && hr < 12) hr += 12;
+      if (ampm === "AM" && hr === 12) hr = 0;
+      return new Date(now.getFullYear(), now.getMonth(), now.getDate() - 1, hr, min).getTime();
+    }
+  }
+
+  // 6. Fallback to discussion ID if numeric (Moodle discussion IDs are monotonically increasing)
+  const numId = parseInt(discussionId, 10);
+  if (!isNaN(numId) && numId > 0) {
+    return numId;
+  }
+
+  return 0;
+}
+
+/**
  * Parses forum discussions from /mod/forum/view.php?id=...
  */
 export function parseForumDiscussions(html, courseCode = "UM") {
@@ -1284,7 +1366,17 @@ export function parseForumDiscussions(html, courseCode = "UM") {
           const author = authorEl ? authorEl.textContent.trim() : "Course Instructor";
 
           const dateEl = row.querySelector(".lastpost, td.lastpost, time, .text-muted time");
-          const dateText = dateEl ? dateEl.textContent.trim() : "Recent";
+          const timeTag = row.querySelector("time");
+          const dateText = dateEl ? dateEl.textContent.trim() : (timeTag ? timeTag.textContent.trim() : "Recent");
+          const dateAttr = timeTag ? (timeTag.getAttribute("datetime") || timeTag.getAttribute("data-timestamp")) : null;
+
+          let timestamp = 0;
+          if (dateAttr) {
+            timestamp = parseNoticeTimestamp(dateAttr, discussionId);
+          }
+          if (!timestamp) {
+            timestamp = parseNoticeTimestamp(dateText, discussionId);
+          }
 
           discussions.push({
             id: discussionId,
@@ -1293,14 +1385,24 @@ export function parseForumDiscussions(html, courseCode = "UM") {
             author,
             date: dateText,
             url,
-            timestamp: Date.now()
+            timestamp
           });
         } catch (err) {
           console.warn("Failed parsing forum discussion row:", err);
         }
       });
 
-      if (discussions.length > 0) return discussions;
+      if (discussions.length > 0) {
+        discussions.sort((a, b) => {
+          const tsA = a.timestamp || 0;
+          const tsB = b.timestamp || 0;
+          if (tsA !== tsB) return tsB - tsA;
+          const idA = parseInt(a.id, 10) || 0;
+          const idB = parseInt(b.id, 10) || 0;
+          return idB - idA;
+        });
+        return discussions;
+      }
     } catch (domErr) {
       console.warn("DOMParser error in parseForumDiscussions, falling back to regex:", domErr);
     }
@@ -1330,12 +1432,22 @@ export function parseForumDiscussions(html, courseCode = "UM") {
       author: "Course Instructor",
       date: "Recent",
       url,
-      timestamp: Date.now()
+      timestamp: parseNoticeTimestamp("", discussionId)
     });
   }
 
+  discussions.sort((a, b) => {
+    const tsA = a.timestamp || 0;
+    const tsB = b.timestamp || 0;
+    if (tsA !== tsB) return tsB - tsA;
+    const idA = parseInt(a.id, 10) || 0;
+    const idB = parseInt(b.id, 10) || 0;
+    return idB - idA;
+  });
+
   return discussions;
 }
+
 
 /**
  * Calculates current academic week (Week 1 through Week 14)
@@ -2111,6 +2223,7 @@ export function parseAttendanceView(html, studentOccurrence = "", referenceDate 
   return {
     summary,
     sessions: pastOrCurrentSessions,
+    allSessions: sessions,
     hasOpenSession: Boolean(openSession),
     openSession
   };

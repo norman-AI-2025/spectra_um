@@ -16,6 +16,11 @@
   // Instant in-page auto-attendance and session watcher
   initInPageAttendance();
 
+  // Auto-capture iCal URL if user visits calendar export page
+  if (window.location.pathname.includes("/calendar/export")) {
+    captureCalendarExportPage();
+  }
+
   // Listen for requests from Spectra popup or background worker
   if (typeof chrome !== "undefined" && chrome.runtime?.onMessage) {
     chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
@@ -60,8 +65,95 @@
         return true;
       }
 
+      if (action === "AUTO_DISCOVER_ICAL_URL") {
+        discoverIcalUrlInPage()
+          .then((url) => sendResponse({ success: true, url }))
+          .catch((err) => sendResponse({ success: false, error: err.message }));
+        return true;
+      }
+
       return false;
     });
+  }
+
+  function captureCalendarExportPage() {
+    try {
+      const match = document.body ? document.body.innerHTML.match(/(https?:\/\/[^\s"'<>]+\/calendar\/export_execute\.php\?[^\s"'<>]+)/i) : null;
+      if (match) {
+        const cleanUrl = match[1].replace(/&amp;/g, "&");
+        if (typeof chrome !== "undefined" && chrome.storage?.local) {
+          chrome.storage.local.set({
+            calendarIcalUrl: cleanUrl,
+            calendar_ical_url: cleanUrl
+          });
+          console.log("[Spectra Content] Auto-captured iCal URL from export page:", cleanUrl);
+        }
+      }
+    } catch (e) { }
+  }
+
+  async function discoverIcalUrlInPage() {
+    const urlRegex = /(https?:\/\/[^\s"'<>]+\/calendar\/export_execute\.php\?[^\s"'<>]+)/i;
+    // 1. Check current DOM
+    const link = document.querySelector('a[href*="export_execute.php"]');
+    if (link && link.href) {
+      const url = link.href.replace(/&amp;/g, "&");
+      if (typeof chrome !== "undefined" && chrome.storage?.local) {
+        chrome.storage.local.set({ calendarIcalUrl: url, calendar_ical_url: url });
+      }
+      return url;
+    }
+
+    // 2. Fetch GET export.php in page context
+    const getRes = await fetch("https://spectrum.um.edu.my/calendar/export.php");
+    const getHtml = await getRes.text();
+    const m1 = getHtml.match(urlRegex);
+    if (m1) {
+      const url = m1[1].replace(/&amp;/g, "&");
+      if (typeof chrome !== "undefined" && chrome.storage?.local) {
+        chrome.storage.local.set({ calendarIcalUrl: url, calendar_ical_url: url });
+      }
+      return url;
+    }
+
+    // 3. Extract sesskey and POST to generateurl
+    const mSess = getHtml.match(/name=["']sesskey["'][^>]*value=["']([a-zA-Z0-9]+)["']/i) ||
+      (window.M && window.M.cfg && window.M.cfg.sesskey ? [null, window.M.cfg.sesskey] : null);
+    const sesskey = mSess ? mSess[1] : "";
+
+    const params = new URLSearchParams();
+    if (sesskey) params.set("sesskey", sesskey);
+    params.set("_qf__core_calendar_export_form", "1");
+    params.set("events[exportevents]", "all");
+    params.set("period[timeperiod]", "recentupcoming");
+    params.set("generateurl", "Get calendar URL");
+
+    const postRes = await fetch("https://spectrum.um.edu.my/calendar/export.php", {
+      method: "POST",
+      headers: { "Content-Type": "application/x-www-form-urlencoded" },
+      body: params.toString()
+    });
+    const postHtml = await postRes.text();
+    const m2 = postHtml.match(urlRegex);
+    if (m2) {
+      const url = m2[1].replace(/&amp;/g, "&");
+      if (typeof chrome !== "undefined" && chrome.storage?.local) {
+        chrome.storage.local.set({ calendarIcalUrl: url, calendar_ical_url: url });
+      }
+      return url;
+    }
+
+    const uid = postHtml.match(/name=["']userid["'][^>]*value=["'](\d+)["']/i) || postHtml.match(/userid=(\d+)/i);
+    const tok = postHtml.match(/name=["']authtoken["'][^>]*value=["']([a-f0-9]{16,})["']/i) || postHtml.match(/authtoken=([a-f0-9]{16,})/i);
+    if (uid && tok) {
+      const url = `https://spectrum.um.edu.my/calendar/export_execute.php?userid=${uid[1]}&authtoken=${tok[1]}&preset_what=all&preset_time=recentupcoming`;
+      if (typeof chrome !== "undefined" && chrome.storage?.local) {
+        chrome.storage.local.set({ calendarIcalUrl: url, calendar_ical_url: url });
+      }
+      return url;
+    }
+
+    throw new Error("Unable to generate iCal URL from SPeCTRUM calendar page.");
   }
 
   function captureLiveSession() {
@@ -173,7 +265,7 @@
     document.cookie = `MoodleSession=${MOODLE_SESSION}; path=/;`;
 
     console.log("%c[2/4] Testing dashboard access & extracting sesskey...", "color: #3b82f6; font-weight: bold;");
-    
+
     let sesskey = null;
     let userName = "Unknown";
 
@@ -328,7 +420,7 @@
     try {
       navigationContext = JSON.parse(sessionStorage.getItem("spectra_attendance_navigation") || "null");
       sessionStorage.removeItem("spectra_attendance_navigation");
-    } catch (_) {}
+    } catch (_) { }
     if (!navigationContext || navigationContext.sessid !== sessidMatch?.[1] || Date.now() - navigationContext.timestamp > 120000) {
       console.log("[Spectra Attendance] Automatic submission skipped: no recent occurrence-checked navigation.");
       return;
@@ -346,7 +438,7 @@
         chrome.runtime.sendMessage({
           action: "RECORD_ATTENDANCE_SUCCESS",
           payload: { sessid: sessidMatch[1], status: "Present" }
-        }).catch(() => {});
+        }).catch(() => { });
       }
       return;
     }
@@ -438,7 +530,7 @@
         const linkText = link.innerText.trim();
 
         if ((/submit|hantar|rekod/i.test(linkText) || /submit|hantar|rekod/i.test(row?.innerText || "")) &&
-            matchesPageOccurrence(groupText, description, preferredOcc)) {
+          matchesPageOccurrence(groupText, description, preferredOcc)) {
           const sessid = link.href.match(/sessid=(\d+)/)?.[1];
           if (!sessid) continue;
           sessionStorage.setItem("spectra_attendance_navigation", JSON.stringify({ sessid, timestamp: Date.now() }));

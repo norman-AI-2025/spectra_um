@@ -31,13 +31,215 @@ export class InvalidSessionError extends Error {
 export const AuthExpiredError = InvalidSessionError;
 
 /**
- * Retrieve active session cookie following strict precedence:
+ * Query Chrome's cookie store across multiple URL and domain patterns
+ * to reliably locate the active MoodleSession cookie for SPeCTRUM.
+ */
+export async function getBrowserMoodleCookie() {
+  if (typeof chrome === "undefined" || !chrome.cookies) return null;
+  try {
+    // 1. Direct query with base URL and trailing slash
+    let cookie = await chrome.cookies.get({
+      url: `${SPECTRUM_BASE_URL}/`,
+      name: "MoodleSession"
+    });
+    if (cookie && cookie.value && cookie.value.trim().length > 0) {
+      return cookie.value.trim();
+    }
+
+    // 2. Direct query without trailing slash
+    cookie = await chrome.cookies.get({
+      url: SPECTRUM_BASE_URL,
+      name: "MoodleSession"
+    });
+    if (cookie && cookie.value && cookie.value.trim().length > 0) {
+      return cookie.value.trim();
+    }
+
+    // 3. Query with /my/ path
+    cookie = await chrome.cookies.get({
+      url: `${SPECTRUM_BASE_URL}/my/`,
+      name: "MoodleSession"
+    });
+    if (cookie && cookie.value && cookie.value.trim().length > 0) {
+      return cookie.value.trim();
+    }
+
+    // 4. Query all cookies under spectrum.um.edu.my domain
+    const allDomainCookies = await chrome.cookies.getAll({ domain: "spectrum.um.edu.my" });
+    if (Array.isArray(allDomainCookies) && allDomainCookies.length > 0) {
+      const match = allDomainCookies.find((c) => c.name === "MoodleSession" || c.name.startsWith("MoodleSession") || c.name.toLowerCase() === "moodlesession");
+      if (match && match.value && match.value.trim().length > 0) {
+        return match.value.trim();
+      }
+    }
+
+    // 5. Query all cookies matching SPeCTRUM URL
+    const allUrlCookies = await chrome.cookies.getAll({ url: SPECTRUM_BASE_URL });
+    if (Array.isArray(allUrlCookies) && allUrlCookies.length > 0) {
+      const match = allUrlCookies.find((c) => c.name === "MoodleSession" || c.name.startsWith("MoodleSession") || c.name.toLowerCase() === "moodlesession");
+      if (match && match.value && match.value.trim().length > 0) {
+        return match.value.trim();
+      }
+    }
+
+    // 6. Query all cookies under parent domain um.edu.my
+    const umCookies = await chrome.cookies.getAll({ domain: "um.edu.my" });
+    if (Array.isArray(umCookies) && umCookies.length > 0) {
+      const match = umCookies.find((c) => c.name === "MoodleSession" || c.name.startsWith("MoodleSession") || c.name.toLowerCase() === "moodlesession");
+      if (match && match.value && match.value.trim().length > 0) {
+        return match.value.trim();
+      }
+    }
+
+    // 7. Broadest query across entire cookie store accessible to this extension
+    const allCookies = await chrome.cookies.getAll({});
+    if (Array.isArray(allCookies) && allCookies.length > 0) {
+      // 7A: SPeCTRUM / UM domain with MoodleSession
+      const m1 = allCookies.find((c) => {
+        const isDom = c.domain && (c.domain.includes("spectrum") || c.domain.includes("um.edu.my"));
+        return isDom && (c.name === "MoodleSession" || c.name.startsWith("MoodleSession") || c.name.toLowerCase() === "moodlesession") && c.value && c.value.trim().length > 0;
+      });
+      if (m1) return m1.value.trim();
+
+      // 7B: Exact name MoodleSession anywhere
+      const m2 = allCookies.find((c) => c.name === "MoodleSession" && c.value && c.value.trim().length > 0);
+      if (m2) return m2.value.trim();
+
+      // 7C: Any cookie on spectrum.um.edu.my domain formatted as session token (15-45 alphanumeric chars)
+      const m3 = allCookies.find((c) => {
+        const isSpectrum = c.domain && c.domain.includes("spectrum.um.edu.my");
+        return isSpectrum && c.value && /^[a-zA-Z0-9_-]{15,45}$/.test(c.value.trim());
+      });
+      if (m3) return m3.value.trim();
+    }
+
+    // 8. Fallback to moodle_session captured by background service worker
+    if (typeof chrome !== "undefined" && chrome.storage?.local) {
+      const stored = await chrome.storage.local.get(["moodle_session"]);
+      if (stored.moodle_session) {
+        const val = typeof stored.moodle_session === "object" ? (stored.moodle_session.value || "").trim() : String(stored.moodle_session).trim();
+        if (val.length > 0) return val;
+      }
+    }
+  } catch (err) {
+    console.warn("[Spectra] Querying chrome.cookies encountered notice:", err);
+  }
+  return null;
+}
+
+/**
+ * Check if the student currently has an active tab open on SPeCTRUM
+ * and request the in-page session state directly from DOM or content script.
+ */
+export async function getInPageSessionFromActiveTab() {
+  if (typeof chrome === "undefined" || !chrome.tabs?.query) return null;
+  try {
+    const allTabs = await chrome.tabs.query({});
+    const spectrumTabs = (allTabs || []).filter(
+      (t) => t.url && t.url.includes("spectrum.um.edu.my")
+    );
+
+    for (const tab of spectrumTabs) {
+      if (!tab.id) continue;
+
+      // Method A: Direct DOM inspection inside the tab
+      if (chrome.scripting?.executeScript) {
+        try {
+          const injection = await chrome.scripting.executeScript({
+            target: { tabId: tab.id },
+            func: () => {
+              // 1. Check window.M.cfg.sesskey
+              let sesskey = (window.M && window.M.cfg && window.M.cfg.sesskey) || null;
+
+              // 2. Check hidden inputs
+              if (!sesskey) {
+                const el = document.querySelector('input[name="sesskey"]');
+                if (el && el.value) sesskey = el.value.trim();
+              }
+
+              // 3. Check logout link
+              if (!sesskey) {
+                const link = document.querySelector('a[href*="logout.php?sesskey="]');
+                if (link && link.href) {
+                  const m = link.href.match(/sesskey=([a-zA-Z0-9]+)/);
+                  if (m) sesskey = m[1];
+                }
+              }
+
+              // 4. Check inline script tags
+              if (!sesskey) {
+                const scripts = document.querySelectorAll("script");
+                for (const s of scripts) {
+                  const txt = s.textContent || "";
+                  const m = txt.match(/"sesskey":"([^"]+)"/) || txt.match(/M\.cfg\.sesskey\s*=\s*"([^"]+)"/);
+                  if (m) {
+                    sesskey = m[1];
+                    break;
+                  }
+                }
+              }
+
+              // 5. Check document.cookie for MoodleSession
+              let cookieVal = null;
+              try {
+                const m = document.cookie.match(/MoodleSession=([a-zA-Z0-9_-]+)/i);
+                if (m) cookieVal = m[1];
+              } catch (e) { }
+
+              // 6. Check user name
+              const nameEl = document.querySelector(".usertext, .logininfo a, .usermenu .usertext, span.user-name");
+              const userName = nameEl ? nameEl.textContent.trim() : "UM Student";
+
+              // 7. Check avatar
+              const avatarEl = document.querySelector(".userpicture, .userbutton img, .avatars img");
+              const userAvatarUrl = avatarEl ? (avatarEl.getAttribute("src") || "") : "";
+
+              return {
+                authenticated: Boolean(sesskey),
+                sesskey,
+                userName,
+                userAvatarUrl,
+                cookie: cookieVal
+              };
+            }
+          });
+
+          if (injection && injection[0]?.result?.authenticated && injection[0].result.sesskey) {
+            return injection[0].result;
+          }
+        } catch (scriptErr) {
+          console.warn("[Spectra] In-tab direct script inspection notice:", scriptErr);
+        }
+      }
+
+      // Method B: Send message to content script
+      try {
+        const res = await new Promise((resolve) => {
+          chrome.tabs.sendMessage(tab.id, { action: "GET_INPAGE_SESSION" }, (response) => {
+            if (chrome.runtime.lastError || !response || !response.success) {
+              resolve(null);
+            } else {
+              resolve(response.data);
+            }
+          });
+        });
+        if (res && res.authenticated && res.sesskey) {
+          return res;
+        }
+      } catch (e) { }
+    }
+  } catch (err) { }
+  return null;
+}
+
+/**
+ * Retrieve active session cookie following precedence:
  * 1. chrome.storage.local "manualMoodleSession"
  * 2. chrome.cookies store for spectrum.um.edu.my
  * Returns { source: "manual" | "browser" | null, cookieValue: string | null }
  */
 export async function getEffectiveSessionCookie() {
-  // Step 1: Check chrome.storage.local for manualMoodleSession (or fallback manual_moodle_session / moodle_session)
+  // Step 1: Check chrome.storage.local for manualMoodleSession / stored token
   if (typeof chrome !== "undefined" && chrome.storage?.local) {
     try {
       const stored = await chrome.storage.local.get(["manualMoodleSession", "manual_moodle_session", "moodle_session"]);
@@ -62,30 +264,13 @@ export async function getEffectiveSessionCookie() {
     }
   }
 
-  // Step 2: Fall back to browser cookie store
-  if (typeof chrome !== "undefined" && chrome.cookies) {
-    try {
-      // Direct query with exact URL and path
-      let cookie = await chrome.cookies.get({
-        url: `${SPECTRUM_BASE_URL}/`,
-        name: "MoodleSession"
-      });
-
-      // Fallback: search all cookies for spectrum.um.edu.my domain
-      if (!cookie || !cookie.value) {
-        const all = await chrome.cookies.getAll({ domain: "spectrum.um.edu.my" });
-        cookie = all.find((c) => c.name === "MoodleSession");
-      }
-
-      if (cookie && cookie.value && cookie.value.trim().length > 0) {
-        return {
-          source: "browser",
-          cookieValue: cookie.value.trim()
-        };
-      }
-    } catch (err) {
-      console.warn("[Spectra] Could not query chrome.cookies:", err);
-    }
+  // Step 2: Fall back to live browser cookie
+  const browserCookie = await getBrowserMoodleCookie();
+  if (browserCookie) {
+    return {
+      source: "browser",
+      cookieValue: browserCookie
+    };
   }
 
   // Step 3: Neither exists
@@ -160,6 +345,59 @@ export async function injectCookieToBrowser(sessionCookie) {
 }
 
 /**
+ * Register dynamic DeclarativeNetRequest rule to automatically attach
+ * Cookie: MoodleSession=<token> on all extension fetches to spectrum.um.edu.my.
+ */
+export async function setupDeclarativeCookieRule(token) {
+  if (!token || !token.trim()) return;
+  if (typeof chrome !== "undefined" && chrome.declarativeNetRequest?.updateDynamicRules) {
+    try {
+      await chrome.declarativeNetRequest.updateDynamicRules({
+        removeRuleIds: [1001],
+        addRules: [
+          {
+            id: 1001,
+            priority: 1,
+            action: {
+              type: "modifyHeaders",
+              requestHeaders: [
+                {
+                  header: "Cookie",
+                  operation: "set",
+                  value: `MoodleSession=${token.trim()}`
+                }
+              ]
+            },
+            condition: {
+              urlFilter: "||spectrum.um.edu.my",
+              resourceTypes: ["xmlhttprequest", "sub_frame", "main_frame", "other"]
+            }
+          }
+        ]
+      });
+      console.log("[Spectra] DeclarativeNetRequest dynamic cookie header rule registered.");
+    } catch (err) {
+      console.warn("[Spectra] declarativeNetRequest rule update notice:", err);
+    }
+  }
+}
+
+/**
+ * Remove DeclarativeNetRequest rule 1001 when a session is invalidated or expired
+ * so stale cookies do not corrupt future requests.
+ */
+export async function removeDeclarativeCookieRule() {
+  if (typeof chrome !== "undefined" && chrome.declarativeNetRequest?.updateDynamicRules) {
+    try {
+      await chrome.declarativeNetRequest.updateDynamicRules({
+        removeRuleIds: [1001]
+      });
+      console.log("[Spectra] DeclarativeNetRequest dynamic cookie header rule cleared.");
+    } catch (err) { }
+  }
+}
+
+/**
  * Verify session cookie against live SPeCTRUM portal and extract dynamic CSRF sesskey
  * Throws InvalidSessionError if redirected to SSO / login, or if sesskey missing
  */
@@ -170,10 +408,13 @@ export async function verifyAndFetchSesskey(sessionCookie) {
 
   const cleanCookie = sessionCookie.trim();
 
-  // 1. Programmatically align browser cookie store with active session
+  // 1. Programmatically attach DeclarativeNetRequest header rule so all native fetch() calls transmit cookie
+  await setupDeclarativeCookieRule(cleanCookie);
+
+  // 2. Align browser cookie store
   await injectCookieToBrowser(cleanCookie);
 
-  // 2. Query SPeCTRUM Dashboard (https://spectrum.um.edu.my/my/) with timeout
+  // 3. Query SPeCTRUM Dashboard (https://spectrum.um.edu.my/my/) with timeout
   let response;
   const controller = typeof AbortController !== "undefined" ? new AbortController() : null;
   const timeoutId = controller ? setTimeout(() => controller.abort(), 8000) : null;
@@ -195,7 +436,7 @@ export async function verifyAndFetchSesskey(sessionCookie) {
     if (timeoutId) clearTimeout(timeoutId);
   }
 
-  // 3. Inspect response URL and redirects
+  // 4. Inspect response URL and redirects
   if (
     (response.redirected && (
       response.url.includes("/login/") ||
@@ -220,7 +461,7 @@ export async function verifyAndFetchSesskey(sessionCookie) {
     throw new InvalidSessionError("SPeCTRUM returned unauthenticated state. Please re-check your MoodleSession token.");
   }
 
-  // 4. Extract CSRF sesskey
+  // 5. Extract CSRF sesskey
   let sesskey = null;
   const jsonMatch = html.match(/"sesskey":"([^"]+)"/);
   if (jsonMatch) sesskey = jsonMatch[1];
@@ -239,12 +480,11 @@ export async function verifyAndFetchSesskey(sessionCookie) {
     throw new InvalidSessionError("No CSRF sesskey found in SPeCTRUM response. Session may be expired.");
   }
 
-  // 5. Extract Student Profile Metadata
+  // 6. Extract Student Profile Metadata
   let userName = "UM Student";
   let userId = "";
   let userAvatarUrl = "";
 
-  // Direct regex match from working SPeCTRUM scraper
   const userMatch = html.match(/class="usertext[^"]*">([^<]+)<\/span>/i) || html.match(/class="userbutton"[^>]*>.*?<span class="usertext">([^<]+)<\/span>/is);
   if (userMatch && userMatch[1].trim()) {
     userName = userMatch[1].trim();
@@ -281,7 +521,7 @@ export async function verifyAndFetchSesskey(sessionCookie) {
     console.warn("[Spectra] Could not parse student profile elements:", domErr);
   }
 
-  // 6. Cache verified session in chrome.storage.local
+  // 7. Cache verified session in chrome.storage.local
   if (typeof chrome !== "undefined" && chrome.storage?.local) {
     await chrome.storage.local.set({
       manualMoodleSession: cleanCookie,
@@ -308,69 +548,94 @@ export async function verifyAndFetchSesskey(sessionCookie) {
 
 /**
  * High-level session discovery orchestrator.
- * Follows strict precedence: manualMoodleSession -> browser cookies -> AUTH_REQUIRED.
+ * Dynamically tests candidate cookies with automatic fallback:
+ * 1. Live browser cookie from Chrome cookies store
+ * 2. Stored manualMoodleSession
+ * 3. Active SPeCTRUM in-page tab session
  */
 export async function getSessionContext() {
-  const { source, cookieValue } = await getEffectiveSessionCookie();
+  const browserCookie = await getBrowserMoodleCookie();
 
-  if (!cookieValue) {
-    if (typeof chrome !== "undefined" && chrome.storage?.local) {
-      await chrome.storage.local.set({ sessionStatus: "unset" });
+  let storedManual = "";
+  if (typeof chrome !== "undefined" && chrome.storage?.local) {
+    try {
+      const st = await chrome.storage.local.get(["manualMoodleSession", "manual_moodle_session", "moodle_session"]);
+      storedManual = (st.manualMoodleSession || st.manual_moodle_session || "").trim();
+      if (!storedManual && st.moodle_session) {
+        storedManual = typeof st.moodle_session === "object"
+          ? (st.moodle_session.value || "").trim()
+          : String(st.moodle_session).trim();
+      }
+    } catch (e) { }
+  }
+
+  // Build candidate list: manual first if configured, followed by live browser cookie
+  const candidates = [];
+  if (storedManual) {
+    candidates.push({ source: "manual", cookie: storedManual });
+  }
+  if (browserCookie && browserCookie !== storedManual) {
+    candidates.push({ source: "browser", cookie: browserCookie });
+  }
+
+  // If candidate cookies are present, attempt verification with fallback
+  let lastErr = null;
+  for (const { source, cookie } of candidates) {
+    try {
+      const result = await verifyAndFetchSesskey(cookie);
+      if (typeof chrome !== "undefined" && chrome.storage?.local) {
+        await chrome.storage.local.set({
+          manualMoodleSession: cookie,
+          moodle_session_valid: true
+        });
+      }
+      return {
+        ...result,
+        source
+      };
+    } catch (candErr) {
+      console.warn(`[Spectra] Candidate ${source} session check failed:`, candErr.message || candErr);
+      lastErr = candErr;
     }
+  }
+
+  // If no candidates or candidates failed, check open tab in-page session
+  const inPageTab = await getInPageSessionFromActiveTab();
+  if (inPageTab && inPageTab.authenticated && inPageTab.sesskey) {
+    if (typeof chrome !== "undefined" && chrome.storage?.local) {
+      await chrome.storage.local.set({
+        verifiedSesskey: inPageTab.sesskey,
+        userName: inPageTab.userName || "UM Student",
+        sessionStatus: "connected",
+        sessionLastVerified: Date.now()
+      });
+    }
+    return {
+      success: true,
+      sesskey: inPageTab.sesskey,
+      userName: inPageTab.userName || "UM Student",
+      userId: inPageTab.userId || "",
+      userAvatarUrl: inPageTab.userAvatarUrl || "",
+      authenticated: true,
+      source: "active_tab"
+    };
+  }
+
+  // If all failed, clear any lingering declarative header rule
+  await removeDeclarativeCookieRule();
+
+  if (typeof chrome !== "undefined" && chrome.storage?.local) {
+    if (candidates.length === 0) {
+      await chrome.storage.local.set({ sessionStatus: "unset" });
+    } else {
+      await chrome.storage.local.set({ sessionStatus: "expired", moodle_session_valid: false });
+    }
+  }
+
+  if (candidates.length === 0) {
     throw new AuthRequiredError();
   }
-
-  try {
-    const result = await verifyAndFetchSesskey(cookieValue);
-    return {
-      ...result,
-      source
-    };
-  } catch (err) {
-    if (typeof chrome !== "undefined" && chrome.storage?.local) {
-      if (err instanceof InvalidSessionError || err instanceof AuthRequiredError) {
-        await chrome.storage.local.set({ sessionStatus: "expired" });
-      }
-    }
-    throw err;
-  }
-}
-
-/**
- * Register dynamic DeclarativeNetRequest rule to automatically attach
- * Cookie: MoodleSession=<token> on all extension fetches to spectrum.um.edu.my.
- */
-export async function setupDeclarativeCookieRule(token) {
-  if (typeof chrome !== "undefined" && chrome.declarativeNetRequest?.updateDynamicRules) {
-    try {
-      await chrome.declarativeNetRequest.updateDynamicRules({
-        removeRuleIds: [1001],
-        addRules: [
-          {
-            id: 1001,
-            priority: 1,
-            action: {
-              type: "modifyHeaders",
-              requestHeaders: [
-                {
-                  header: "Cookie",
-                  operation: "set",
-                  value: `MoodleSession=${token.trim()}`
-                }
-              ]
-            },
-            condition: {
-              urlFilter: "||spectrum.um.edu.my/",
-              resourceTypes: ["xmlhttprequest", "sub_frame", "main_frame", "other"]
-            }
-          }
-        ]
-      });
-      console.log("[Spectra] DeclarativeNetRequest dynamic cookie header rule registered.");
-    } catch (err) {
-      console.warn("[Spectra] declarativeNetRequest rule update notice:", err);
-    }
-  }
+  throw lastErr || new InvalidSessionError("Could not connect to SPeCTRUM. Session is invalid or expired.");
 }
 
 /**
@@ -402,16 +667,31 @@ export async function inPageSpectrumScraper(moodleSession) {
     const html = await dashboardRes.text();
 
     // 1. Extract sesskey (required for Moodle's native JSON APIs)
-    const sesskeyMatch = html.match(/"sesskey":"([^"]+)"/);
-    if (!sesskeyMatch) {
+    let sesskeyMatch = html.match(/"sesskey":"([^"]+)"/);
+    if (sesskeyMatch) {
+      sesskey = sesskeyMatch[1];
+    } else {
+      const inputMatch = html.match(/name="sesskey"\s+value="([^"]+)"/i) || html.match(/sesskey=([a-zA-Z0-9]+)/);
+      if (inputMatch) sesskey = inputMatch[1];
+    }
+    if (!sesskey) {
+      const cfgMatch = html.match(/M\.cfg\s*=\s*\{[^}]*"sesskey"\s*:\s*"([^"]+)"/);
+      if (cfgMatch) sesskey = cfgMatch[1];
+    }
+    if (!sesskey && typeof window !== "undefined" && window.M?.cfg?.sesskey) {
+      sesskey = window.M.cfg.sesskey;
+    }
+    if (!sesskey) {
       throw new Error("Could not parse sesskey from dashboard. Check if session is valid.");
     }
-    sesskey = sesskeyMatch[1];
 
     // 2. Extract logged-in user name
     const userMatch = html.match(/class="usertext[^"]*">([^<]+)<\/span>/i) || html.match(/class="userbutton"[^>]*>.*?<span class="usertext">([^<]+)<\/span>/is);
     if (userMatch) {
       userName = userMatch[1].trim();
+    } else if (typeof document !== "undefined") {
+      const nameEl = document.querySelector(".usertext, .logininfo a, .usermenu .usertext, span.user-name");
+      if (nameEl && nameEl.textContent.trim()) userName = nameEl.textContent.trim();
     }
 
     console.log(`%c✔ Session Active! Welcome, ${userName}`, "color: #10b981; font-weight: bold;");
@@ -493,63 +773,27 @@ export async function injectAndScrapeSpectrum(moodleSession) {
   await setupDeclarativeCookieRule(token);
   await injectCookieToBrowser(token);
 
-  // 2. Locate or create a tab on spectrum.um.edu.my
+  // 2. Locate an existing open tab on spectrum.um.edu.my (never create disruptive background tabs)
   let result = null;
   if (typeof chrome !== "undefined" && chrome.tabs && chrome.scripting) {
-    let targetTab = null;
-    let didCreateTab = false;
-
     try {
       const tabs = await chrome.tabs.query({ url: "*://spectrum.um.edu.my/*" });
-      if (tabs.length > 0) {
-        // Use active or first tab
-        targetTab = tabs.find((t) => t.active) || tabs[0];
-      } else {
-        // Create a background tab on SPeCTRUM
-        targetTab = await chrome.tabs.create({
-          url: "https://spectrum.um.edu.my/my/",
-          active: false
-        });
-        didCreateTab = true;
+      if (tabs && tabs.length > 0) {
+        const targetTab = tabs.find((t) => t.active) || tabs[0];
+        if (targetTab && targetTab.id) {
+          const injectedResults = await chrome.scripting.executeScript({
+            target: { tabId: targetTab.id },
+            func: inPageSpectrumScraper,
+            args: [token]
+          });
 
-        // Wait for page to finish loading
-        await new Promise((resolve) => {
-          let timeoutId;
-          const listener = (tabId, changeInfo) => {
-            if (tabId === targetTab.id && changeInfo.status === "complete") {
-              chrome.tabs.onUpdated.removeListener(listener);
-              clearTimeout(timeoutId);
-              resolve();
-            }
-          };
-          chrome.tabs.onUpdated.addListener(listener);
-          timeoutId = setTimeout(() => {
-            chrome.tabs.onUpdated.removeListener(listener);
-            resolve();
-          }, 8000);
-        });
-      }
-
-      if (targetTab && targetTab.id) {
-        // Inject and execute testSpectrumScraper directly inside SPeCTRUM tab!
-        const injectedResults = await chrome.scripting.executeScript({
-          target: { tabId: targetTab.id },
-          func: inPageSpectrumScraper,
-          args: [token]
-        });
-
-        if (injectedResults && injectedResults[0] && injectedResults[0].result) {
-          result = injectedResults[0].result;
+          if (injectedResults && injectedResults[0] && injectedResults[0].result) {
+            result = injectedResults[0].result;
+          }
         }
       }
     } catch (scriptErr) {
-      console.warn("[Spectra] In-tab script injection notice:", scriptErr);
-    } finally {
-      if (didCreateTab && targetTab && targetTab.id) {
-        setTimeout(() => {
-          chrome.tabs.remove(targetTab.id).catch(() => { });
-        }, 1500);
-      }
+      console.warn("[Spectra] In-tab script execution notice:", scriptErr);
     }
   }
 
@@ -575,7 +819,7 @@ export async function injectAndScrapeSpectrum(moodleSession) {
     return result;
   }
 
-  // 3. Fallback: direct fetch with declarativeNetRequest header
+  // 3. Direct verification via HTTP with declarativeNetRequest header
   const directResult = await verifyAndFetchSesskey(token);
   return directResult;
 }
@@ -621,27 +865,56 @@ export async function saveManualSession(rawToken) {
  * Auto-detect MoodleSession from browser cookie store, save it, and verify.
  */
 export async function autoDetectSession() {
-  if (typeof chrome === "undefined" || !chrome.cookies) {
-    throw new Error("Chrome cookies API is not accessible in this context.");
+  let token = (await getBrowserMoodleCookie()) || "";
+
+  // 1. If not found via direct cookie query, check stored moodle_session from background worker
+  if (!token && typeof chrome !== "undefined" && chrome.storage?.local) {
+    try {
+      const stored = await chrome.storage.local.get(["moodle_session", "spectrum_live_session"]);
+      if (stored.moodle_session) {
+        token = typeof stored.moodle_session === "object" ? (stored.moodle_session.value || "").trim() : String(stored.moodle_session).trim();
+      }
+      if (!token && stored.spectrum_live_session?.cookie) {
+        token = stored.spectrum_live_session.cookie.trim();
+      }
+    } catch (e) { }
   }
 
-  let cookie = await chrome.cookies.get({
-    url: `${SPECTRUM_BASE_URL}/`,
-    name: "MoodleSession"
-  });
-
-  if (!cookie || !cookie.value) {
-    const all = await chrome.cookies.getAll({ domain: "spectrum.um.edu.my" });
-    cookie = all.find((c) => c.name === "MoodleSession");
+  // 2. Check active SPeCTRUM tab in Chrome
+  if (!token) {
+    const tabSession = await getInPageSessionFromActiveTab();
+    if (tabSession && tabSession.authenticated && tabSession.sesskey) {
+      if (tabSession.cookie) {
+        token = tabSession.cookie.trim();
+      } else {
+        if (typeof chrome !== "undefined" && chrome.storage?.local) {
+          await chrome.storage.local.set({
+            verifiedSesskey: tabSession.sesskey,
+            userName: tabSession.userName || "UM Student",
+            sessionStatus: "connected",
+            sessionLastVerified: Date.now()
+          });
+        }
+        return {
+          success: true,
+          sesskey: tabSession.sesskey,
+          userName: tabSession.userName || "UM Student",
+          userId: tabSession.userId || "",
+          userAvatarUrl: tabSession.userAvatarUrl || "",
+          events: [],
+          courses: tabSession.courses || []
+        };
+      }
+    }
   }
 
-  if (!cookie || !cookie.value || !cookie.value.trim()) {
+  if (!token) {
     throw new Error("No MoodleSession cookie found for spectrum.um.edu.my in browser. Please sign in to SPeCTRUM in Chrome first.");
   }
 
-  const token = cookie.value.trim();
+  token = token.trim();
 
-  if (chrome.storage?.local) {
+  if (typeof chrome !== "undefined" && chrome.storage?.local) {
     await chrome.storage.local.set({ manualMoodleSession: token });
   }
 
@@ -652,5 +925,5 @@ export async function autoDetectSession() {
 
 export { getLiveEnrolledCourses, getLiveCourseMaterials, fetchLiveEnrolledCourses, fetchLiveCourseMaterials, fetchLiveAnnouncements, fetchCourseContentsViaAjax } from "./courses.js";
 export { fetchCourseAttendance, fetchLiveAllAttendance, autoSubmitAttendance, scanAndAutoRecordAttendance, formatAttendanceTelegram, fetchCourseGradebookAttendance } from "./attendance.js";
-export { fetchLiveDeadlines, fetchIcsDeadlines, normalizeHydratedDeadlines, getTaskFingerprint, deduplicateDeadlinesList } from "./calendar.js";
+export { fetchLiveDeadlines, fetchIcsDeadlines, normalizeHydratedDeadlines, getTaskFingerprint, deduplicateDeadlinesList, autoDiscoverMoodleIcalUrl, extractIcalUrlFromHtml } from "./calendar.js";
 
