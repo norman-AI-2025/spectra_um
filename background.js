@@ -887,3 +887,8 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
 
   return true;
 });
+
+// Ensure alarms and auto-attendance scanner are always registered on service worker evaluation
+chrome.storage.local.get(["poll_interval_mins"]).then((st) => {
+  setupAlarms(st.poll_interval_mins || 15).catch(() => {});
+}).catch(() => {});

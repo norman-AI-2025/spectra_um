@@ -412,19 +412,72 @@
     }
   }
 
+  /**
+   * DOM attendance submission algorithm (Can also be pasted/run in Console directly)
+   */
+  function submitAttendanceDOM(options = {}) {
+    const { password = "" } = options;
+
+    // 1. Select the "Present" radio option
+    const presentRadio = Array.from(document.querySelectorAll('label, span, div'))
+      .find(el => {
+        const txt = el.textContent.trim().toLowerCase();
+        return txt === 'present' || txt === 'hadir';
+      })
+      ?.closest('label')?.querySelector('input[type="radio"]') 
+      || Array.from(document.querySelectorAll('input[type="radio"]')).find(r => {
+        const id = r.id;
+        const lbl = id ? document.querySelector(`label[for="${id}"]`) : null;
+        const parentLbl = r.closest('label');
+        const txt = `${lbl?.textContent || ""} ${parentLbl?.textContent || ""} ${r.parentElement?.textContent || ""}`.trim().toLowerCase();
+        return /present|hadir|^p\b/.test(txt);
+      })
+      || document.querySelector('input[type="radio"]');
+
+    if (!presentRadio) {
+      console.error("[Spectra] Could not find the 'Present' radio button.");
+      return { success: false, error: "Could not find the 'Present' radio button." };
+    }
+
+    presentRadio.checked = true;
+    presentRadio.dispatchEvent(new Event('change', { bubbles: true }));
+
+    // Handle password if present
+    const form = presentRadio.closest('form') || document.querySelector('form[action*="attendance.php"], form#mform1');
+    const pwdInput = form ? form.querySelector('input[name="studentpassword"], input[name="password"], input[type="password"]') : null;
+    if (pwdInput && !pwdInput.value) {
+      if (password) {
+        pwdInput.value = password;
+        pwdInput.dispatchEvent(new Event("input", { bubbles: true }));
+        pwdInput.dispatchEvent(new Event("change", { bubbles: true }));
+      } else {
+        pwdInput.focus();
+        pwdInput.style.outline = "3px solid #f59e0b";
+        return { success: false, requiresPassword: true, error: "Password required to check in." };
+      }
+    }
+
+    // 2. Click the "Save changes" submit button
+    const submitBtn = Array.from(document.querySelectorAll('input[type="submit"], button'))
+      .find(btn => btn.value?.includes('Save') || btn.textContent?.includes('Save') || btn.value?.includes('Simpan') || btn.textContent?.includes('Simpan'));
+
+    if (submitBtn) {
+      submitBtn.click();
+    } else {
+      // Fallback: submit the enclosing form directly
+      presentRadio.closest('form')?.submit();
+    }
+
+    return { success: true };
+  }
+
+  // Expose on window for direct Console execution
+  window.spectraSubmitAttendance = submitAttendanceDOM;
+
   function handleAttendanceFormPage(store) {
     console.log("[Spectra Attendance] Active on attendance form page:", window.location.href);
 
     const sessidMatch = window.location.href.match(/sessid=(\d+)/);
-    let navigationContext = null;
-    try {
-      navigationContext = JSON.parse(sessionStorage.getItem("spectra_attendance_navigation") || "null");
-      sessionStorage.removeItem("spectra_attendance_navigation");
-    } catch (_) { }
-    if (!navigationContext || navigationContext.sessid !== sessidMatch?.[1] || Date.now() - navigationContext.timestamp > 120000) {
-      console.log("[Spectra Attendance] Automatic submission skipped: no recent occurrence-checked navigation.");
-      return;
-    }
 
     // Check if attendance is already recorded
     const bodyText = document.body ? document.body.innerText : "";
@@ -443,73 +496,20 @@
       return;
     }
 
-    const form = document.querySelector('form[action*="attendance.php"], form#mform1');
-    if (!form) return;
-
-    // Extract sessid
-    const sessidInput = form.querySelector('input[name="sessid"]');
-    const sessid = sessidInput ? sessidInput.value : (sessidMatch ? sessidMatch[1] : null);
-
-    // Find Present / Hadir radio button
-    const radioInputs = form.querySelectorAll('input[name="status"]');
-    let presentRadio = null;
-
-    for (const r of radioInputs) {
-      const id = r.id;
-      const label = id ? document.querySelector(`label[for="${id}"]`) : null;
-      const parentLabel = r.closest("label");
-      const text = `${label?.textContent || ""} ${parentLabel?.textContent || ""} ${r.parentElement?.textContent || ""}`.trim();
-      if (/present|hadir|^p\b/i.test(text)) {
-        presentRadio = r;
+    // Find any saved course password
+    const passwordsMap = store.course_passwords || {};
+    let matchedPwd = "";
+    for (const val of Object.values(passwordsMap)) {
+      if (val && String(val).trim()) {
+        matchedPwd = String(val).trim();
         break;
       }
     }
 
-    if (!presentRadio && radioInputs.length > 0) {
-      presentRadio = radioInputs[0];
-    }
-
-    if (!presentRadio) {
-      console.warn("[Spectra Attendance] Present option not found in form.");
-      return;
-    }
-
-    // Select the Present radio button
-    presentRadio.checked = true;
-    presentRadio.dispatchEvent(new Event("change", { bubbles: true }));
-    presentRadio.dispatchEvent(new Event("click", { bubbles: true }));
-
-    // Check password field
-    const pwdInput = form.querySelector('input[name="studentpassword"], input[name="password"], input[type="password"]');
-    if (pwdInput) {
-      const passwordsMap = store.course_passwords || {};
-      let matchedPwd = "";
-      for (const val of Object.values(passwordsMap)) {
-        if (val && String(val).trim()) {
-          matchedPwd = String(val).trim();
-          break;
-        }
-      }
-
-      if (matchedPwd) {
-        pwdInput.value = matchedPwd;
-        pwdInput.dispatchEvent(new Event("input", { bubbles: true }));
-        pwdInput.dispatchEvent(new Event("change", { bubbles: true }));
-      } else {
-        pwdInput.focus();
-        pwdInput.style.outline = "3px solid #f59e0b";
-        showSpectraToast("Password required: please enter password and submit.", "warning");
-        return;
-      }
-    }
-
-    // Find submit button
-    const submitBtn = form.querySelector('input[type="submit"], button[type="submit"], input#id_submitbutton');
-    if (submitBtn) {
-      showSpectraToast("Submitting attendance as Present... ⏳", "info");
-      setTimeout(() => {
-        submitBtn.click();
-      }, 300);
+    showSpectraToast("Submitting attendance as Present... ⏳", "info");
+    const result = submitAttendanceDOM({ password: matchedPwd });
+    if (!result.success && result.requiresPassword) {
+      showSpectraToast("Password required: please enter password and submit.", "warning");
     }
   }
 
@@ -601,7 +601,7 @@
       /\b(?:tutorial|tut|lab|assignment|tugasan)\s+\d+\s+(?:submission|link|dropbox|box|handin|hantar|due)\b/gi,
       ""
     );
-    if (occurrence === "all") return true;
+    if (!occurrence || occurrence === "all") return true;
 
     const universal = !group || group === "all" || group.includes("all students") || group.includes("semua pelajar");
     const marker = /\b(?:occ(?:urrence)?|kumpulan|group|tutorial|tut)\s*#?\s*0*(\d+)\b/i;

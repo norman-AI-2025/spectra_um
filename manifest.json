@@ -28,7 +28,8 @@
   "content_scripts": [
     {
       "matches": [
-        "https://spectrum.um.edu.my/*"
+        "https://spectrum.um.edu.my/my/*",
+        "https://spectrum.um.edu.my/mod/attendance/*"
       ],
       "js": [
         "content.js"

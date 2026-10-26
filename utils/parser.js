@@ -1518,8 +1518,8 @@ export function isRespectiveOccurrence(sessionGroup, studentOccurrence, sessionD
   const actName = (activityName || "").trim().toLowerCase();
   const occ = (studentOccurrence || "").trim().toLowerCase();
 
-  // If student occurrence is 'all', matches everything
-  if (occ === "all") {
+  // If student occurrence is not specified or 'all', matches everything for full auto-checkin
+  if (!occ || occ === "all") {
     return true;
   }
 
@@ -2262,26 +2262,23 @@ export function parseAttendanceForm(html) {
   if (typeof DOMParser !== "undefined") {
     try {
       const doc = new DOMParser().parseFromString(html, "text/html");
-      const statusInputs = doc.querySelectorAll('input[name="status"]');
-      for (const input of statusInputs) {
-        const val = input.value;
-        const id = input.id;
-        let labelText = "";
-        if (id) {
-          const lbl = doc.querySelector(`label[for="${id}"]`);
-          if (lbl) labelText += " " + lbl.textContent;
-        }
-        const parentLabel = input.closest("label");
-        if (parentLabel) labelText += " " + parentLabel.textContent;
-        const nextElem = input.nextElementSibling;
-        if (nextElem && nextElem.tagName.toLowerCase() === "label") labelText += " " + nextElem.textContent;
-        if (input.parentElement) labelText += " " + input.parentElement.textContent;
+      const presentRadio = Array.from(doc.querySelectorAll('label, span, div'))
+        .find(el => {
+          const txt = el.textContent.trim().toLowerCase();
+          return txt === 'present' || txt === 'hadir';
+        })
+        ?.closest('label')?.querySelector('input[type="radio"]') 
+        || Array.from(doc.querySelectorAll('input[type="radio"]')).find(r => {
+          const id = r.id;
+          const lbl = id ? doc.querySelector(`label[for="${id}"]`) : null;
+          const parentLbl = r.closest('label');
+          const txt = `${lbl?.textContent || ""} ${parentLbl?.textContent || ""} ${r.parentElement?.textContent || ""}`.trim().toLowerCase();
+          return /present|hadir|^p\b/.test(txt);
+        })
+        || doc.querySelector('input[type="radio"]');
 
-        const cleanLabel = labelText.trim();
-        if (/present|hadir|^p\b/i.test(cleanLabel)) {
-          statusId = val;
-          break;
-        }
+      if (presentRadio && presentRadio.value) {
+        statusId = presentRadio.value;
       }
     } catch (_) { }
   }

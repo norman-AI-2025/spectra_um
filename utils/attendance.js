@@ -313,9 +313,9 @@ export async function fetchCourseAttendance({ courseId, courseCode = "UM", sessk
     }
   });
 
-  // Check for open session genuinely matching the student's occurrence
+  // Check for open session genuinely matching the student's occurrence (or any open session if occurrence is not set)
   for (const s of matchingSessions) {
-    if (s.status === "open" && s.submitUrl && isRespectiveOccurrence(s.group, occurrence, s.description, s.activityName)) {
+    if (s.status === "open" && s.submitUrl && (!isOccSpecified || isRespectiveOccurrence(s.group, occurrence, s.description, s.activityName))) {
       openSession = s;
       break;
     }

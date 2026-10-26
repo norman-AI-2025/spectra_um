@@ -420,7 +420,9 @@ async function checkAndRecordCloudAttendance(env, sessionData) {
 
           if (!statusId) {
             const anyRadio = formHtml.match(/name=["']status["'][^>]*value=["'](\d+)["']/i) ||
-              formHtml.match(/value=["'](\d+)["'][^>]*name=["']status["']/i);
+              formHtml.match(/value=["'](\d+)["'][^>]*name=["']status["']/i) ||
+              formHtml.match(/<input[^>]+type=["']radio["'][^>]*value=["'](\d+)["']/i) ||
+              formHtml.match(/value=["'](\d+)["'][^>]*type=["']radio["']/i);
             if (anyRadio) statusId = anyRadio[1];
           }
 
@@ -515,7 +517,7 @@ async function checkAndRecordCloudAttendance(env, sessionData) {
 
 function matchesOccurrence(groupStr, studentOcc, descStr = "") {
   const targetOcc = String(studentOcc || "").trim().toLowerCase();
-  if (targetOcc === "all") return true;
+  if (!targetOcc || targetOcc === "all") return true;
   const g = String(groupStr || "").trim().toLowerCase();
   let d = String(descStr || "").trim().toLowerCase();
 

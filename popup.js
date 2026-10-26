@@ -1847,7 +1847,7 @@ async function loadLiveAttendanceData(force = false) {
         const sess = openItem.session;
         const occ = openItem.occurrence || state.courseOccurrences[openItem.courseId] || "";
         const isOpen = sess.status === "open" && Boolean(sess.submitUrl);
-        const matchesOcc = isRespectiveOccurrence(sess.group, occ, sess.description, sess.activityName);
+        const matchesOcc = !occ || isRespectiveOccurrence(sess.group, occ, sess.description, sess.activityName);
 
         if (isOpen && matchesOcc && sess.submitUrl) {
           const store = await chrome.storage.local.get(["recorded_attendance_sessids", "course_passwords"]);
@@ -1870,6 +1870,18 @@ async function loadLiveAttendanceData(force = false) {
               if (res.success) {
                 recorded.add(sess.sessid);
                 await chrome.storage.local.set({ recorded_attendance_sessids: Array.from(recorded) });
+                // Send Telegram alert via background listener
+                if (typeof chrome !== "undefined" && chrome.runtime?.sendMessage) {
+                  chrome.runtime.sendMessage({
+                    action: "RECORD_ATTENDANCE_SUCCESS",
+                    payload: {
+                      sessid: sess.sessid,
+                      courseCode: openItem.courseCode,
+                      sessionDescription: sess.description,
+                      status: "Present"
+                    }
+                  }).catch(() => {});
+                }
                 showToast(`Auto-Attendance: Recorded Present for ${openItem.courseCode}!`, "success");
                 sess.status = "present";
                 sess.statusLabel = "Present";
@@ -2485,17 +2497,17 @@ async function handleSubmitOpenAttendance() {
   const session = firstOpen.session;
   const occ = firstOpen.occurrence || state.courseOccurrences[firstOpen.courseId] || state.courseOccurrences[firstOpen.courseCode] || "";
 
-  // STRICT REQUIREMENT: Only fill attendance for respective occ AND when open
+  // Allow manual submission if user has not configured occurrence yet (!occ)
   const isOpen = session && session.status === "open" && Boolean(session.submitUrl);
-  const matchesOcc = session && isRespectiveOccurrence(session.group, occ, session.description, session.activityName);
+  const matchesOcc = !occ || isRespectiveOccurrence(session.group, occ, session.description, session.activityName);
 
   if (!isOpen) {
     showToast("This session is not currently open for check-in on SPeCTRUM.", "error");
     return;
   }
 
-  if (!matchesOcc) {
-    showToast(`Session is for "${session.group || "Specific Group"}", which does not match your configured occurrence ("${occ || "Not configured"}").`, "error");
+  if (occ && !matchesOcc) {
+    showToast(`Session is for "${session.group || "Specific Group"}", which does not match your configured occurrence ("${occ}").`, "error");
     return;
   }
 
@@ -2505,6 +2517,56 @@ async function handleSubmitOpenAttendance() {
 
   try {
     const password = pwdInput ? pwdInput.value.trim() : "";
+
+    // 1. If active tab is on SPeCTRUM attendance form, inject and run DOM algorithm directly
+    if (typeof chrome !== "undefined" && chrome.tabs && chrome.scripting) {
+      try {
+        const [activeTab] = await chrome.tabs.query({ active: true, currentWindow: true });
+        if (activeTab?.url?.includes("/mod/attendance/attendance.php")) {
+          await chrome.scripting.executeScript({
+            target: { tabId: activeTab.id },
+            func: (pwd) => {
+              if (typeof window.spectraSubmitAttendance === "function") {
+                return window.spectraSubmitAttendance({ password: pwd });
+              }
+              const presentRadio = Array.from(document.querySelectorAll('label, span, div'))
+                .find(el => {
+                  const t = el.textContent.trim().toLowerCase();
+                  return t === 'present' || t === 'hadir';
+                })
+                ?.closest('label')?.querySelector('input[type="radio"]') 
+                || document.querySelector('input[type="radio"]');
+
+              if (presentRadio) {
+                presentRadio.checked = true;
+                presentRadio.dispatchEvent(new Event('change', { bubbles: true }));
+                const form = presentRadio.closest('form');
+                const pInput = form?.querySelector('input[name="studentpassword"], input[name="password"], input[type="password"]');
+                if (pInput && pwd) {
+                  pInput.value = pwd;
+                  pInput.dispatchEvent(new Event('input', { bubbles: true }));
+                  pInput.dispatchEvent(new Event('change', { bubbles: true }));
+                }
+                const submitBtn = Array.from(document.querySelectorAll('input[type="submit"], button'))
+                  .find(b => b.value?.includes('Save') || b.textContent?.includes('Save') || b.value?.includes('Simpan') || b.textContent?.includes('Simpan'));
+                if (submitBtn) {
+                  submitBtn.click();
+                } else {
+                  form?.submit();
+                }
+                return { success: true };
+              }
+              return { success: false };
+            },
+            args: [password]
+          });
+        }
+      } catch (domErr) {
+        console.debug("[Spectra] Active tab DOM injection note:", domErr);
+      }
+    }
+
+    // 2. Submit attendance check-in via API
     const result = await autoSubmitAttendance({
       sessid: session?.sessid,
       sesskey: state.sesskey,
