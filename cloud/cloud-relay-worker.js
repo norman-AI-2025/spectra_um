@@ -47,12 +47,13 @@ export default {
       });
     }
 
-    // Route: POST /sync (or root POST called by Spectra Extension on cookie change)
-    if ((path === "/sync" || path === "/") && request.method === "POST") {
+    // Route: POST /sync-cookie or POST /sync (called by Spectra Extension on cookie change)
+    if ((path === "/sync-cookie" || path === "/sync" || path === "/") && request.method === "POST") {
       try {
         const body = await request.json().catch(() => ({}));
+        const rawToken = body.sessionToken || body.cookie || body.moodleSession || "";
+        const sessionToken = typeof rawToken === "string" ? rawToken.replace(/^MoodleSession=/i, "").split(";")[0].trim() : "";
         const {
-          sessionToken,
           expires,
           domain,
           courses,
@@ -65,7 +66,7 @@ export default {
         } = body;
 
         if (!sessionToken) {
-          return new Response(JSON.stringify({ error: "Missing sessionToken" }), {
+          return new Response(JSON.stringify({ error: "Missing sessionToken or cookie" }), {
             status: 400,
             headers: { "Content-Type": "application/json", ...corsHeaders }
           });

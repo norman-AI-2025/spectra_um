@@ -128,14 +128,19 @@ async function setupAlarms(intervalMinutes = 15) {
     delayInMinutes: 2
   });
 
-  // Auto-attendance scanner alarm:
-  // Runs every 1 minute so attendance windows (typically 10-15 mins) are caught and filled immediately!
-  chrome.alarms.create("spectra_check_attendance", {
-    periodInMinutes: 1,
+  // Periodic Background Alarm: checkAttendanceAlarm firing every 2 minutes
+  chrome.alarms.create("checkAttendanceAlarm", {
+    periodInMinutes: 2,
     delayInMinutes: 0.1
   });
 
-  console.log(`[Spectra] Alarms registered: Attendance=1m, Announcements=${intervalMinutes}m.`);
+  // Backward compatibility alias
+  chrome.alarms.create("spectra_check_attendance", {
+    periodInMinutes: 2,
+    delayInMinutes: 0.2
+  });
+
+  console.log(`[Spectra] Alarms registered: checkAttendanceAlarm=2m, Announcements=${intervalMinutes}m.`);
 }
 
 // Active wake-up triggers for instant attendance check (< 10 min guarantee)
@@ -171,12 +176,12 @@ if (chrome.idle?.onStateChanged) {
 // Alarm Listener
 // -------------------------------------------------------------
 chrome.alarms.onAlarm.addListener(async (alarm) => {
-  if (alarm.name === "spectra_poll_announcements") {
+  if (alarm.name === "checkAttendanceAlarm" || alarm.name === "spectra_check_attendance") {
+    await checkAutoAttendance();
+  } else if (alarm.name === "spectra_poll_announcements") {
     await pollAnnouncements();
   } else if (alarm.name === "spectra_check_deadlines") {
     await checkUpcomingDeadlines();
-  } else if (alarm.name === "spectra_check_attendance") {
-    await checkAutoAttendance();
   }
 });
 
@@ -305,12 +310,17 @@ async function syncSessionToCloudRelay(sessionData, relayUrl, secretKey) {
       name: c.name || ""
     }));
 
+    const cleanBase = (relayUrl || "").replace(/\/+(?:sync-cookie|sync)?\/?$/, "");
+    const targetUrl = cleanBase ? `${cleanBase}/sync-cookie` : relayUrl;
+
     const payload = {
       action: "SESSION_SYNC",
       timestamp: Date.now(),
       domain: "spectrum.um.edu.my",
       cookieName: COOKIE_NAME,
+      cookie: sessionData.value,
       sessionToken: sessionData.value,
+      moodleSession: sessionData.value,
       expires: sessionData.expires,
       sesskey: store.moodle_session_key || "",
       calendarIcalUrl: store.calendarIcalUrl || store.calendar_ical_url || "",
@@ -322,7 +332,7 @@ async function syncSessionToCloudRelay(sessionData, relayUrl, secretKey) {
       client: "Spectra Chrome Extension v1.0.2"
     };
 
-    const res = await fetch(relayUrl, {
+    const res = await fetch(targetUrl, {
       method: "POST",
       headers,
       body: JSON.stringify(payload)
@@ -520,27 +530,38 @@ async function checkUpcomingDeadlines() {
 }
 
 // -------------------------------------------------------------
-// Live Auto-Attendance Scanner (< 15 Mins / On Open)
+// Headless Auto-Attendance Scanner (2-Min Periodic & Event-Driven)
 // -------------------------------------------------------------
 let isAttendanceScanning = false;
 let lastAttendanceScanTime = 0;
 
 async function checkAutoAttendance() {
   const now = Date.now();
-  // Concurrency & rate-limiting guard: skip if already running or ran < 30 seconds ago
-  if (isAttendanceScanning || (now - lastAttendanceScanTime < 30000)) {
-    console.log("[Spectra] Attendance scan skipped (already running or throttled <30s).");
+  // Concurrency & rate-limiting guard: skip if already running or ran < 25 seconds ago
+  if (isAttendanceScanning || (now - lastAttendanceScanTime < 25000)) {
+    console.log("[Spectra] Attendance scan skipped (already running or throttled <25s).");
     return;
   }
   isAttendanceScanning = true;
   lastAttendanceScanTime = now;
 
   try {
+    // 1. Check if MoodleSession exists via chrome.cookies.get
+    const cookie = await chrome.cookies.get({ url: "https://spectrum.um.edu.my", name: COOKIE_NAME });
+    if (!cookie || !cookie.value) {
+      console.log("[Spectra Headless] Attendance scan skipped: No active MoodleSession cookie found.");
+      return;
+    }
+    const cookieVal = cookie.value;
+    await setupDeclarativeCookieRule(cookieVal);
+
     const store = await chrome.storage.local.get([
       "pref_auto_attendance",
-      "course_occurrences",
-      "course_passwords",
+      "trackedAttendanceUrls",
+      "submittedSessions",
       "recorded_attendance_sessids",
+      "course_passwords",
+      "course_occurrences",
       "telegram_bot_token",
       "telegram_chat_id",
       "cached_courses",
@@ -548,111 +569,268 @@ async function checkAutoAttendance() {
       "moodle_session"
     ]);
 
-    // Default to true if not explicitly turned off
-    const autoAttendanceEnabled = store.pref_auto_attendance !== false;
-    if (!autoAttendanceEnabled) return;
-
-    const hasTelegram = Boolean(store.telegram_bot_token && store.telegram_chat_id);
-
-    let sesskey = store.moodle_session?.sesskey || store.verifiedSesskey || "";
-    let cookieVal = store.moodle_session?.value || store.manualMoodleSession || "";
-
-    // Fast check: if session is cached and valid, reuse it without full /my/ roundtrip
-    if (!sesskey || !cookieVal) {
-      try {
-        const sessionContext = await getSessionContext();
-        sesskey = sessionContext.sesskey;
-        cookieVal = sessionContext.session?.value || cookieVal;
-      } catch (err) {
-        console.log("[Spectra] Attendance scan skipped: not authenticated.");
-        return;
-      }
-    }
-
-    if (cookieVal) {
-      await setupDeclarativeCookieRule(cookieVal);
-    }
-
-    // Fast course lookup: use cached courses to complete scan in <2s and prevent MV3 service worker timeout
-    let courses = store.cached_courses || store.courses || [];
-    if (!courses || courses.length === 0) {
-      try {
-        courses = await getLiveEnrolledCourses(sesskey);
-      } catch (err) {
-        console.warn("[Spectra] Error loading live courses for attendance check:", err);
-      }
-    }
-
-    if (!courses || courses.length === 0) {
-      console.log("[Spectra] Attendance scan paused: no enrolled courses found.");
+    // Respect user toggle (default enabled)
+    if (store.pref_auto_attendance === false) {
       return;
     }
 
-    const occurrencesMap = store.course_occurrences || {};
-    const passwordsMap = store.course_passwords || {};
-    const recordedSessids = new Set(store.recorded_attendance_sessids || []);
+    const submittedSet = new Set([
+      ...(store.submittedSessions || []),
+      ...(store.recorded_attendance_sessids || [])
+    ]);
 
-    const { attendance, actions } = await scanAndAutoRecordAttendance({
-      courses,
-      sesskey,
-      occurrencesMap,
-      autoSubmit: true,
-      passwordsMap
-    });
+    // 2. Fetch list of user's active attendance links (from trackedAttendanceUrls or resolve dynamically)
+    let trackedUrls = Array.isArray(store.trackedAttendanceUrls) ? [...store.trackedAttendanceUrls] : [];
+    let courses = store.cached_courses || store.courses || [];
+    let sesskey = store.moodle_session?.sesskey || store.verifiedSesskey || "";
 
-    // Cache latest attendance state for popup UI
-    await chrome.storage.local.set({
-      cached_attendance: attendance,
-      last_attendance_sync: Date.now()
-    });
+    if (trackedUrls.length === 0 || !courses || courses.length === 0) {
+      try {
+        const sessionContext = await getSessionContext();
+        sesskey = sessionContext.sesskey || sesskey;
+        courses = await getLiveEnrolledCourses(sesskey);
+      } catch (err) {
+        console.warn("[Spectra Headless] Note loading live courses:", err?.message || err);
+      }
 
-    for (const act of actions) {
-      const sessid = act.session?.sessid;
-      if (!sessid || recordedSessids.has(sessid)) continue;
-
-      if (act.result?.success) {
-        recordedSessids.add(sessid);
-
-        if (hasTelegram) {
+      if (courses && courses.length > 0) {
+        const discoveredUrls = new Set(trackedUrls);
+        for (const course of courses) {
+          const cid = course.id || course.courseId;
+          if (!cid) continue;
           try {
-            const html = formatAttendanceTelegram({
-              courseCode: act.courseCode,
-              occurrence: act.occurrence,
-              status: "Present",
-              sessionDescription: act.session?.description,
-              time: act.session?.time,
-              success: true
+            const indexRes = await fetch(`https://spectrum.um.edu.my/mod/attendance/index.php?id=${encodeURIComponent(cid)}`, {
+              credentials: "include"
             });
-            await sendTelegramMessage(store.telegram_bot_token, store.telegram_chat_id, html);
-          } catch (tgErr) {
-            console.error("[Spectra] Telegram auto-attendance dispatch error:", tgErr);
-          }
+            if (indexRes.ok) {
+              const indexHtml = await indexRes.text();
+              const matches = indexHtml.match(/href=["']([^"']*\/mod\/attendance\/view\.php\?[^"']*)["']/gi) || [];
+              for (const m of matches) {
+                const uMatch = m.match(/href=["']([^"']+)["']/i);
+                if (uMatch) {
+                  const fullUrl = uMatch[1].startsWith("http") ? uMatch[1] : `https://spectrum.um.edu.my/${uMatch[1].replace(/^\//, "")}`;
+                  discoveredUrls.add(fullUrl);
+                }
+              }
+            }
+          } catch (_) { }
         }
-
-      } else if (act.result?.requiresPassword) {
-        if (hasTelegram && !recordedSessids.has(`pwd_${sessid}`)) {
-          recordedSessids.add(`pwd_${sessid}`);
-          try {
-            const html = formatAttendanceTelegram({
-              courseCode: act.courseCode,
-              occurrence: act.occurrence,
-              sessionDescription: act.session?.description,
-              time: act.session?.time,
-              requiresPassword: true
-            });
-            await sendTelegramMessage(store.telegram_bot_token, store.telegram_chat_id, html);
-          } catch (tgErr) {
-            console.error("[Spectra] Telegram password alert error:", tgErr);
-          }
+        if (discoveredUrls.size > 0) {
+          trackedUrls = Array.from(discoveredUrls);
+          await chrome.storage.local.set({ trackedAttendanceUrls: trackedUrls });
         }
       }
     }
 
-    await chrome.storage.local.set({
-      recorded_attendance_sessids: Array.from(recordedSessids)
-    });
+    // 3. For each course attendance page (/mod/attendance/view.php?id=...)
+    let newlySubmitted = false;
+    for (const viewUrl of trackedUrls) {
+      try {
+        const targetViewUrl = viewUrl.includes("view=") ? viewUrl : `${viewUrl}&view=5`;
+        const res = await fetch(targetViewUrl, {
+          method: "GET",
+          credentials: "include"
+        });
+        if (!res.ok) continue;
+        const viewHtml = await res.text();
+
+        // Detect if a "Submit attendance" link is active
+        const submitMatch = viewHtml.match(/href=["']([^"']*attendance\.php\?(sessid=(\d+)[^"'>\s]*))["'][^>]*>([\s\S]*?)<\/a>/i) ||
+          viewHtml.match(/attendance\.php\?(sessid=(\d+)&amp;sesskey=[^"'>\s]+)/i) ||
+          viewHtml.match(/attendance\.php\?(sessid=(\d+)[^"'>\s]*)/i);
+
+        if (!submitMatch) continue;
+
+        let query = "";
+        let sessid = "";
+        if (submitMatch[1]?.includes("sessid=")) {
+          query = submitMatch[1].replace(/&amp;/g, "&");
+          const sm = query.match(/sessid=(\d+)/);
+          sessid = sm ? sm[1] : (submitMatch[2] || "");
+        } else {
+          query = submitMatch[0].replace(/&amp;/g, "&").replace(/^attendance\.php\?/, "");
+          sessid = submitMatch[2] || "";
+        }
+
+        if (!sessid || submittedSet.has(sessid)) {
+          continue;
+        }
+
+        // 3.1. GET the submission page
+        const submitPageUrl = query.startsWith("http")
+          ? query
+          : `https://spectrum.um.edu.my/mod/attendance/attendance.php?${query.replace(/^[^?]*\?/, "")}`;
+
+        const formRes = await fetch(submitPageUrl, {
+          method: "GET",
+          credentials: "include"
+        });
+        if (!formRes.ok) continue;
+        const formHtml = await formRes.text();
+
+        // 3.2. Extract sessid, sesskey (CSRF token), and statusId for Present
+        const sesskeyMatch = formHtml.match(/name=["']sesskey["'][^>]*value=["']([^"']+)["']/i) ||
+          formHtml.match(/value=["']([^"']+)["'][^>]*name=["']sesskey["']/i) ||
+          formHtml.match(/"sesskey":"([^"]+)"/);
+        const formSesskey = sesskeyMatch ? sesskeyMatch[1] : (sesskey || "");
+
+        const sessidMatch = formHtml.match(/name=["']sessid["'][^>]*value=["'](\d+)["']/i) ||
+          formHtml.match(/value=["'](\d+)["'][^>]*name=["']sessid["']/i);
+        const finalSessid = sessidMatch ? sessidMatch[1] : sessid;
+
+        let statusId = null;
+        const inputStatusRegex = /<input[^>]*name=["']status["'][^>]*>/gi;
+        let inMatch;
+        while ((inMatch = inputStatusRegex.exec(formHtml)) !== null) {
+          const tagStr = inMatch[0];
+          const valM = tagStr.match(/value=["'](\d+)["']/i);
+          const idM = tagStr.match(/id=["']([^"']+)["']/i);
+          if (!valM) continue;
+          const val = valM[1];
+
+          let isPresent = false;
+          if (idM) {
+            const labelForRegex = new RegExp(`<label[^>]*for=["']${idM[1]}["'][^>]*>([\\s\\S]*?)<\\/label>`, "i");
+            const lMatch = formHtml.match(labelForRegex);
+            if (lMatch && /present|hadir|^p\b/i.test(lMatch[1].replace(/<[^>]+>/g, "").trim())) {
+              isPresent = true;
+            }
+          }
+          if (!isPresent) {
+            const afterInput = formHtml.substring(inputStatusRegex.lastIndex, inputStatusRegex.lastIndex + 300);
+            const nextLabelM = afterInput.match(/^[\s\S]*?<label[^>]*>([\s\S]*?)<\/label>/i);
+            if (nextLabelM && /present|hadir|^p\b/i.test(nextLabelM[1].replace(/<[^>]+>/g, "").trim())) {
+              isPresent = true;
+            }
+          }
+          if (!isPresent) {
+            const surrounding = formHtml.substring(Math.max(0, inMatch.index - 50), Math.min(formHtml.length, inMatch.index + 200));
+            if (/present|hadir/i.test(surrounding)) {
+              isPresent = true;
+            }
+          }
+          if (isPresent) {
+            statusId = val;
+            break;
+          }
+        }
+
+        // Fallback: Pick first radio option
+        if (!statusId) {
+          const anyRadio = formHtml.match(/name=["']status["'][^>]*value=["'](\d+)["']/i) ||
+            formHtml.match(/value=["'](\d+)["'][^>]*name=["']status["']/i) ||
+            formHtml.match(/<input[^>]+type=["']radio["'][^>]+value=["'](\d+)["']/i);
+          if (anyRadio) statusId = anyRadio[1];
+        }
+
+        if (!statusId) continue;
+
+        // Check password field if required
+        const hasPassword = /<input[^>]+name=["'](studentpassword|password)["']/i.test(formHtml);
+        let password = "";
+        if (hasPassword && store.course_passwords) {
+          for (const pwd of Object.values(store.course_passwords)) {
+            if (pwd && String(pwd).trim()) {
+              password = String(pwd).trim();
+              break;
+            }
+          }
+        }
+
+        // 3.4. Submit attendance via headless POST
+        const postBody = new URLSearchParams();
+        postBody.append("sessid", finalSessid);
+        postBody.append("sesskey", formSesskey);
+        postBody.append("status", statusId);
+        postBody.append("mform_is_submitted", "1");
+        postBody.append("submitbutton", "Save changes");
+        if (password) {
+          postBody.append("studentpassword", password);
+          postBody.append("password", password);
+        }
+
+        const postRes = await fetch("https://spectrum.um.edu.my/mod/attendance/attendance.php", {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/x-www-form-urlencoded"
+          },
+          credentials: "include",
+          body: postBody.toString()
+        });
+
+        const postText = await postRes.text();
+        const isConfirmed = postRes.ok && (
+          postRes.redirected ||
+          postRes.url.includes("view.php") ||
+          /(?:your attendance has been (?:successfully )?recorded|attendance (?:has been|was) successfully recorded|kehadiran anda telah direkodkan)/i.test(postText)
+        );
+
+        if (isConfirmed) {
+          // 3.5. On success: Append sessid to submittedSessions
+          submittedSet.add(finalSessid);
+          newlySubmitted = true;
+          console.log(`[Spectra Headless] Auto-submitted Present for sessid=${finalSessid}!`);
+
+          // Dispatch native desktop notification
+          if (typeof chrome !== "undefined" && chrome.notifications?.create) {
+            chrome.notifications.create(`attendance_${finalSessid}`, {
+              type: "basic",
+              iconUrl: chrome.runtime.getURL("icons/icon128.png"),
+              title: "Spectra Auto-Attendance",
+              message: "Attendance marked Present on SPeCTRUM! ✅",
+              priority: 2
+            });
+          }
+
+          // Dispatch Telegram notification if configured
+          if (store.telegram_bot_token && store.telegram_chat_id) {
+            try {
+              const html = formatAttendanceTelegram({
+                courseCode: "SPeCTRUM Class",
+                occurrence: "Auto",
+                status: "Present",
+                sessionDescription: "Headless Background Check-In",
+                time: "Just now",
+                success: true
+              });
+              await sendTelegramMessage(store.telegram_bot_token, store.telegram_chat_id, html);
+            } catch (tgErr) {
+              console.error("[Spectra Headless] Telegram alert failed:", tgErr);
+            }
+          }
+        }
+      } catch (itemErr) {
+        console.warn("[Spectra Headless] Error checking viewUrl:", itemErr);
+      }
+    }
+
+    if (newlySubmitted) {
+      await chrome.storage.local.set({
+        submittedSessions: Array.from(submittedSet),
+        recorded_attendance_sessids: Array.from(submittedSet)
+      });
+    }
+
+    // Refresh UI attendance cache for extension popup
+    if (courses && courses.length > 0) {
+      try {
+        const occurrencesMap = store.course_occurrences || {};
+        const passwordsMap = store.course_passwords || {};
+        const { attendance } = await scanAndAutoRecordAttendance({
+          courses,
+          sesskey,
+          occurrencesMap,
+          autoSubmit: false,
+          passwordsMap
+        });
+        await chrome.storage.local.set({
+          cached_attendance: attendance,
+          last_attendance_sync: Date.now()
+        });
+      } catch (_) { }
+    }
   } catch (err) {
-    console.warn("[Spectra] Error during auto-attendance run:", err);
+    console.warn("[Spectra] Error during headless auto-attendance run:", err);
   } finally {
     isAttendanceScanning = false;
   }
