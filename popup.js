@@ -68,7 +68,7 @@ const state = {
   courseOccurrences: {},
   selectedAttendanceSubject: "all",
   attendanceFilter: "upcoming",
-  autoAttendanceEnabled: true,
+  notifyAttendanceOpen: true,
   telegramSentAnnouncementIds: new Set(),
   telegramSentDeadlineIds: new Set(),
   countdownIntervalId: null,
@@ -138,6 +138,20 @@ function initDOMListeners() {
   const footerDemoBtn = document.getElementById("footerDemoBtn");
   if (footerDemoBtn) {
     footerDemoBtn.addEventListener("click", enableDemoPreview);
+  }
+
+  // Footer Donate button
+  const footerDonateBtn = document.getElementById("footerDonateBtn");
+  if (footerDonateBtn) {
+    footerDonateBtn.addEventListener("click", () => {
+      switchTab("settings");
+      setTimeout(() => {
+        const donationCard = document.getElementById("donationCard");
+        if (donationCard) {
+          donationCard.scrollIntoView({ behavior: "smooth", block: "center" });
+        }
+      }, 100);
+    });
   }
 
   // Top Bar Refresh Button
@@ -321,22 +335,55 @@ function initDOMListeners() {
   }
 
   // Attendance Tab Handlers
-  const autoAttendanceToggle = document.getElementById("autoAttendanceToggle");
-  if (autoAttendanceToggle) {
-    autoAttendanceToggle.addEventListener("change", async (e) => {
-      state.autoAttendanceEnabled = e.target.checked;
-      const lbl = document.getElementById("autoAttendanceToggleLabel");
-      if (lbl) lbl.textContent = e.target.checked ? "Auto-Checkin Active" : "Auto-Checkin Paused";
+  const telegramOpenToggle = document.getElementById("telegramAttendanceOpenToggle");
+  if (telegramOpenToggle) {
+    telegramOpenToggle.addEventListener("change", async (e) => {
+      state.notifyAttendanceOpen = e.target.checked;
+      const lbl = document.getElementById("telegramAttendanceOpenLabel");
+      if (lbl) lbl.textContent = e.target.checked ? "Telegram Alert Active" : "Telegram Alert Paused";
+      const prefOpen = document.getElementById("prefAttendanceOpen");
+      if (prefOpen) prefOpen.checked = e.target.checked;
       if (typeof chrome !== "undefined" && chrome.storage?.local) {
-        await chrome.storage.local.set({ pref_auto_attendance: e.target.checked });
+        await chrome.storage.local.set({ notify_attendance_open: e.target.checked });
       }
-      showToast(`Auto-Attendance ${e.target.checked ? "enabled" : "paused"}.`, "info");
+      showToast(`Telegram open alert ${e.target.checked ? "enabled" : "paused"}.`, "info");
+    });
+  }
+
+  const prefAttendanceOpen = document.getElementById("prefAttendanceOpen");
+  if (prefAttendanceOpen) {
+    prefAttendanceOpen.addEventListener("change", async (e) => {
+      state.notifyAttendanceOpen = e.target.checked;
+      const attToggle = document.getElementById("telegramAttendanceOpenToggle");
+      if (attToggle) attToggle.checked = e.target.checked;
+      const lbl = document.getElementById("telegramAttendanceOpenLabel");
+      if (lbl) lbl.textContent = e.target.checked ? "Telegram Alert Active" : "Telegram Alert Paused";
+      if (typeof chrome !== "undefined" && chrome.storage?.local) {
+        await chrome.storage.local.set({ notify_attendance_open: e.target.checked });
+      }
     });
   }
 
   const scanAttendanceBtn = document.getElementById("scanAttendanceBtn");
   if (scanAttendanceBtn) {
     scanAttendanceBtn.addEventListener("click", handleScanAttendanceNow);
+  }
+
+  const refreshSubmissionsBtn = document.getElementById("refreshSubmissionsBtn");
+  if (refreshSubmissionsBtn) {
+    refreshSubmissionsBtn.addEventListener("click", async () => {
+      refreshSubmissionsBtn.disabled = true;
+      refreshSubmissionsBtn.classList.add("spinning");
+      try {
+        await loadLiveDeadlines();
+        showToast("Live submissions radar refreshed", "success");
+      } catch (err) {
+        showToast("Could not refresh live submissions", "error");
+      } finally {
+        refreshSubmissionsBtn.classList.remove("spinning");
+        refreshSubmissionsBtn.disabled = false;
+      }
+    });
   }
 
   const toggleOccBtn = document.getElementById("toggleOccurrenceSetupBtn");
@@ -380,7 +427,106 @@ function initDOMListeners() {
 
   const submitOpenAttBtn = document.getElementById("submitOpenAttendanceBtn");
   if (submitOpenAttBtn) {
-    submitOpenAttBtn.addEventListener("click", handleSubmitOpenAttendance);
+    submitOpenAttBtn.addEventListener("click", () => handleSubmitOpenAttendance());
+  }
+
+  // Interactive Password Accordion Drawer Toggle
+  const togglePwdDrawerBtn = document.getElementById("togglePasswordDrawerBtn");
+  const pwdWrap = document.getElementById("openAttendancePasswordWrap");
+  if (togglePwdDrawerBtn && pwdWrap) {
+    togglePwdDrawerBtn.addEventListener("click", () => {
+      const isHidden = pwdWrap.classList.toggle("hidden");
+      togglePwdDrawerBtn.classList.toggle("is-open", !isHidden);
+      const arrow = document.getElementById("togglePasswordArrow");
+      if (arrow) arrow.textContent = isHidden ? "▾" : "▴";
+      const pwdInput = document.getElementById("openAttendancePasswordInput");
+      if (!isHidden && pwdInput) pwdInput.focus();
+    });
+  }
+
+  // Interactive Password Visibility Toggle
+  const toggleOpenPwdVisBtn = document.getElementById("toggleOpenPwdVisBtn");
+  const openPwdInput = document.getElementById("openAttendancePasswordInput");
+  if (toggleOpenPwdVisBtn && openPwdInput) {
+    toggleOpenPwdVisBtn.addEventListener("click", () => {
+      const isPwd = openPwdInput.type === "password";
+      openPwdInput.type = isPwd ? "text" : "password";
+      toggleOpenPwdVisBtn.textContent = isPwd ? "🙈" : "👁️";
+    });
+  }
+
+  if (openPwdInput) {
+    openPwdInput.addEventListener("keydown", (e) => {
+      if (e.key === "Enter") {
+        e.preventDefault();
+        handleSubmitOpenAttendance();
+      }
+    });
+  }
+
+  // Interactive Copy Check-In Link Button
+  const copyAttUrlBtn = document.getElementById("copyAttendanceUrlBtn");
+  if (copyAttUrlBtn) {
+    copyAttUrlBtn.addEventListener("click", async () => {
+      const firstOpen = state.attendance?.openSessions?.[0];
+      const url = firstOpen?.session?.submitUrl || firstOpen?.viewUrl || "https://spectrum.um.edu.my/my/";
+      try {
+        await navigator.clipboard.writeText(url);
+        const icon = document.getElementById("copyUrlBtnIcon");
+        if (icon) icon.textContent = "✓";
+        showToast("Check-in link copied to clipboard!", "success");
+        setTimeout(() => {
+          if (icon) icon.textContent = "📋";
+        }, 2200);
+      } catch (e) {
+        showToast("Could not copy link automatically.", "error");
+      }
+    });
+  }
+
+  // Interactive Preview / Simulator Toggle Button
+  const testSubBtn = document.getElementById("testSubmissionContainerBtn");
+  if (testSubBtn) {
+    testSubBtn.addEventListener("click", () => {
+      const banner = document.getElementById("openAttendanceBanner");
+      if (!banner) return;
+      const isHidden = banner.classList.contains("hidden");
+
+      if (!isHidden && banner.dataset.simulated === "true") {
+        banner.classList.add("hidden");
+        delete banner.dataset.simulated;
+        testSubBtn.textContent = "⚡ Preview Check-In";
+        showToast("Preview closed.", "info");
+        return;
+      }
+
+      const sampleCourse = state.courses?.[0] || { code: "WIX2002", name: "Project Management", id: "101" };
+      const simulatedOpenSession = {
+        courseId: sampleCourse.id,
+        courseCode: sampleCourse.code,
+        courseName: sampleCourse.name,
+        occurrence: state.courseOccurrences[sampleCourse.id] || state.courseOccurrences[sampleCourse.code] || "Occ 1",
+        viewUrl: `https://spectrum.um.edu.my/course/view.php?id=${sampleCourse.id}`,
+        session: {
+          sessid: "99881",
+          description: "Lecture Session 08 (Interactive Check-In Demo)",
+          time: "2:00 PM - 4:00 PM",
+          status: "open",
+          submitUrl: `https://spectrum.um.edu.my/mod/attendance/attendance.php?sessid=99881`
+        }
+      };
+
+      if (!state.attendance) {
+        state.attendance = { openSessions: [simulatedOpenSession], courses: [] };
+      } else {
+        state.attendance.openSessions = [simulatedOpenSession];
+      }
+
+      banner.dataset.simulated = "true";
+      testSubBtn.textContent = "✕ Close Preview";
+      renderOpenAttendanceBanner();
+      showToast("Interactive Submission Container active! Click Submit to test.", "info");
+    });
   }
 
   // Open Attendance Page Links
@@ -407,6 +553,15 @@ function initDOMListeners() {
     openSpectrumHeaderBtn.addEventListener("click", (e) => {
       e.preventDefault();
       const url = openSpectrumHeaderBtn.dataset.url || openSpectrumHeaderBtn.getAttribute("href") || "https://spectrum.um.edu.my/my/";
+      openExternalUrl(url);
+    });
+  }
+
+  const openSpectrumCalendarBtn = document.getElementById("openSpectrumCalendarBtn");
+  if (openSpectrumCalendarBtn) {
+    openSpectrumCalendarBtn.addEventListener("click", (e) => {
+      e.preventDefault();
+      const url = openSpectrumCalendarBtn.getAttribute("href") || "https://spectrum.um.edu.my/calendar/view.php?view=upcoming";
       openExternalUrl(url);
     });
   }
@@ -458,23 +613,10 @@ function initDOMListeners() {
     });
   }
 
-  // Settings: Cloud Relay Toggle
-  const cloudToggle = document.getElementById("cloudRelayToggle");
-  const cloudFields = document.getElementById("cloudRelayFields");
-  if (cloudToggle && cloudFields) {
-    cloudToggle.addEventListener("change", (e) => {
-      cloudFields.classList.toggle("hidden", !e.target.checked);
-    });
-  }
-
   // Settings: Test Buttons
   const testTelegramBtn = document.getElementById("testTelegramBtn");
   if (testTelegramBtn) {
     testTelegramBtn.addEventListener("click", handleTestTelegram);
-  }
-  const syncCloudNowBtn = document.getElementById("syncCloudNowBtn");
-  if (syncCloudNowBtn) {
-    syncCloudNowBtn.addEventListener("click", handleManualCloudSync);
   }
   const saveSettingsBtn = document.getElementById("saveSettingsBtn");
   if (saveSettingsBtn) {
@@ -483,6 +625,54 @@ function initDOMListeners() {
   const autoDiscoverIcalBtn = document.getElementById("autoDiscoverIcalBtn");
   if (autoDiscoverIcalBtn) {
     autoDiscoverIcalBtn.addEventListener("click", handleAutoDiscoverIcal);
+  }
+
+  // Auto-update attendance tab whenever attendance is recorded or updated
+  if (typeof chrome !== "undefined" && chrome.storage?.onChanged) {
+    chrome.storage.onChanged.addListener((changes, areaName) => {
+      if (areaName === "local") {
+        if (changes.cached_attendance?.newValue) {
+          state.attendance = changes.cached_attendance.newValue;
+          renderAttendanceSummaryMetrics();
+          renderOpenAttendanceBanner();
+          renderAttendanceRecords();
+        }
+        if (changes.notify_attendance_open !== undefined) {
+          const val = Boolean(changes.notify_attendance_open.newValue);
+          state.notifyAttendanceOpen = val;
+          const t = document.getElementById("telegramAttendanceOpenToggle");
+          if (t) t.checked = val;
+          const p = document.getElementById("prefAttendanceOpen");
+          if (p) p.checked = val;
+          const lbl = document.getElementById("telegramAttendanceOpenLabel");
+          if (lbl) lbl.textContent = val ? "Telegram Alert Active" : "Telegram Alert Paused";
+        }
+      }
+    });
+  }
+
+  if (typeof chrome !== "undefined" && chrome.runtime?.onMessage) {
+    chrome.runtime.onMessage.addListener((message) => {
+      if (message.action === "ATTENDANCE_SUBMITTED_SUCCESS" || message.action === "RECORD_ATTENDANCE_SUCCESS") {
+        showToast("Attendance submitted! Marked as Present ✅", "success");
+        const step3 = document.getElementById("stepperStep3");
+        if (step3) {
+          step3.className = "stepper-step step-done";
+          const s3Icon = step3.querySelector(".stepper-icon");
+          if (s3Icon) {
+            s3Icon.textContent = "✓";
+            s3Icon.classList.remove("stepper-pulse");
+          }
+        }
+        const btnLabel = document.getElementById("submitBtnLabel");
+        if (btnLabel) btnLabel.textContent = "Submitted as Present ✅";
+        const btnIcon = document.getElementById("submitBtnIcon");
+        if (btnIcon) btnIcon.textContent = "✓";
+        setTimeout(() => {
+          loadLiveAttendanceData(false).catch(() => {});
+        }, 1200);
+      }
+    });
   }
 }
 
@@ -1360,6 +1550,23 @@ function updateUrgentCountBadge() {
   document.getElementById("countWeek").textContent = countWeek;
   document.getElementById("countLater").textContent = countLater;
   document.getElementById("countDone").textContent = countDone;
+
+  // Update Submissions Overview Information Container (matching Attendance overview design)
+  const progressRate = total > 0 ? `${Math.round((countDone / total) * 100)}%` : "100%";
+  const pendingCount = total - countDone;
+
+  const progEl = document.getElementById("submissionsProgressRate");
+  if (progEl) progEl.textContent = progressRate;
+  const doneEl = document.getElementById("submissionsDoneCount");
+  if (doneEl) doneEl.textContent = countDone;
+  const wkEl = document.getElementById("submissionsWeekCount");
+  if (wkEl) wkEl.textContent = countWeek;
+  const urgEl = document.getElementById("submissionsUrgentCount");
+  if (urgEl) urgEl.textContent = countUrgent;
+  const pendEl = document.getElementById("submissionsPendingLabel");
+  if (pendEl) {
+    pendEl.textContent = `${pendingCount} Pending Submission${pendingCount === 1 ? "" : "s"}`;
+  }
 }
 
 function renderDeadlines() {
@@ -1405,19 +1612,90 @@ function renderDeadlines() {
 
   filtered.forEach((item) => {
     const card = document.createElement("div");
-    card.className = `deadline-card tier-${item.urgency} ${item.isCompleted ? "is-completed" : ""}`;
     card.id = `card_${item.id}`;
 
+    const isSubmitted = Boolean(item.isSubmittedOnSpectrum || item.isCompleted);
+    const now = Date.now();
+    const diffMs = item.dueTimestamp ? (item.dueTimestamp - now) : null;
+    const isUnder24Hr = !isSubmitted && item.dueTimestamp && (diffMs > 0 && diffMs <= 86400000);
+    const isClosingTerm = item.dateLabel === "Closes" || item.type === "quiz";
+    const dateLabelText = item.dateLabel
+      ? `${item.dateLabel}:`
+      : (item.type === "quiz" ? "Closes:" : "Due:");
+
+    // Determine 3-state hierarchy requested by user:
+    // 1. Green for Submitted
+    // 2. Red for Under 24 hr
+    // 3. Yellow for Pending
+    let cardStateClass = "card-state-pending";
     let badgeHtml = "";
-    if (item.urgency === "urgent") {
-      badgeHtml = `<span class="urgency-badge badge-urgent"><span class="pulse-ring" style="width:10px;height:10px;position:static;"></span> &lt; 24h</span>`;
-    } else if (item.urgency === "this_week") {
-      badgeHtml = `<span class="urgency-badge badge-week">This Week</span>`;
+    let submissionChipHtml = "";
+    let daysLeftBadge = "";
+
+    if (isSubmitted) {
+      cardStateClass = "card-state-submitted is-completed";
+      badgeHtml = `<span class="urgency-badge badge-submitted"><span>✓</span> Submitted</span>`;
+      daysLeftBadge = `<span class="due-days-pill pill-completed">✔ Done</span>`;
+      submissionChipHtml = `
+        <div class="submission-status-chip is-submitted" title="Submission recorded on SPeCTRUM">
+          <span class="status-dot"></span>
+          <span>${escapeHtml(item.submissionStatus || "Submitted")}</span>
+        </div>
+      `;
+    } else if (isUnder24Hr || (!isSubmitted && item.urgency === "urgent" && diffMs > 0)) {
+      cardStateClass = "card-state-urgent";
+      badgeHtml = `<span class="urgency-badge badge-urgent"><span class="pulse-ring" style="width:10px;height:10px;position:static;"></span> &lt; 24h Left</span>`;
+      const h = Math.floor(diffMs / 3600000);
+      const m = Math.floor((diffMs % 3600000) / 60000);
+      daysLeftBadge = `<span class="due-days-pill pill-urgent countdown-pill" data-timestamp="${item.dueTimestamp}">⚡ ${h}h ${m}m left</span>`;
+      submissionChipHtml = `
+        <div class="submission-status-chip is-urgent" title="Due in less than 24 hours">
+          <span class="status-dot"></span>
+          <span>Action Required (&lt;24h)</span>
+        </div>
+      `;
     } else {
-      badgeHtml = `<span class="urgency-badge badge-upcoming">Upcoming</span>`;
+      // Pending state: Yellow / Amber
+      cardStateClass = "card-state-pending";
+      if (diffMs !== null && diffMs <= 0) {
+        const ovDays = Math.floor(Math.abs(diffMs) / 86400000);
+        badgeHtml = `<span class="urgency-badge badge-pending"><span>⏳</span> Overdue ${ovDays > 0 ? `${ovDays}d` : ""}</span>`;
+        daysLeftBadge = `<span class="due-days-pill pill-warning">⚠️ ${isClosingTerm ? "Closed" : "Overdue"} ${ovDays > 0 ? `${ovDays}d` : ""}</span>`;
+        submissionChipHtml = `
+          <div class="submission-status-chip is-pending" title="Pending submission">
+            <span class="status-dot"></span>
+            <span>${escapeHtml(item.submissionStatus || "Pending Submission")}</span>
+          </div>
+        `;
+      } else if (item.urgency === "this_week") {
+        badgeHtml = `<span class="urgency-badge badge-week"><span>🟡</span> This Week</span>`;
+        const diffDays = Math.floor((diffMs || 0) / 86400000);
+        daysLeftBadge = `<span class="due-days-pill pill-warning countdown-pill" data-timestamp="${item.dueTimestamp}">⏳ ${isClosingTerm ? "Closes" : "Due"} in ${diffDays}d</span>`;
+        submissionChipHtml = `
+          <div class="submission-status-chip is-pending" title="Due this week">
+            <span class="status-dot"></span>
+            <span>${escapeHtml(item.submissionStatus || "No submission")}</span>
+          </div>
+        `;
+      } else {
+        badgeHtml = `<span class="urgency-badge badge-upcoming"><span>⏳</span> Pending</span>`;
+        if (item.dueTimestamp) {
+          const diffDays = Math.floor((diffMs || 0) / 86400000);
+          daysLeftBadge = `<span class="due-days-pill pill-warning countdown-pill" data-timestamp="${item.dueTimestamp}">⏳ ${isClosingTerm ? "Closes" : "Due"} in ${diffDays}d</span>`;
+        } else {
+          daysLeftBadge = `<span class="due-days-pill pill-normal">Open</span>`;
+        }
+        submissionChipHtml = `
+          <div class="submission-status-chip is-pending" title="Pending submission">
+            <span class="status-dot"></span>
+            <span>${escapeHtml(item.submissionStatus || "No submission")}</span>
+          </div>
+        `;
+      }
     }
 
-    const timeRemainingStr = formatTimeRemaining(item.dueTimestamp);
+    card.className = `deadline-card ${cardStateClass} tier-${item.urgency}`;
+
     const formattedDueDate = formatDueCalendarDate(item.dueTimestamp, item.formattedTime);
     const isTgSent = state.telegramSentDeadlineIds.has(String(item.id)) || item.telegramSent;
     const tgSentBadge = isTgSent ? `<span class="telegram-sent-tag" title="Alert flagged as sent to Telegram">✈️ Telegram Sent</span>` : "";
@@ -1426,44 +1704,6 @@ function renderDeadlines() {
     const typeBadge = `<span class="activity-type-tag type-${item.type || "assign"}">${typeLabel}</span>`;
     const studentOcc = state.courseOccurrences[item.courseCode] || state.courseOccurrences[item.courseId] || "";
     const occBadge = studentOcc ? `<span class="occ-target-tag" title="Filtered for your registered occurrence">${escapeHtml(studentOcc)}</span>` : "";
-
-    const isClosingTerm = item.dateLabel === "Closes" || item.type === "quiz";
-    const dateLabelText = item.dateLabel
-      ? `${item.dateLabel}:`
-      : (item.type === "quiz" ? "Closes:" : "Due:");
-
-    let daysLeftBadge = "";
-    if (item.isCompleted) {
-      daysLeftBadge = `<span class="due-days-pill pill-completed">✔ Completed</span>`;
-    } else if (item.dueTimestamp) {
-      const diffMs = item.dueTimestamp - Date.now();
-      if (diffMs <= 0) {
-        const ovDays = Math.floor(Math.abs(diffMs) / 86400000);
-        daysLeftBadge = `<span class="due-days-pill pill-urgent">⚠️ ${isClosingTerm ? "Closed" : "Overdue"} ${ovDays > 0 ? `${ovDays}d` : ""}</span>`;
-      } else {
-        const diffHrs = diffMs / 3600000;
-        const diffDays = Math.floor(diffHrs / 24);
-        if (diffHrs < 24) {
-          const h = Math.floor(diffHrs);
-          const m = Math.floor((diffMs % 3600000) / 60000);
-          daysLeftBadge = `<span class="due-days-pill pill-urgent countdown-pill" data-timestamp="${item.dueTimestamp}">⚡ ${h}h ${m}m left</span>`;
-        } else if (diffDays === 1) {
-          daysLeftBadge = `<span class="due-days-pill pill-warning countdown-pill" data-timestamp="${item.dueTimestamp}">⏳ ${isClosingTerm ? "Closes" : "Due"} in 1 day</span>`;
-        } else {
-          daysLeftBadge = `<span class="due-days-pill ${diffDays <= 7 ? "pill-warning" : "pill-normal"} countdown-pill" data-timestamp="${item.dueTimestamp}">⏳ ${isClosingTerm ? "Closes" : "Due"} in ${diffDays} days</span>`;
-        }
-      }
-    } else {
-      daysLeftBadge = `<span class="due-days-pill pill-open">Open</span>`;
-    }
-
-    const isSubmitted = item.isSubmittedOnSpectrum || item.isCompleted;
-    const submissionChipHtml = `
-      <div class="submission-status-chip ${isSubmitted ? "is-submitted" : "is-pending"}">
-        <span class="status-dot"></span>
-        <span>${escapeHtml(isSubmitted ? (item.submissionStatus || "Submitted") : (item.submissionStatus || "No submission"))}</span>
-      </div>
-    `;
 
     card.innerHTML = `
       <div class="deadline-card-header">
@@ -1840,63 +2080,6 @@ async function loadLiveAttendanceData(force = false) {
     renderActiveOccurrenceBadges();
     renderOpenAttendanceBanner();
     renderAttendanceRecords();
-
-    // 3. Auto-Submit open attendance session if active and enabled
-    if (state.autoAttendanceEnabled && attendanceData.openSessions?.length > 0) {
-      for (const openItem of attendanceData.openSessions) {
-        const sess = openItem.session;
-        const occ = openItem.occurrence || state.courseOccurrences[openItem.courseId] || "";
-        const isOpen = sess.status === "open" && Boolean(sess.submitUrl);
-        const matchesOcc = !occ || isRespectiveOccurrence(sess.group, occ, sess.description, sess.activityName);
-
-        if (isOpen && matchesOcc && sess.submitUrl) {
-          const store = await chrome.storage.local.get(["recorded_attendance_sessids", "course_passwords"]);
-          const recorded = new Set(store.recorded_attendance_sessids || []);
-          if (!recorded.has(sess.sessid)) {
-            console.log(`[Spectra] Auto-submitting open session ${sess.sessid} for ${openItem.courseCode}...`);
-            const pwd = (store.course_passwords && (store.course_passwords[openItem.courseId] || store.course_passwords[openItem.courseCode])) || "";
-            try {
-              const res = await autoSubmitAttendance({
-                sessid: sess.sessid,
-                sesskey: state.sesskey,
-                attendanceUrl: sess.submitUrl,
-                password: pwd,
-                sessionGroup: sess.group,
-                sessionDescription: sess.description,
-                activityName: sess.activityName,
-                studentOccurrence: occ,
-                isOpen: true
-              });
-              if (res.success) {
-                recorded.add(sess.sessid);
-                await chrome.storage.local.set({ recorded_attendance_sessids: Array.from(recorded) });
-                // Send Telegram alert via background listener
-                if (typeof chrome !== "undefined" && chrome.runtime?.sendMessage) {
-                  chrome.runtime.sendMessage({
-                    action: "RECORD_ATTENDANCE_SUCCESS",
-                    payload: {
-                      sessid: sess.sessid,
-                      courseCode: openItem.courseCode,
-                      sessionDescription: sess.description,
-                      status: "Present"
-                    }
-                  }).catch(() => {});
-                }
-                showToast(`Auto-Attendance: Recorded Present for ${openItem.courseCode}!`, "success");
-                sess.status = "present";
-                sess.statusLabel = "Present";
-                renderAttendanceSummaryMetrics();
-                renderOpenAttendanceBanner();
-                renderAttendanceRecords();
-              }
-            } catch (subErr) {
-              console.warn("[Spectra] Auto-submission attempt notice:", subErr);
-            }
-          }
-        }
-      }
-    }
-
   } catch (err) {
     console.error("[Spectra] Error loading live attendance:", err);
     if (!state.attendance) {
@@ -2076,16 +2259,46 @@ function renderOpenAttendanceBanner() {
 
   const firstOpen = openList[0];
   const courseCodeEl = document.getElementById("openAttendanceCourseCode");
+  const occBadgeEl = document.getElementById("openAttendanceOccBadge");
   const timeBadge = document.getElementById("openAttendanceTimeBadge");
   const titleEl = document.getElementById("openAttendanceTitle");
   const descEl = document.getElementById("openAttendanceDesc");
   const openLink = document.getElementById("openAttendancePageLink");
+  const btnIcon = document.getElementById("submitBtnIcon");
+  const btnLabel = document.getElementById("submitBtnLabel");
+  const step1 = document.getElementById("stepperStep1");
+  const step2 = document.getElementById("stepperStep2");
+  const step3 = document.getElementById("stepperStep3");
 
   if (courseCodeEl) courseCodeEl.textContent = firstOpen.courseCode || "UM Course";
+  if (occBadgeEl) {
+    const rawOcc = firstOpen.occurrence || state.courseOccurrences[firstOpen.courseId] || state.courseOccurrences[firstOpen.courseCode] || "All Occ";
+    occBadgeEl.textContent = rawOcc.toLowerCase().includes("all") ? "All Occ" : (rawOcc.toLowerCase().includes("occ") ? rawOcc : `Occ ${rawOcc.replace(/\D+/g, "") || rawOcc}`);
+  }
   if (timeBadge) timeBadge.textContent = firstOpen.session?.time || "OPEN NOW";
   if (titleEl) titleEl.textContent = firstOpen.session?.description || "Lecture Session Check-In Open";
   if (descEl) {
-    descEl.textContent = `Occurrence: ${firstOpen.occurrence || "All"} • Self-recording is currently active on SPeCTRUM.`;
+    descEl.textContent = `Matches your registered occurrence. Click Submit to auto-navigate & mark Present.`;
+  }
+
+  // Reset interactive button state
+  if (btnIcon && btnLabel) {
+    btnIcon.textContent = "⚡";
+    btnLabel.textContent = "Submit (Mark Present) →";
+  }
+
+  // Reset interactive stepper
+  if (step1 && step2 && step3) {
+    step1.className = "stepper-step step-done";
+    step1.querySelector(".stepper-icon").textContent = "✓";
+    step2.className = "stepper-step step-current";
+    const s2Icon = step2.querySelector(".stepper-icon");
+    s2Icon.textContent = "2";
+    s2Icon.classList.add("stepper-pulse");
+    step3.className = "stepper-step step-pending";
+    const s3Icon = step3.querySelector(".stepper-icon");
+    s3Icon.textContent = "🤖";
+    s3Icon.classList.remove("stepper-pulse");
   }
 
   const targetUrl = firstOpen.session?.submitUrl || firstOpen.viewUrl || (firstOpen.cmid ? `https://spectrum.um.edu.my/mod/attendance/view.php?id=${firstOpen.cmid}` : "https://spectrum.um.edu.my/mod/attendance/view.php");
@@ -2325,9 +2538,9 @@ function renderAttendanceRecords() {
         <div class="flex-align-center" style="gap: 6px;">
           ${s.points ? `<span class="session-points-text">${s.points}</span>` : ""}
           ${s.status === "open" && s.submitUrl ? `
-            <a href="${s.submitUrl}" data-url="${s.submitUrl}" class="btn-primary-action btn-xs" style="text-decoration: none; padding: 3px 8px;">
-              Check In ↗
-            </a>
+            <button class="btn-primary-action btn-xs session-submit-btn" data-url="${s.submitUrl}" data-sessid="${s.sessid || ""}" data-course="${s.courseCode || ""}" style="border: none; cursor: pointer; padding: 4px 10px; border-radius: 6px; font-weight: 600;">
+              Submit ↗
+            </button>
           ` : ""}
           <a href="${s.courseViewUrl}" data-url="${s.courseViewUrl}" class="btn-secondary-action btn-xs" style="text-decoration: none; padding: 3px 8px;" title="Open attendance page on SPeCTRUM">
             Open Page ↗
@@ -2335,6 +2548,20 @@ function renderAttendanceRecords() {
         </div>
       </div>
     `;
+
+    const sessionSubmitBtn = card.querySelector(".session-submit-btn");
+    if (sessionSubmitBtn) {
+      sessionSubmitBtn.addEventListener("click", (e) => {
+        e.preventDefault();
+        e.stopPropagation();
+        handleSubmitOpenAttendance({
+          submitUrl: s.submitUrl,
+          sessid: s.sessid,
+          courseCode: s.courseCode,
+          session: s
+        });
+      });
+    }
 
     container.appendChild(card);
   });
@@ -2374,14 +2601,6 @@ async function handleSaveCourseOccurrence() {
     });
   }
 
-  // Auto-sync updated occurrences to Cloud Relay if enabled
-  if (state.cloudRelayEnabled && state.cloudRelayUrl && typeof chrome !== "undefined" && chrome.runtime?.sendMessage) {
-    chrome.runtime.sendMessage({
-      action: "SYNC_CLOUD_RELAY_NOW",
-      payload: { relayUrl: state.cloudRelayUrl, secretKey: state.cloudRelaySecret }
-    }).catch(() => { });
-  }
-
   btn.disabled = false;
   btn.textContent = "Save Occurrence";
 
@@ -2398,7 +2617,7 @@ async function handleSaveCourseOccurrence() {
 }
 
 /**
- * Handle instant scan & auto-checkin
+ * Handle instant scan for open attendance sessions
  */
 async function handleScanAttendanceNow() {
   const btn = document.getElementById("scanAttendanceBtn");
@@ -2439,20 +2658,19 @@ async function handleScanAttendanceNow() {
       }
     }
 
-    // 3. Scan and auto record attendance
-    const scanRes = await scanAndAutoRecordAttendance({
-      courses: state.courses,
-      sesskey: state.sesskey,
-      occurrencesMap: state.courseOccurrences,
-      autoSubmit: true
-    });
+    // 3. Scan live attendance data (no headless auto submit)
+    const liveAttendance = await fetchLiveAllAttendance(
+      state.courses,
+      state.sesskey,
+      state.courseOccurrences
+    );
 
-    state.attendance = scanRes.attendance;
+    state.attendance = liveAttendance;
 
     // Cache updated attendance data
     if (typeof chrome !== "undefined" && chrome.storage?.local) {
       await chrome.storage.local.set({
-        cached_attendance: scanRes.attendance,
+        cached_attendance: liveAttendance,
         last_attendance_sync: Date.now()
       });
     }
@@ -2463,9 +2681,9 @@ async function handleScanAttendanceNow() {
     renderOpenAttendanceBanner();
     renderAttendanceRecords();
 
-    const recordedCount = (scanRes.actions || []).filter((a) => a.result?.success).length;
-    if (recordedCount > 0) {
-      showToast(`Auto-Attendance: Marked Present for ${recordedCount} session(s)! ✅`, "success");
+    const openCount = liveAttendance.openSessions?.length || 0;
+    if (openCount > 0) {
+      showToast(`Scan complete: ${openCount} open check-in session detected! Click Submit to check in.`, "info");
     } else {
       showToast("Scan finished: Attendance records up to date.", "info");
     }
@@ -2482,119 +2700,78 @@ async function handleScanAttendanceNow() {
 }
 
 /**
- * Submit open attendance check-in
+ * Submit open attendance check-in:
+ * Sets pending auto-fill flag and navigates to the attendance check-in page
  */
-async function handleSubmitOpenAttendance() {
-  const btn = document.getElementById("submitOpenAttendanceBtn");
+async function handleSubmitOpenAttendance(overrideParams = {}) {
   const pwdInput = document.getElementById("openAttendancePasswordInput");
   const openList = state.attendance?.openSessions || [];
 
-  if (openList.length === 0) {
-    showToast("No active open session detected.", "error");
-    return;
-  }
-  const firstOpen = openList[0];
-  const session = firstOpen.session;
-  const occ = firstOpen.occurrence || state.courseOccurrences[firstOpen.courseId] || state.courseOccurrences[firstOpen.courseCode] || "";
+  let submitUrl = overrideParams?.submitUrl;
+  let sessid = overrideParams?.sessid;
+  let courseCode = overrideParams?.courseCode;
 
-  // Allow manual submission if user has not configured occurrence yet (!occ)
-  const isOpen = session && session.status === "open" && Boolean(session.submitUrl);
-  const matchesOcc = !occ || isRespectiveOccurrence(session.group, occ, session.description, session.activityName);
-
-  if (!isOpen) {
-    showToast("This session is not currently open for check-in on SPeCTRUM.", "error");
-    return;
-  }
-
-  if (occ && !matchesOcc) {
-    showToast(`Session is for "${session.group || "Specific Group"}", which does not match your configured occurrence ("${occ}").`, "error");
-    return;
+  if (!submitUrl) {
+    if (openList.length === 0) {
+      showToast("No active open session detected.", "error");
+      return;
+    }
+    const firstOpen = openList[0];
+    const session = firstOpen.session;
+    submitUrl = session?.submitUrl;
+    sessid = session?.sessid;
+    courseCode = firstOpen.courseCode;
   }
 
-  const origText = btn.textContent;
-  btn.disabled = true;
-  btn.textContent = "Submitting check-in...";
+  if (!submitUrl) {
+    showToast("This session has no check-in URL on SPeCTRUM.", "error");
+    return;
+  }
 
-  try {
-    const password = pwdInput ? pwdInput.value.trim() : "";
+  const courseSavedPwd = (courseCode && state.coursePasswords?.[courseCode]) ? state.coursePasswords[courseCode] : "";
+  const password = (pwdInput?.value?.trim()) || courseSavedPwd || "";
 
-    // 1. If active tab is on SPeCTRUM attendance form, inject and run DOM algorithm directly
-    if (typeof chrome !== "undefined" && chrome.tabs && chrome.scripting) {
-      try {
-        const [activeTab] = await chrome.tabs.query({ active: true, currentWindow: true });
-        if (activeTab?.url?.includes("/mod/attendance/attendance.php")) {
-          await chrome.scripting.executeScript({
-            target: { tabId: activeTab.id },
-            func: (pwd) => {
-              if (typeof window.spectraSubmitAttendance === "function") {
-                return window.spectraSubmitAttendance({ password: pwd });
-              }
-              const presentRadio = Array.from(document.querySelectorAll('label, span, div'))
-                .find(el => {
-                  const t = el.textContent.trim().toLowerCase();
-                  return t === 'present' || t === 'hadir';
-                })
-                ?.closest('label')?.querySelector('input[type="radio"]') 
-                || document.querySelector('input[type="radio"]');
+  const btnIcon = document.getElementById("submitBtnIcon");
+  const btnLabel = document.getElementById("submitBtnLabel");
+  const step2 = document.getElementById("stepperStep2");
+  const step3 = document.getElementById("stepperStep3");
 
-              if (presentRadio) {
-                presentRadio.checked = true;
-                presentRadio.dispatchEvent(new Event('change', { bubbles: true }));
-                const form = presentRadio.closest('form');
-                const pInput = form?.querySelector('input[name="studentpassword"], input[name="password"], input[type="password"]');
-                if (pInput && pwd) {
-                  pInput.value = pwd;
-                  pInput.dispatchEvent(new Event('input', { bubbles: true }));
-                  pInput.dispatchEvent(new Event('change', { bubbles: true }));
-                }
-                const submitBtn = Array.from(document.querySelectorAll('input[type="submit"], button'))
-                  .find(b => b.value?.includes('Save') || b.textContent?.includes('Save') || b.value?.includes('Simpan') || b.textContent?.includes('Simpan'));
-                if (submitBtn) {
-                  submitBtn.click();
-                } else {
-                  form?.submit();
-                }
-                return { success: true };
-              }
-              return { success: false };
-            },
-            args: [password]
-          });
-        }
-      } catch (domErr) {
-        console.debug("[Spectra] Active tab DOM injection note:", domErr);
+  if (btnIcon && btnLabel) {
+    btnIcon.textContent = "⏳";
+    btnLabel.textContent = "Auto-filling Present...";
+  }
+
+  if (step2 && step3) {
+    step2.className = "stepper-step step-done";
+    step2.querySelector(".stepper-icon").textContent = "✓";
+    step2.querySelector(".stepper-icon").classList.remove("stepper-pulse");
+    step3.className = "stepper-step step-current";
+    const s3Icon = step3.querySelector(".stepper-icon");
+    s3Icon.textContent = "🚀";
+    s3Icon.classList.add("stepper-pulse");
+  }
+
+  // 1. Store pending autofill in storage for content script
+  if (typeof chrome !== "undefined" && chrome.storage?.local) {
+    await chrome.storage.local.set({
+      spectra_pending_autofill: {
+        sessid,
+        courseCode,
+        password,
+        submitUrl,
+        autoSubmit: true,
+        timestamp: Date.now()
       }
-    }
-
-    // 2. Submit attendance check-in via API
-    const result = await autoSubmitAttendance({
-      sessid: session?.sessid,
-      sesskey: state.sesskey,
-      attendanceUrl: session?.submitUrl,
-      password,
-      sessionGroup: session?.group,
-      sessionDescription: session?.description,
-      activityName: session?.activityName,
-      studentOccurrence: occ,
-      isOpen
     });
+  }
 
-    if (result.success) {
-      showToast(`Success! Marked Present for ${firstOpen.courseCode}`, "success");
-      await loadLiveAttendanceData(true);
-    } else if (result.requiresPassword) {
-      const pwdWrap = document.getElementById("openAttendancePasswordWrap");
-      if (pwdWrap) pwdWrap.classList.remove("hidden");
-      if (pwdInput) pwdInput.focus();
-      showToast(result.message || "Password required to check in.", "error");
-    } else {
-      showToast(result.error || "Attendance submission failed.", "error");
-    }
-  } catch (err) {
-    showToast(`Error: ${err.message}`, "error");
-  } finally {
-    btn.disabled = false;
-    btn.textContent = origText;
+  showToast(`Opening attendance for ${courseCode || "class"}... Auto-filling Present!`, "success");
+
+  // 2. Open the attendance submit page in active browser tab
+  if (typeof chrome !== "undefined" && chrome.tabs?.create) {
+    chrome.tabs.create({ url: submitUrl, active: true });
+  } else {
+    window.open(submitUrl, "_blank");
   }
 }
 
@@ -2924,45 +3101,6 @@ async function handleTestTelegram() {
   }
 }
 
-async function handleManualCloudSync() {
-  const relayUrl = document.getElementById("cloudRelayUrl").value.trim();
-  const secretKey = document.getElementById("cloudRelaySecret").value.trim();
-
-  if (!relayUrl) {
-    showToast("Please specify a Cloud Relay endpoint URL", "error");
-    return;
-  }
-
-  // Auto-persist configured relay endpoint and secret to storage
-  if (typeof chrome !== "undefined" && chrome.storage?.local) {
-    await chrome.storage.local.set({
-      cloud_relay_url: relayUrl,
-      cloud_relay_secret: secretKey,
-      cloud_relay_enabled: true
-    });
-  }
-
-  const btn = document.getElementById("syncCloudNowBtn");
-  const origText = btn.innerHTML;
-  btn.disabled = true;
-  btn.textContent = "Syncing...";
-
-  chrome.runtime.sendMessage({
-    action: "SYNC_CLOUD_RELAY_NOW",
-    payload: { relayUrl, secretKey }
-  }, (response) => {
-    btn.disabled = false;
-    btn.innerHTML = origText;
-    if (response && response.success) {
-      const d = new Date();
-      document.getElementById("lastCloudSyncLabel").textContent = `Synced: ${d.toLocaleTimeString()}`;
-      showToast("MoodleSession synced to Cloud Relay!", "success");
-    } else {
-      showToast(`Sync failed: ${response?.message || response?.error}`, "error");
-    }
-  });
-}
-
 async function handleSaveSettings() {
   const tokenInput = document.getElementById("telegramToken");
   const chatInput = document.getElementById("telegramChatId");
@@ -2974,12 +3112,12 @@ async function handleSaveSettings() {
 
   const icalInput = document.getElementById("calendarIcalUrl");
   const icalUrl = icalInput ? icalInput.value.trim() : "";
-  const cloudEnabled = document.getElementById("cloudRelayToggle").checked;
-  const cloudUrl = document.getElementById("cloudRelayUrl").value.trim();
-  const cloudSecret = document.getElementById("cloudRelaySecret").value.trim();
   const pollMins = parseInt(document.getElementById("pollIntervalSelect").value, 10);
+  const notifyAttendanceOpen = document.getElementById("prefAttendanceOpen") ? document.getElementById("prefAttendanceOpen").checked : true;
   const notifyAnnounce = document.getElementById("prefAnnouncements").checked;
   const notifyDeadlines = document.getElementById("prefDeadlines").checked;
+
+  state.notifyAttendanceOpen = notifyAttendanceOpen;
 
   if (typeof chrome !== "undefined" && chrome.storage?.local) {
     await chrome.storage.local.set({
@@ -2987,10 +3125,8 @@ async function handleSaveSettings() {
       telegram_chat_id: chatId,
       calendarIcalUrl: icalUrl,
       calendar_ical_url: icalUrl,
-      cloud_relay_enabled: cloudEnabled,
-      cloud_relay_url: cloudUrl,
-      cloud_relay_secret: cloudSecret,
       poll_interval_mins: pollMins,
+      notify_attendance_open: notifyAttendanceOpen,
       notify_announcements: notifyAnnounce,
       notify_urgent_deadlines: notifyDeadlines
     });
@@ -3028,11 +3164,6 @@ async function handleAutoDiscoverIcal(silent = false) {
         calendarIcalUrl: icalUrl,
         calendar_ical_url: icalUrl
       });
-    }
-
-    // Immediately sync to Cloud Relay worker if configured
-    if (state.cloudRelayEnabled && state.cloudRelayUrl && typeof chrome !== "undefined" && chrome.runtime?.sendMessage) {
-      chrome.runtime.sendMessage({ action: "SYNC_CLOUD_RELAY_NOW" }).catch(() => { });
     }
 
     // Refresh deadlines tab with live iCal feed
@@ -3195,19 +3326,15 @@ async function loadStoredPreferences() {
     stored = await chrome.storage.local.get([
       "telegram_bot_token",
       "telegram_chat_id",
-      "cloud_relay_enabled",
-      "cloud_relay_url",
-      "cloud_relay_secret",
       "poll_interval_mins",
       "notify_announcements",
       "notify_urgent_deadlines",
+      "notify_attendance_open",
       "completed_assignment_ids",
-      "last_cloud_sync_timestamp",
       "semester_start_date",
       "course_occurrences",
       "courseOccurrences",
       "studentOccurrence",
-      "pref_auto_attendance",
       "telegram_sent_announcement_ids",
       "telegram_sent_deadline_ids"
     ]);
@@ -3234,13 +3361,15 @@ async function loadStoredPreferences() {
   if (stored.courseOccurrences && typeof stored.courseOccurrences === "object") {
     state.courseOccurrences = { ...state.courseOccurrences, ...stored.courseOccurrences };
   }
-  if (stored.pref_auto_attendance !== undefined) {
-    state.autoAttendanceEnabled = stored.pref_auto_attendance;
-    const attToggle = document.getElementById("autoAttendanceToggle");
-    if (attToggle) attToggle.checked = stored.pref_auto_attendance;
-    const lbl = document.getElementById("autoAttendanceToggleLabel");
-    if (lbl) lbl.textContent = stored.pref_auto_attendance ? "Auto-Checkin Active" : "Auto-Checkin Paused";
-  }
+
+  const notifyOpen = stored.notify_attendance_open !== false;
+  state.notifyAttendanceOpen = notifyOpen;
+  const attToggle = document.getElementById("telegramAttendanceOpenToggle");
+  if (attToggle) attToggle.checked = notifyOpen;
+  const prefOpen = document.getElementById("prefAttendanceOpen");
+  if (prefOpen) prefOpen.checked = notifyOpen;
+  const lbl = document.getElementById("telegramAttendanceOpenLabel");
+  if (lbl) lbl.textContent = notifyOpen ? "Telegram Alert Active" : "Telegram Alert Paused";
 
   const tgTokenInput = document.getElementById("telegramToken");
   if (tgTokenInput && stored.telegram_bot_token) tgTokenInput.value = stored.telegram_bot_token;
@@ -3249,21 +3378,6 @@ async function loadStoredPreferences() {
   const icalInput = document.getElementById("calendarIcalUrl");
   if (icalInput && (stored.calendarIcalUrl || stored.calendar_ical_url)) {
     icalInput.value = stored.calendarIcalUrl || stored.calendar_ical_url;
-  }
-
-  const cloudEnabled = Boolean(stored.cloud_relay_enabled);
-  const cloudToggle = document.getElementById("cloudRelayToggle");
-  if (cloudToggle) cloudToggle.checked = cloudEnabled;
-  const cloudFields = document.getElementById("cloudRelayFields");
-  if (cloudFields) cloudFields.classList.toggle("hidden", !cloudEnabled);
-  const cloudUrl = document.getElementById("cloudRelayUrl");
-  if (cloudUrl && stored.cloud_relay_url) cloudUrl.value = stored.cloud_relay_url;
-  const cloudSecret = document.getElementById("cloudRelaySecret");
-  if (cloudSecret && stored.cloud_relay_secret) cloudSecret.value = stored.cloud_relay_secret;
-  const syncLabel = document.getElementById("lastCloudSyncLabel");
-  if (syncLabel && stored.last_cloud_sync_timestamp) {
-    const d = new Date(stored.last_cloud_sync_timestamp);
-    syncLabel.textContent = `Synced: ${d.toLocaleDateString()} ${d.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })}`;
   }
 
   const pollInterval = document.getElementById("pollIntervalSelect");

@@ -200,6 +200,55 @@
       <!-- TAB 1: DEADLINES & SUBMISSIONS RADAR                          -->
       <!-- ============================================================ -->
       <main id="sectionDeadlines" class="tab-content active" role="tabpanel">
+        <!-- Submissions Overview Bento Card (Information Container like Attendance) -->
+        <div class="bento-card">
+          <div class="card-header-clean">
+            <div>
+              <h3 class="card-main-title">Submissions Radar</h3>
+              <p class="card-main-sub">Live coursework, assignment dropboxes &amp; quizzes</p>
+            </div>
+            <button type="button" id="refreshSubmissionsBtn" class="circle-btn-sm" title="Refresh Live Submissions">
+              <svg viewBox="0 0 20 20" width="14" height="14" fill="currentColor">
+                <path fill-rule="evenodd"
+                  d="M4 2a1 1 0 011 1v2.101a7.002 7.002 0 0111.601 2.566 1 1 0 11-1.885.666A5.002 5.002 0 005.999 7H9a1 1 0 010 2H4a1 1 0 01-1-1V3a1 1 0 011-1zm.008 9.057a1 1 0 011.276.61A5.002 5.002 0 0014.001 13H11a1 1 0 110-2h5a1 1 0 011 1v5a1 1 0 11-2 0v-2.101a7.002 7.002 0 01-11.601-2.566 1 1 0 01.61-1.276z"
+                  clip-rule="evenodd" />
+              </svg>
+            </button>
+          </div>
+
+          <!-- 4 Metric Cards in Grid (Identical to Attendance) -->
+          <div class="attendance-metrics-grid">
+            <div class="metric-box metric-overall">
+              <span class="metric-val" id="submissionsProgressRate">--%</span>
+              <span class="metric-lbl">Completion Rate</span>
+            </div>
+            <div class="metric-box metric-present">
+              <span class="metric-val text-emerald" id="submissionsDoneCount">0</span>
+              <span class="metric-lbl">Submitted ✅</span>
+            </div>
+            <div class="metric-box metric-late">
+              <span class="metric-val text-amber" id="submissionsWeekCount">0</span>
+              <span class="metric-lbl">This Week 🟡</span>
+            </div>
+            <div class="metric-box metric-urgent">
+              <span class="metric-val text-rose" id="submissionsUrgentCount">0</span>
+              <span class="metric-lbl">Urgent (&lt;24h) 🔴</span>
+            </div>
+          </div>
+
+          <!-- Toggle & Action Row (Identical to Attendance) -->
+          <div class="attendance-toggle-row">
+            <div class="toggle-control-group">
+              <span class="toggle-label-text" id="submissionsPendingLabel">0 Pending Submissions</span>
+            </div>
+            <div class="flex-align-center" style="gap: 6px;">
+              <a id="openSpectrumCalendarBtn" href="https://spectrum.um.edu.my/calendar/view.php?view=upcoming" target="_blank" rel="noopener noreferrer" class="link-btn-pill">
+                SPeCTRUM Calendar ↗
+              </a>
+            </div>
+          </div>
+        </div>
+
         <!-- Submissions Search & Filter Card -->
         <div class="bento-card filter-card-wrap">
           <div class="search-input-wrapper">
@@ -316,45 +365,92 @@
 
           <!-- Toggle & Action Row -->
           <div class="attendance-toggle-row">
-            <div class="toggle-control-group">
+            <div class="toggle-control-group" title="Send Telegram alert when attendance session opens for your occurrence">
               <label class="switch">
-                <input type="checkbox" id="autoAttendanceToggle" checked>
+                <input type="checkbox" id="telegramAttendanceOpenToggle" checked>
                 <span class="slider round"></span>
               </label>
-              <span class="toggle-label-text" id="autoAttendanceToggleLabel">Auto-Checkin Active</span>
+              <span class="toggle-label-text" id="telegramAttendanceOpenLabel">Telegram Open Alert</span>
             </div>
-            <a id="openSpectrumHeaderBtn" href="https://spectrum.um.edu.my/my/" target="_blank" rel="noopener noreferrer" class="link-btn-pill">
-              SPeCTRUM ↗
-            </a>
+            <div class="flex-align-center" style="gap: 6px;">
+              <button type="button" id="testSubmissionContainerBtn" class="btn-ghost-pill" title="Preview interactive submission container">
+                ⚡ Preview Check-In
+              </button>
+              <a id="openSpectrumHeaderBtn" href="https://spectrum.um.edu.my/my/" target="_blank" rel="noopener noreferrer" class="link-btn-pill">
+                SPeCTRUM ↗
+              </a>
+            </div>
           </div>
         </div>
 
-        <!-- Live Open Attendance Banner -->
-        <div id="openAttendanceBanner" class="open-attendance-banner hidden">
-          <div class="open-banner-icon-wrap">
-            <span class="pulse-ring"></span>
-            <span class="open-banner-dot"></span>
-          </div>
-          <div style="flex: 1;">
-            <div class="flex-between">
+        <!-- Interactive Live Open Attendance Submission Container -->
+        <div id="openAttendanceBanner" class="open-attendance-banner interactive-submission-card hidden">
+          <!-- Live Header Status Bar -->
+          <div class="open-banner-header flex-between">
+            <div class="open-banner-live-indicator">
+              <span class="live-pulse-radar"></span>
+              <span class="live-pulse-core"></span>
+              <span class="live-status-text">ATTENDANCE OPEN</span>
+            </div>
+            <div class="open-banner-meta-badges">
               <span id="openAttendanceCourseCode" class="open-banner-tag">WIX2002</span>
+              <span id="openAttendanceOccBadge" class="open-occ-tag">Occ 1</span>
               <span id="openAttendanceTimeBadge" class="open-banner-time">OPEN NOW</span>
             </div>
-            <h4 id="openAttendanceTitle" class="open-banner-title">Session Check-In Open</h4>
+          </div>
+
+          <!-- Title & Context -->
+          <div class="open-banner-body">
+            <h4 id="openAttendanceTitle" class="open-banner-title">Lecture Session Check-In Open</h4>
             <p id="openAttendanceDesc" class="open-banner-subtitle">Matches your occurrence. Ready for instant submission.</p>
+          </div>
 
+          <!-- Interactive 3-Step Submission Flow Stepper -->
+          <div class="submission-flow-stepper" id="submissionFlowStepper">
+            <div class="stepper-step step-done" id="stepperStep1" title="Attendance detected open for your occurrence">
+              <span class="stepper-icon">✓</span>
+              <span class="stepper-label">Detected</span>
+            </div>
+            <div class="stepper-connector active"></div>
+            <div class="stepper-step step-current" id="stepperStep2" title="Click Submit to initiate check-in">
+              <span class="stepper-icon stepper-pulse">2</span>
+              <span class="stepper-label">Submit</span>
+            </div>
+            <div class="stepper-connector"></div>
+            <div class="stepper-step step-pending" id="stepperStep3" title="Spectra will navigate and auto-fill Present">
+              <span class="stepper-icon">🤖</span>
+              <span class="stepper-label">Auto-Fill</span>
+            </div>
+          </div>
+
+          <!-- Interactive Password Accordion Drawer -->
+          <div class="open-password-accordion">
+            <button type="button" id="togglePasswordDrawerBtn" class="password-drawer-toggle">
+              <span class="toggle-icon">🔑</span>
+              <span class="toggle-text" id="togglePasswordText">Password required? (Optional)</span>
+              <span class="toggle-arrow" id="togglePasswordArrow">▾</span>
+            </button>
             <div id="openAttendancePasswordWrap" class="open-password-wrap hidden">
-              <input type="text" id="openAttendancePasswordInput" placeholder="Enter session password if required..." class="modern-input input-sm">
+              <div class="password-input-group">
+                <input type="password" id="openAttendancePasswordInput" placeholder="Enter session password if required..." class="modern-input input-sm" autocomplete="off">
+                <button type="button" id="toggleOpenPwdVisBtn" class="pwd-vis-btn" title="Show or hide password">👁️</button>
+              </div>
             </div>
+          </div>
 
-            <div class="open-banner-actions">
-              <button id="submitOpenAttendanceBtn" class="btn-primary-action btn-pill-md">
-                Submit Attendance (Present) &rarr;
-              </button>
-              <a id="openAttendancePageLink" href="https://spectrum.um.edu.my/mod/attendance/view.php" target="_blank" rel="noopener noreferrer" class="btn-secondary-action btn-pill-md">
-                View Page ↗
-              </a>
-            </div>
+          <!-- Interactive Action Buttons -->
+          <div class="open-banner-actions">
+            <button type="button" id="submitOpenAttendanceBtn" class="btn-primary-action btn-submit-interactive" title="Bring to attendance page and fill Present automatically">
+              <span class="submit-btn-icon" id="submitBtnIcon">⚡</span>
+              <span class="submit-btn-label" id="submitBtnLabel">Submit (Mark Present) &rarr;</span>
+              <span class="submit-btn-shine"></span>
+            </button>
+            <button type="button" id="copyAttendanceUrlBtn" class="btn-secondary-action btn-icon-only" title="Copy check-in link to clipboard">
+              <span id="copyUrlBtnIcon">📋</span>
+            </button>
+            <a id="openAttendancePageLink" href="https://spectrum.um.edu.my/mod/attendance/view.php" target="_blank" rel="noopener noreferrer" class="btn-secondary-action btn-pill-md" title="View attendance history on SPeCTRUM">
+              View Page ↗
+            </a>
           </div>
         </div>
 
@@ -709,44 +805,19 @@
           </div>
         </div>
 
-        <!-- Cloud Relay Sync Card -->
-        <div class="bento-card">
-          <div class="card-header-clean">
-            <div>
-              <h3 class="card-main-title">24/7 Cloud Relay Sync</h3>
-              <p class="card-main-sub">Sync session token to external worker when browser is closed</p>
-            </div>
-            <label class="switch">
-              <input type="checkbox" id="cloudRelayToggle">
-              <span class="slider round"></span>
-            </label>
-          </div>
-
-          <div id="cloudRelayFields" class="nested-form-fields hidden">
-            <div class="form-group">
-              <label for="cloudRelayUrl" class="form-label">Worker Endpoint</label>
-              <input type="url" id="cloudRelayUrl" placeholder="https://spectra-relay.workers.dev/sync" class="modern-input">
-            </div>
-
-            <div class="form-group">
-              <label for="cloudRelaySecret" class="form-label">Secret Token</label>
-              <input type="password" id="cloudRelaySecret" placeholder="worker-auth-secret-key" class="modern-input">
-            </div>
-
-            <div class="action-btn-row flex-between">
-              <button id="syncCloudNowBtn" class="btn-secondary-action btn-pill-md">
-                Sync Now
-              </button>
-              <span id="lastCloudSyncLabel" class="field-hint">Never synced</span>
-            </div>
-          </div>
-        </div>
-
         <!-- Notification Preferences & Frequency -->
         <div class="bento-card">
           <h3 class="card-section-title">Preferences</h3>
 
           <div class="checkbox-row margin-top-xs">
+            <label class="checkbox-container">
+              <input type="checkbox" id="prefAttendanceOpen" checked>
+              <span class="checkmark"></span>
+              <span class="checkbox-label">Telegram Alert When Attendance Opens</span>
+            </label>
+          </div>
+
+          <div class="checkbox-row">
             <label class="checkbox-container">
               <input type="checkbox" id="prefAnnouncements" checked>
               <span class="checkmark"></span>
@@ -781,6 +852,20 @@
           </button>
         </div>
 
+        <!-- Support & Donations Bento Card -->
+        <div class="bento-card" id="donationCard" style="text-align: center; border-color: #FECDD3; background: linear-gradient(145deg, #FFFFFF 0%, #FFF5F5 100%); margin-top: 12px;">
+          <div style="font-size: 24px; margin-bottom: 2px;">☕</div>
+          <h3 class="card-main-title" style="color: #9F1239; margin-bottom: 4px;">Support Spectra</h3>
+          <p class="card-main-sub" style="margin-bottom: 12px; font-size: 11.5px; line-height: 1.4;">
+            Spectra is an independent open-source project made with ❤️ for Universiti Malaya students.
+          </p>
+          <div style="display: flex; flex-direction: column; align-items: center; justify-content: center; margin: 6px 0;">
+            <img src="assets/duitnow-qr.png" alt="DuitNow QR" style="width: 170px; max-width: 100%; border-radius: 12px; border: 1.5px solid #FDA4AF; box-shadow: 0 4px 14px rgba(244, 63, 94, 0.15); padding: 4px; background: #FFFFFF;" />
+            <span style="font-size: 11.5px; font-weight: 700; color: #BE123C; margin-top: 8px;">Scan via DuitNow QR</span>
+            <span style="font-size: 10px; color: var(--text-muted); margin-top: 2px;">Touch 'n Go • Maybank MAE • GrabPay • ShopeePay • Bank Apps</span>
+          </div>
+        </div>
+
       </main>
     </div>
 
@@ -811,6 +896,7 @@
       <div class="footer-utility-row">
         <a href="https://spectrum.um.edu.my/" target="_blank" class="footer-chip-btn">SPeCTRUM ↗</a>
         <a href="https://t.me/" target="_blank" class="footer-chip-btn">Telegram Bot</a>
+        <button type="button" id="footerDonateBtn" class="footer-chip-btn" style="color: #BE123C; font-weight: 700;">☕ Donate</button>
         <button type="button" id="footerDemoBtn" class="footer-chip-btn">Demo Mode</button>
       </div>
     </footer>

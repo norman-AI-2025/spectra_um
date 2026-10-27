@@ -1498,6 +1498,72 @@ export function calculateAcademicWeek(semesterStartDateStr = null) {
 }
 
 /**
+ * Extracts all occurrence and group numbers declared in a string.
+ * Handles:
+ * - Hyphen/slash/comma separated lists: "(OCC3-OCC5-OCC8-OCC9)", "OCC 1, 2, 3", "OCC1/OCC2"
+ * - Ranges: "OCC 1 - OCC 4", "OCC 1-4", "OCC 1 to 4", "Group 1-3"
+ * - Multi-tokens: "Attendance Lecture Group 2 (OCC3-OCC5-OCC8-OCC9)" -> [2, 3, 5, 8, 9]
+ * - Standalone numbers or pure digits: "01", "3", "Occ 2"
+ */
+export function extractAllOccurrenceNumbers(text) {
+  if (!text) return [];
+  const str = String(text).toLowerCase();
+  const numbers = new Set();
+
+  // 1. Check for explicit ranges: e.g. "occ 1 to 4", "occ 1 to occ 4", "group 1 hingga 3", or "group 1-3" / "occ 1-4"
+  const rangeWordRegex = /\b(?:occ(?:urrence)?|kumpulan|kump|group|tut(?:orial)?|lecture\s+group|lec\s+group|kumpulan\s+kuliah)\s*#?\s*0*(\d+)\s*(?:to|hingga|sampai)\s*(?:(?:occ(?:urrence)?|kumpulan|kump|group|tut(?:orial)?|lecture\s+group|lec\s+group|kumpulan\s+kuliah)\s*#?\s*)?0*(\d+)\b/gi;
+  let rangeMatch;
+  while ((rangeMatch = rangeWordRegex.exec(str)) !== null) {
+    const start = parseInt(rangeMatch[1], 10);
+    const end = parseInt(rangeMatch[2], 10);
+    if (!isNaN(start) && !isNaN(end) && end >= start && end - start <= 20) {
+      for (let n = start; n <= end; n++) numbers.add(n);
+    }
+  }
+
+  // Pure hyphen range without prefix on second number: e.g. "group 1-3" or "occ 1-4" (not "occ3-occ5")
+  const hyphenRangeRegex = /\b(?:occ(?:urrence)?|kumpulan|kump|group|tut(?:orial)?)\s*#?\s*0*(\d+)\s*-\s*0*(\d+)\b(?!\s*-\s*(?:occ|group|kump|\d))/gi;
+  while ((rangeMatch = hyphenRangeRegex.exec(str)) !== null) {
+    const start = parseInt(rangeMatch[1], 10);
+    const end = parseInt(rangeMatch[2], 10);
+    if (!isNaN(start) && !isNaN(end) && end >= start && end - start <= 20) {
+      for (let n = start; n <= end; n++) numbers.add(n);
+    }
+  }
+
+  // 2. Check for tokens with explicit occurrence/group prefixes:
+  // e.g. "Group 2", "OCC3", "OCC5", "kumpulan 1", "tutorial 3", "Lecture Group 2"
+  const tokenRegex = /(?:\b(?:occ(?:urrence)?|kumpulan|kump|group|tut(?:orial)?|lecture\s+group|lec\s+group|kumpulan\s+kuliah)\s*#?\s*|\b[ktg]\s*#?\s*)0*(\d+)\b/gi;
+  let tokenMatch;
+  while ((tokenMatch = tokenRegex.exec(str)) !== null) {
+    const n = parseInt(tokenMatch[1], 10);
+    if (!isNaN(n)) numbers.add(n);
+  }
+
+  // 3. Check for lists following an occurrence prefix, e.g. "OCC 3, 5, 8, 9" or "OCC3-5-8-9"
+  const listAfterPrefixRegex = /\b(?:occ(?:urrence)?|kumpulan|kump|group|tut(?:orial)?|lecture\s+group|lec\s+group|kumpulan\s+kuliah)\s*#?\s*0*(\d+)(?:\s*[,/&-]\s*0*(\d+))+/gi;
+  let listMatch;
+  while ((listMatch = listAfterPrefixRegex.exec(str)) !== null) {
+    const subDigits = listMatch[0].match(/\b0*(\d+)\b/g);
+    if (subDigits) {
+      subDigits.forEach((d) => {
+        const n = parseInt(d, 10);
+        if (!isNaN(n)) numbers.add(n);
+      });
+    }
+  }
+
+  // 4. If the string is purely numeric or just a number with padding, e.g. "01", "1", "2"
+  const pureNumMatch = str.trim().match(/^0*(\d+)$/);
+  if (pureNumMatch) {
+    const n = parseInt(pureNumMatch[1], 10);
+    if (!isNaN(n)) numbers.add(n);
+  }
+
+  return Array.from(numbers);
+}
+
+/**
  * Matches a session's group/type string against a student's configured occurrence
  */
 export function matchesOccurrence(sessionGroup, studentOccurrence, sessionDescription = "", activityName = "") {
@@ -1508,6 +1574,8 @@ export function matchesOccurrence(sessionGroup, studentOccurrence, sessionDescri
  * Strict occurrence checker:
  * Ensures attendance is only filled/recorded for the student's respective occurrence.
  * - Universal groups ("All students", "Semua pelajar", empty) match everyone.
+ * - Multi-occurrence lecture groups (e.g. "Attendance Lecture Group 2 (OCC3-OCC5-OCC8-OCC9)")
+ *   match students enrolled in Group 2, OCC 3, OCC 5, OCC 8, or OCC 9.
  * - If session or activityName specifies a group (e.g. "Occ 1", "Occ 2") or mentions it in description,
  *   student must have configured that exact occurrence.
  * - If student has NOT configured an occurrence, group-specific sessions will NOT match.
@@ -1518,74 +1586,63 @@ export function isRespectiveOccurrence(sessionGroup, studentOccurrence, sessionD
   const actName = (activityName || "").trim().toLowerCase();
   const occ = (studentOccurrence || "").trim().toLowerCase();
 
-  // If student occurrence is not specified or 'all', matches everything for full auto-checkin
-  if (!occ || occ === "all") {
+  // If student occurrence is 'all', matches everything for full auto-checkin
+  if (occ === "all") {
     return true;
   }
 
-  // 1. If activityName explicitly declares a specific occurrence (e.g. "Tutorial Attendance Occ 2", "Attendance - Group 1")
-  const actHasOcc = actName && (/\bocc(?:urrence)?\s*\d+\b/i.test(actName) || /\bkumpulan\s*\d+\b/i.test(actName) || /\bgroup\s*\d+\b/i.test(actName) || /\btut(?:orial)?\s*\d+\b/i.test(actName));
-  if (actHasOcc) {
-    if (!occ) return false;
-    const occM = occ.match(/\b(?:occ|occurrence|kumpulan|group|tutorial|tut)\s*#?\s*(\d+)\b/i) || occ.match(/\b\d+\b/);
-    const actM = actName.match(/\b(?:occ|occurrence|kumpulan|group|tutorial|tut)\s*#?\s*(\d+)\b/i);
-    const occNum = occM ? (occM[1] || occM[0]) : null;
-    const actNum = actM ? actM[1] : null;
-    if (occNum && actNum && parseInt(occNum, 10) !== parseInt(actNum, 10)) {
-      // Activity specifically belongs to another occurrence!
+  const studentNumbers = extractAllOccurrenceNumbers(occ);
+  const hasStudentOcc = studentNumbers.length > 0 || Boolean(occ && occ !== "all");
+
+  // Step 1: Check Activity Name
+  // If activityName explicitly declares one or more occurrences / groups:
+  const actNumbers = extractAllOccurrenceNumbers(actName);
+  if (actNumbers.length > 0) {
+    if (!hasStudentOcc) {
+      // Activity is group-specific, but student has no occurrence configured
+      return false;
+    }
+    // Student must match at least one of the occurrences declared in the activity name
+    const matchesAct = studentNumbers.some((n) => actNumbers.includes(n));
+    if (!matchesAct) {
+      // Activity specifically belongs to another occurrence / group!
       return false;
     }
   }
 
-  // 2. Detect if group or description specifies a specific occurrence or group number
+  // Step 2: Check Session Group and Session Description
   const groupIsUniversal = !group || group.includes("all students") || group.includes("semua pelajar") || group === "all";
-  const descHasOcc = desc && (/\bocc(?:urrence)?\s*\d+\b/i.test(desc) || /\bkumpulan\s*\d+\b/i.test(desc) || /\bgroup\s*\d+\b/i.test(desc) || /\btut(?:orial)?\s*\d+\b/i.test(desc));
 
-  // Determine target text for occurrence extraction
-  let targetText = "";
-  if (!groupIsUniversal) {
-    targetText = group;
-  } else if (descHasOcc) {
-    targetText = desc;
-  } else if (actHasOcc) {
-    targetText = actName;
-  }
+  // Check group column numbers (if not universal)
+  const groupNumbers = !groupIsUniversal ? extractAllOccurrenceNumbers(group) : [];
 
-  // Universal session (no specific group or occurrence in group, description, or activity name)
-  if (!targetText) {
+  // Check description numbers
+  const descNumbers = extractAllOccurrenceNumbers(desc);
+
+  const sessionNumbers = groupNumbers.length > 0 ? groupNumbers : descNumbers;
+
+  if (sessionNumbers.length > 0) {
+    if (!hasStudentOcc) {
+      // Session row is group-specific, but student has no occurrence configured
+      return false;
+    }
+    const matchesSession = studentNumbers.some((n) => sessionNumbers.includes(n));
+    if (!matchesSession) {
+      return false;
+    }
     return true;
   }
 
-  // Session is group-specific, but student has not configured an occurrence
-  if (!occ) {
-    return false;
+  // If group is not universal and had no numbers, check textual match
+  if (!groupIsUniversal && group) {
+    if (!hasStudentOcc) return false;
+    const safeOcc = occ.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+    const regex = new RegExp(`\\b${safeOcc}\\b`, "i");
+    return regex.test(group) || group.includes(occ);
   }
 
-  // Extract occurrence number specifically associated with occ/kumpulan/group/tutorial keywords if present
-  const occNumberMatch = targetText.match(/\b(?:occ|occurrence|kumpulan|group|tutorial|tut|kump|lec|kuliah|[ktgl])\s*#?\s*(\d+)\b/i);
-  let textNum = null;
-  if (occNumberMatch) {
-    textNum = occNumberMatch[1];
-  } else if (!groupIsUniversal && targetText === group) {
-    // If targetText is purely from group column (e.g. "1" or "01"), fallback to first digits
-    const m = targetText.match(/\b\d+\b/) || targetText.match(/\d+/);
-    if (m) textNum = m[0];
-  } else {
-    // If targetText had no occurrence keywords and group is universal, it is universal
-    return true;
-  }
-
-  const occDigits = occ.match(/\b(?:occ|occurrence|kumpulan|group|tutorial|tut|kump|lec|kuliah|[ktgl])\s*#?\s*(\d+)\b/i) || occ.match(/\b\d+\b/) || occ.match(/\d+/);
-  const studentNum = occDigits ? (occDigits[1] || occDigits[0]) : null;
-
-  if (studentNum && textNum) {
-    return parseInt(studentNum, 10) === parseInt(textNum, 10);
-  }
-
-  // If no numbers, require word boundary match
-  const safeOcc = occ.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
-  const regex = new RegExp(`\\b${safeOcc}\\b`, "i");
-  return regex.test(targetText);
+  // If session is universal, and activity either matched or had no occurrence:
+  return true;
 }
 
 /**

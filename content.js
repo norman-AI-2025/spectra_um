@@ -376,17 +376,11 @@
 
     try {
       const store = await chrome.storage.local.get([
-        "pref_auto_attendance",
+        "spectra_pending_autofill",
         "course_occurrences",
         "course_passwords",
         "recorded_attendance_sessids"
       ]);
-
-      const isAutoEnabled = store.pref_auto_attendance !== false;
-      if (!isAutoEnabled) {
-        console.log("[Spectra Content] Auto-attendance paused in user preferences.");
-        return;
-      }
 
       const currentUrl = window.location.href;
 
@@ -407,6 +401,9 @@
         handleCourseViewPage(store);
         return;
       }
+
+      // 4. PAGE: /my/ or /calendar/ (Dashboard & Upcoming Events)
+      handleGeneralUpcomingEvents(store);
     } catch (e) {
       console.warn("[Spectra Content] Error initializing in-page attendance:", e);
     }
@@ -478,6 +475,7 @@
     console.log("[Spectra Attendance] Active on attendance form page:", window.location.href);
 
     const sessidMatch = window.location.href.match(/sessid=(\d+)/);
+    const sessid = sessidMatch ? sessidMatch[1] : null;
 
     // Check if attendance is already recorded
     const bodyText = document.body ? document.body.innerText : "";
@@ -487,28 +485,40 @@
       bodyText.includes("Attendance has been recorded")
     ) {
       showSpectraToast("Attendance recorded as Present! ✅", "success");
-      if (sessidMatch) {
+      chrome.storage.local.remove(["spectra_pending_autofill"]).catch(() => {});
+      if (sessid) {
         chrome.runtime.sendMessage({
           action: "RECORD_ATTENDANCE_SUCCESS",
-          payload: { sessid: sessidMatch[1], status: "Present" }
+          payload: { sessid, status: "Present" }
         }).catch(() => { });
       }
       return;
     }
 
     // Find any saved course password
-    const passwordsMap = store.course_passwords || {};
-    let matchedPwd = "";
-    for (const val of Object.values(passwordsMap)) {
-      if (val && String(val).trim()) {
-        matchedPwd = String(val).trim();
-        break;
+    const pending = store.spectra_pending_autofill;
+    let matchedPwd = (pending && pending.password) ? pending.password : "";
+    if (!matchedPwd) {
+      const passwordsMap = store.course_passwords || {};
+      for (const val of Object.values(passwordsMap)) {
+        if (val && String(val).trim()) {
+          matchedPwd = String(val).trim();
+          break;
+        }
       }
     }
 
-    showSpectraToast("Submitting attendance as Present... ⏳", "info");
+    showSpectraToast("Spectra auto-filling Present and submitting attendance... ⏳", "info");
     const result = submitAttendanceDOM({ password: matchedPwd });
-    if (!result.success && result.requiresPassword) {
+    if (result.success) {
+      if (sessid) {
+        chrome.runtime.sendMessage({
+          action: "RECORD_ATTENDANCE_SUCCESS",
+          payload: { sessid, status: "Present", courseCode: pending?.courseCode }
+        }).catch(() => {});
+      }
+      chrome.storage.local.remove(["spectra_pending_autofill"]).catch(() => {});
+    } else if (result.requiresPassword) {
       showSpectraToast("Password required: please enter password and submit.", "warning");
     }
   }
@@ -516,64 +526,44 @@
   function handleAttendanceViewPage(store) {
     console.log("[Spectra Attendance] Active on attendance view page:", window.location.href);
 
-    function scanForOpenSessions() {
-      const submitLinks = document.querySelectorAll('a[href*="attendance.php?sessid="]');
-      if (submitLinks.length === 0) return false;
-
-      const preferredOcc = findPageOccurrence(store);
-
-      for (const link of submitLinks) {
-        const row = link.closest("tr");
-        const cells = row ? Array.from(row.querySelectorAll("td")) : [];
-        const groupText = cells.length >= 6 ? cells[2].innerText.trim() : "";
-        const description = cells.length >= 6 ? cells[3].innerText.trim() : (row?.innerText || "");
-        const linkText = link.innerText.trim();
-
-        if ((/submit|hantar|rekod/i.test(linkText) || /submit|hantar|rekod/i.test(row?.innerText || "")) &&
-          matchesPageOccurrence(groupText, description, preferredOcc)) {
-          const sessid = link.href.match(/sessid=(\d+)/)?.[1];
-          if (!sessid) continue;
-          sessionStorage.setItem("spectra_attendance_navigation", JSON.stringify({ sessid, timestamp: Date.now() }));
-          console.log("[Spectra Attendance] Open session detected! Navigating to form:", link.href);
-          showSpectraToast("Open attendance session found! Auto-submitting... 🚀", "success");
-          window.location.href = link.href;
-          return true;
-        }
+    // Check if attendance was just recorded or confirmed on this page
+    const bodyText = document.body ? document.body.innerText : "";
+    if (
+      bodyText.includes("Your attendance has been recorded") ||
+      bodyText.includes("Kehadiran anda telah direkodkan") ||
+      bodyText.includes("Attendance has been recorded")
+    ) {
+      showSpectraToast("Attendance recorded as Present! ✅", "success");
+      const navItem = sessionStorage.getItem("spectra_attendance_navigation");
+      let sessid = null;
+      if (navItem) {
+        try {
+          sessid = JSON.parse(navItem)?.sessid;
+        } catch (e) {}
       }
-      return false;
-    }
-
-    // Check immediately on page load
-    const found = scanForOpenSessions();
-
-    // If not found yet, set a gentle 10s poll to watch when lecturer opens it
-    if (!found) {
-      const watchInterval = setInterval(() => {
-        if (scanForOpenSessions()) {
-          clearInterval(watchInterval);
-        }
-      }, 10000);
+      if (sessid) {
+        chrome.runtime.sendMessage({
+          action: "RECORD_ATTENDANCE_SUCCESS",
+          payload: { sessid, status: "Present" }
+        }).catch(() => {});
+      }
+      chrome.storage.local.remove(["spectra_pending_autofill"]).catch(() => {});
     }
   }
 
   function handleCourseViewPage(store) {
+    // Check if there is an active check-in link without forcibly redirecting the user
     const directAttendanceLinks = document.querySelectorAll('a[href*="/mod/attendance/attendance.php?sessid="]');
-    const courseId = new URL(window.location.href).searchParams.get("id") || "";
-    const preferredOcc = findPageOccurrence(store, courseId);
-    for (const link of directAttendanceLinks) {
-      const activity = link.closest("li.activity, .activityinstance, div.activity");
-      const description = activity?.innerText || link.innerText;
-      if (!matchesPageOccurrence("", description, preferredOcc)) continue;
+    if (directAttendanceLinks.length > 0) {
+      console.log("[Spectra Attendance] Active check-in link spotted on course page.");
+    }
+  }
 
-      const sessid = link.href.match(/sessid=(\d+)/)?.[1];
-      if (!sessid) continue;
-      console.log("[Spectra Attendance] Matching attendance link found on course page:", link.href);
-      showSpectraToast("Active attendance link detected! Auto-navigating... 🚀", "success");
-      sessionStorage.setItem("spectra_attendance_navigation", JSON.stringify({ sessid, timestamp: Date.now() }));
-      setTimeout(() => {
-        window.location.href = link.href;
-      }, 500);
-      return;
+  function handleGeneralUpcomingEvents(store) {
+    // Check for any direct attendance check-in link without forcibly redirecting
+    const directLinks = document.querySelectorAll('a[href*="/mod/attendance/attendance.php?sessid="]');
+    if (directLinks.length > 0) {
+      console.log("[Spectra Attendance] Active check-in link spotted on dashboard.");
     }
   }
 
@@ -594,6 +584,58 @@
     return "";
   }
 
+  function extractAllOccurrenceNumbersContent(text) {
+    if (!text) return [];
+    const str = String(text).toLowerCase();
+    const numbers = new Set();
+
+    const rangeWordRegex = /\b(?:occ(?:urrence)?|kumpulan|kump|group|tut(?:orial)?|lecture\s+group|lec\s+group|kumpulan\s+kuliah)\s*#?\s*0*(\d+)\s*(?:to|hingga|sampai)\s*(?:(?:occ(?:urrence)?|kumpulan|kump|group|tut(?:orial)?|lecture\s+group|lec\s+group|kumpulan\s+kuliah)\s*#?\s*)?0*(\d+)\b/gi;
+    let rangeMatch;
+    while ((rangeMatch = rangeWordRegex.exec(str)) !== null) {
+      const start = parseInt(rangeMatch[1], 10);
+      const end = parseInt(rangeMatch[2], 10);
+      if (!isNaN(start) && !isNaN(end) && end >= start && end - start <= 20) {
+        for (let n = start; n <= end; n++) numbers.add(n);
+      }
+    }
+
+    const hyphenRangeRegex = /\b(?:occ(?:urrence)?|kumpulan|kump|group|tut(?:orial)?)\s*#?\s*0*(\d+)\s*-\s*0*(\d+)\b(?!\s*-\s*(?:occ|group|kump|\d))/gi;
+    while ((rangeMatch = hyphenRangeRegex.exec(str)) !== null) {
+      const start = parseInt(rangeMatch[1], 10);
+      const end = parseInt(rangeMatch[2], 10);
+      if (!isNaN(start) && !isNaN(end) && end >= start && end - start <= 20) {
+        for (let n = start; n <= end; n++) numbers.add(n);
+      }
+    }
+
+    const tokenRegex = /(?:\b(?:occ(?:urrence)?|kumpulan|kump|group|tut(?:orial)?|lecture\s+group|lec\s+group|kumpulan\s+kuliah)\s*#?\s*|\b[ktg]\s*#?\s*)0*(\d+)\b/gi;
+    let tokenMatch;
+    while ((tokenMatch = tokenRegex.exec(str)) !== null) {
+      const n = parseInt(tokenMatch[1], 10);
+      if (!isNaN(n)) numbers.add(n);
+    }
+
+    const listAfterPrefixRegex = /\b(?:occ(?:urrence)?|kumpulan|kump|group|tut(?:orial)?|lecture\s+group|lec\s+group|kumpulan\s+kuliah)\s*#?\s*0*(\d+)(?:\s*[,/&-]\s*0*(\d+))+/gi;
+    let listMatch;
+    while ((listMatch = listAfterPrefixRegex.exec(str)) !== null) {
+      const subDigits = listMatch[0].match(/\b0*(\d+)\b/g);
+      if (subDigits) {
+        subDigits.forEach((d) => {
+          const n = parseInt(d, 10);
+          if (!isNaN(n)) numbers.add(n);
+        });
+      }
+    }
+
+    const pureNumMatch = str.trim().match(/^0*(\d+)$/);
+    if (pureNumMatch) {
+      const n = parseInt(pureNumMatch[1], 10);
+      if (!isNaN(n)) numbers.add(n);
+    }
+
+    return Array.from(numbers);
+  }
+
   function matchesPageOccurrence(groupText, description, studentOccurrence) {
     const group = String(groupText || "").trim().toLowerCase();
     const occurrence = String(studentOccurrence || "").trim().toLowerCase();
@@ -604,14 +646,17 @@
     if (!occurrence || occurrence === "all") return true;
 
     const universal = !group || group === "all" || group.includes("all students") || group.includes("semua pelajar");
-    const marker = /\b(?:occ(?:urrence)?|kumpulan|group|tutorial|tut)\s*#?\s*0*(\d+)\b/i;
-    const studentNumber = occurrence.match(marker) || occurrence.match(/\b0*(\d+)\b/);
-    const target = universal ? detail : group;
-    const targetNumber = target.match(marker) || (!universal ? target.match(/^\s*0*(\d+)\s*$/) : null);
 
-    if (universal && !targetNumber) return true;
-    if (!studentNumber || !targetNumber) return Boolean(occurrence && !universal && (group === occurrence || group.includes(occurrence)));
-    return parseInt(studentNumber[1] || studentNumber[0], 10) === parseInt(targetNumber[1] || targetNumber[0], 10);
+    const studentNumbers = extractAllOccurrenceNumbersContent(occurrence);
+    const targetNumbers = !universal ? extractAllOccurrenceNumbersContent(group) : extractAllOccurrenceNumbersContent(detail);
+
+    if (targetNumbers.length > 0) {
+      if (studentNumbers.length === 0) return false;
+      return studentNumbers.some((n) => targetNumbers.includes(n));
+    }
+
+    if (universal) return true;
+    return Boolean(occurrence && (group === occurrence || group.includes(occurrence)));
   }
 
   function showSpectraToast(message, type = "info") {

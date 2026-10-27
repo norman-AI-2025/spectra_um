@@ -66,7 +66,7 @@ export default {
         } = body;
 
         if (!sessionToken) {
-          return new Response(JSON.stringify({ error: "Missing sessionToken or cookie" }), {
+          return new Response(JSON.stringify({ error: "Missing sessionToken" }), {
             status: 400,
             headers: { "Content-Type": "application/json", ...corsHeaders }
           });
@@ -516,6 +516,58 @@ async function checkAndRecordCloudAttendance(env, sessionData) {
   return { checked: checkedCourses, recorded: recordedCount };
 }
 
+function extractAllOccurrenceNumbersWorker(text) {
+  if (!text) return [];
+  const str = String(text).toLowerCase();
+  const numbers = new Set();
+
+  const rangeWordRegex = /\b(?:occ(?:urrence)?|kumpulan|kump|group|tut(?:orial)?|lecture\s+group|lec\s+group|kumpulan\s+kuliah)\s*#?\s*0*(\d+)\s*(?:to|hingga|sampai)\s*(?:(?:occ(?:urrence)?|kumpulan|kump|group|tut(?:orial)?|lecture\s+group|lec\s+group|kumpulan\s+kuliah)\s*#?\s*)?0*(\d+)\b/gi;
+  let rangeMatch;
+  while ((rangeMatch = rangeWordRegex.exec(str)) !== null) {
+    const start = parseInt(rangeMatch[1], 10);
+    const end = parseInt(rangeMatch[2], 10);
+    if (!isNaN(start) && !isNaN(end) && end >= start && end - start <= 20) {
+      for (let n = start; n <= end; n++) numbers.add(n);
+    }
+  }
+
+  const hyphenRangeRegex = /\b(?:occ(?:urrence)?|kumpulan|kump|group|tut(?:orial)?)\s*#?\s*0*(\d+)\s*-\s*0*(\d+)\b(?!\s*-\s*(?:occ|group|kump|\d))/gi;
+  while ((rangeMatch = hyphenRangeRegex.exec(str)) !== null) {
+    const start = parseInt(rangeMatch[1], 10);
+    const end = parseInt(rangeMatch[2], 10);
+    if (!isNaN(start) && !isNaN(end) && end >= start && end - start <= 20) {
+      for (let n = start; n <= end; n++) numbers.add(n);
+    }
+  }
+
+  const tokenRegex = /(?:\b(?:occ(?:urrence)?|kumpulan|kump|group|tut(?:orial)?|lecture\s+group|lec\s+group|kumpulan\s+kuliah)\s*#?\s*|\b[ktg]\s*#?\s*)0*(\d+)\b/gi;
+  let tokenMatch;
+  while ((tokenMatch = tokenRegex.exec(str)) !== null) {
+    const n = parseInt(tokenMatch[1], 10);
+    if (!isNaN(n)) numbers.add(n);
+  }
+
+  const listAfterPrefixRegex = /\b(?:occ(?:urrence)?|kumpulan|kump|group|tut(?:orial)?|lecture\s+group|lec\s+group|kumpulan\s+kuliah)\s*#?\s*0*(\d+)(?:\s*[,/&-]\s*0*(\d+))+/gi;
+  let listMatch;
+  while ((listMatch = listAfterPrefixRegex.exec(str)) !== null) {
+    const subDigits = listMatch[0].match(/\b0*(\d+)\b/g);
+    if (subDigits) {
+      subDigits.forEach((d) => {
+        const n = parseInt(d, 10);
+        if (!isNaN(n)) numbers.add(n);
+      });
+    }
+  }
+
+  const pureNumMatch = str.trim().match(/^0*(\d+)$/);
+  if (pureNumMatch) {
+    const n = parseInt(pureNumMatch[1], 10);
+    if (!isNaN(n)) numbers.add(n);
+  }
+
+  return Array.from(numbers);
+}
+
 function matchesOccurrence(groupStr, studentOcc, descStr = "") {
   const targetOcc = String(studentOcc || "").trim().toLowerCase();
   if (!targetOcc || targetOcc === "all") return true;
@@ -525,17 +577,17 @@ function matchesOccurrence(groupStr, studentOcc, descStr = "") {
   // Strip task titles so "Tutorial 3 Submission" isn't treated as occurrence 3
   d = d.replace(/\b(?:tutorial|tut|lab|assignment|tugasan)\s+\d+\s+(?:submission|link|dropbox|box|handin|hantar|due)\b/gi, "");
   const universalGroup = !g || g === "all" || g.includes("all students") || g.includes("semua pelajar");
-  const occurrencePattern = /\b(?:occ(?:urrence)?|kumpulan|group|tutorial|tut)\s*#?\s*0*(\d+)\b/i;
-  const studentNumberMatch = targetOcc.match(occurrencePattern) || targetOcc.match(/\b0*(\d+)\b/);
-  const targetText = universalGroup ? d : g;
-  const targetNumberMatch = targetText.match(occurrencePattern) || (!universalGroup ? targetText.match(/^\s*0*(\d+)\s*$/) : null);
 
-  if (universalGroup && !targetNumberMatch) return true;
-  if (!studentNumberMatch || !targetNumberMatch) {
-    return Boolean(targetOcc && !universalGroup && (g === targetOcc || g.includes(targetOcc)));
+  const studentNumbers = extractAllOccurrenceNumbersWorker(targetOcc);
+  const targetNumbers = !universalGroup ? extractAllOccurrenceNumbersWorker(g) : extractAllOccurrenceNumbersWorker(d);
+
+  if (targetNumbers.length > 0) {
+    if (studentNumbers.length === 0) return false;
+    return studentNumbers.some((n) => targetNumbers.includes(n));
   }
-  return parseInt(studentNumberMatch[1] || studentNumberMatch[0], 10) ===
-    parseInt(targetNumberMatch[1] || targetNumberMatch[0], 10);
+
+  if (universalGroup) return true;
+  return Boolean(targetOcc && (g === targetOcc || g.includes(targetOcc)));
 }
 
 function isAttendanceWorkerActivity(title, url = "") {

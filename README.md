@@ -1,239 +1,179 @@
 # Spectra (SPeCTRUM Companion for Universiti Malaya)
 
-> **Modern Chrome Extension (Manifest V3) with 24/7 Cloud Relay & Instant Telegram Push Notifications**  
-> Tailored specifically for Universiti Malaya students navigating SPeCTRUM (Moodle).
+> **Modern, Local-First Chrome Extension (Manifest V3) for Universiti Malaya Students**  
+> *Never miss an attendance check-in, impending submission dropbox, or urgent course announcement again.*
 
 [![Manifest V3](https://img.shields.io/badge/Chrome_Extension-Manifest_V3-4285F4?logo=googlechrome&logoColor=white)](https://developer.chrome.com/docs/extensions/mv3/)
+[![Local First](https://img.shields.io/badge/Architecture-100%25_Local_Chrome-10B981?logo=googlechrome&logoColor=white)](#-privacy--local-first-security)
 [![Universiti Malaya](https://img.shields.io/badge/UM-SPeCTRUM-003366)](https://spectrum.um.edu.my/)
 [![License: MIT](https://img.shields.io/badge/License-MIT-green.svg)](LICENSE)
 [![Donate: DuitNow](https://img.shields.io/badge/Donate-DuitNow_QR-ED1C24.svg)](#-support--donations)
 [![Telegram Bot API](https://img.shields.io/badge/Telegram-Bot_API-26A5E4?logo=telegram&logoColor=white)](https://core.telegram.org/bots/api)
-[![Cloudflare Workers](https://img.shields.io/badge/Cloudflare-Workers_KV-F38020?logo=cloudflare&logoColor=white)](https://workers.cloudflare.com/)
+
+---
+
+## 📑 Table of Contents
+
+- [Overview](#-overview)
+- [Key Features](#-key-features)
+  - [1. Interactive Attendance & 1-Click Check-In](#1-interactive-attendance--1-click-check-in)
+  - [2. Submissions Radar (3-Tier Interactive Color System)](#2-submissions-radar-3-tier-interactive-color-system)
+  - [3. Course Announcements & Notices Radar](#3-course-announcements--notices-radar)
+  - [4. 1-Click Week Pack Downloader](#4-1-click-week-pack-downloader)
+  - [5. Privacy & Local-First Security](#5-privacy--local-first-security)
+- [Quick Setup Guide (Under 3 Minutes)](#-quick-setup-guide-under-3-minutes)
+  - [Step 1: Download the Extension](#step-1-download-the-extension)
+  - [Step 2: Load into Google Chrome](#step-2-load-into-google-chrome)
+  - [Step 3: Connect to SPeCTRUM & Set Occurrences](#step-3-connect-to-spectrum--set-occurrences)
+  - [Step 4: Enable Phone Telegram Alerts](#step-4-enable-phone-telegram-alerts)
+- [Project Architecture](#-project-architecture)
+- [Frequently Asked Questions (FAQ)](#-frequently-asked-questions-faq)
+- [Support & Donations (DuitNow QR)](#-support--donations)
+- [License](#-license)
+
+---
+
+## 🎯 Overview
+
+**Spectra** is an intelligent companion extension designed specifically for Universiti Malaya (UM) students navigating SPeCTRUM (Moodle).
+
+Built strictly as a **pure local Chrome Extension (Manifest V3)**, Spectra runs directly inside your browser without needing external cloud functions, serverless workers, or third-party databases. It eliminates the everyday friction of university portals:
+
+- **Attendance check-in detection**: Notifies you the second attendance opens for your specific tutorial or lecture occurrence.
+- **Semi-automated check-in**: Instead of navigating multiple menus, click **Submit (Mark Present)** in Spectra; it auto-navigates to the check-in form, selects *Present / Hadir*, fills the password (if required), submits the form, and updates the popup in real time.
+- **Interactive submissions radar**: Tracks all assignments, quizzes, Turnitin submissions, and workshops with a dynamic 3-color tier system (Green for submitted, Yellow for pending, Red for under 24 hours).
+- **Telegram push notifications**: Sends instant alerts directly to your mobile phone when attendance opens or deadlines approach.
 
 ---
 
 ## ⚡ Key Features
 
-1. **📢 24/7 Course Announcements & Forum Radar:**
-   - Continuously monitors lecturer announcements across all your enrolled courses.
-   - Pushes instant alerts to your phone via **Telegram** so you never miss a cancelled class, venue change, or exam notice.
-   - Includes a dedicated **Notices** tab in the extension with instant search and course filters.
+### 1. Interactive Attendance & 1-Click Check-In
 
-2. **⏰ Top-to-Bottom Submission Deadlines & Occurrence Filter:**
-   - **Moodle AJAX & Full Course Discovery:** Fast pure JSON extraction via Moodle's native `core_course_get_contents` AJAX service, combined with Assignment Overview (`/mod/assign/index.php`) and top-to-bottom page scanning (`/course/view.php`) to catch all dropboxes, online quizzes, workshops, and Turnitin assignments—including bottom project dropboxes in Week 14.
-   - **Respective Occurrence Filtering:** Group-specific assignments (e.g. *Lab 1 Occ 2*) are strictly excluded if you are in *Occ 1*, while universal assignments (*All students*) and your group's submissions are included.
-   - **Permanent iCal Feed Integration (Zero Cookie Expiry):** Synchronizes with your SPeCTRUM calendar export feed (`.ics`), allowing the 24/7 Cloudflare Worker to track and alert on impending deadlines indefinitely even when your browser session expires.
-   - **Urgency Badges & < 24h Alerts:** Automatically flags submissions due within 24 hours (`urgent`), this week, or upcoming. Dispatches urgent phone alerts via Telegram before deadlines close.
-   - **Submission Tracking:** Detects if an assignment has already been submitted on SPeCTRUM, with persistent checkboxes to mark completed work.
-
-3. **📊 Live Attendance & Intelligent Auto-Checkin:**
-   - **Full Discovery (Moodle AJAX & Top-to-Bottom):** Automatically discovers all attendance instances across your courses via `core_course_get_contents` and multi-section scans.
-   - **All Tabs Inspected (`view=5`) & Gradebook Integration:** Queries the universal **All** tab and group tabs, with Gradebook user report integration for instant overall score and percentage summaries.
-   - **Past Till Current Date Only:** Automatically displays sessions from the semester start up to the current date. Shows scheduled sessions for today (even if scheduled for later in the day), while excluding unrecorded future sessions.
-   - **Strict Occurrence Auto-Checkin:** When check-in opens, Spectra auto-records your attendance as *Present* **strictly for your registered occurrence (e.g. Occ 1, Occ 2)**.
-   - **Passcode Support & Telegram Confirmations:** Automatically submits teacher passwords if configured, or sends a Telegram alert requesting the password if required.
-
-4. **📦 One-Click Week Pack Downloader:**
-   - Automatically discovers and categorizes lecture slides, lab sheets, and tutorial worksheets by week (Week 1 to Week 14).
-   - Generates neatly structured downloads: `Downloads/Spectra/{Course_Code}/Week_{N}/`.
-
-5. **☁️ 24/7 Cloud Relay (Hybrid Architecture with Permanent iCal):**
-   - Works hand-in-hand with the Chrome extension.
-   - When your laptop is open, the extension gives you a fast, responsive desktop hub with auto-attendance and deadline filters.
-   - When your laptop is sleeping, turned off, or you are away from your desk, a lightweight Cloudflare Worker monitors announcements, auto-submits attendance, and continues sending deadline alerts via permanent iCal feeds even across session cookie expirations.
+- **Occurrence Isolation:** Filters class sessions strictly for your enrolled occurrence (e.g. `Occ 1`, `Occ 2`, `Group 1`, `Tutorial 3`). You will never see or accidentally check into another group's attendance.
+- **Live Radar Beacon:** When attendance opens for your occurrence, an interactive submission container lights up with a pulsing live beacon (`ATTENDANCE OPEN`).
+- **Semi-Automated 1-Click Submit:** Click **`⚡ Submit (Mark Present) →`**. Spectra opens the attendance page in SPeCTRUM, automatically selects **Present / Hadir**, enters the class passcode if required, and submits the form.
+- **Instant Real-Time Popup Update:** As soon as attendance is confirmed on SPeCTRUM, Spectra's popup automatically updates to show **Present ✅** without needing a manual refresh.
+- **Telegram Open Alert Toggle:** Includes a quick toggle button (`Telegram Open Alert`) to enable or disable mobile alerts whenever attendance opens for your group.
+- **Passcode Accordion:** Easily enter or view session passwords in an expandable drawer before submitting.
+- **Attendance History & Analytics:** Tracks your semester check-in rate, present/late/absent counts, and points breakdown.
 
 ---
 
-## 💻 Setup Guide on a Brand New Laptop
+### 2. Submissions Radar (3-Tier Interactive Color System)
 
-Follow this complete step-by-step walkthrough to get Spectra up and running on a fresh computer in under 5 minutes.
+- **Top-to-Bottom Course Discovery:** Automatically scans Moodle via native AJAX (`core_course_get_contents`), Assignment Overviews (`/mod/assign/index.php`), and course pages (`/course/view.php`) to capture all dropboxes, online quizzes, workshops, and Turnitin submissions—including Week 14 final project dropboxes.
+- **Occurrence Filtering:** Strictly excludes submissions belonging to other tutorial groups while keeping universal assignments and your group's dropboxes.
+- **Interactive 3-Tier Color Hierarchy:**
+  - 🟢 **Green (`.card-state-submitted`): Submitted / Completed**
+    - Soft mint-emerald surface gradient with a bold green accent edge.
+    - Badged with `✓ Submitted` and emerald status beacon.
+    - Interactive custom checkbox checked.
+  - 🟡 **Yellow (`.card-state-pending`): Pending**
+    - Warm amber gradient with an amber accent edge.
+    - Badged with `⏳ Pending` or `🟡 This Week` (displays overdue days if past due date).
+    - Status chip labeled `Pending Submission`.
+  - 🔴 **Red (`.card-state-urgent`): Under 24 Hours**
+    - Vibrant rose surface gradient with an alert rose accent edge.
+    - Badged with `< 24h Left` and live pulsing radar ring.
+    - Live ticking countdown pill: `⚡ Xh Ym left`.
+- **Tactile Micro-Interactions:** Cards elevate on hover (`transform: translateY(-2px)`) with glowing state-colored drop shadows. Checkboxes feature smooth scale-pop animations (`scale(1.08)` on hover, `scale(1.05)` when checked), immediately flipping the card between states.
+- **Direct Dropbox Jump:** Tactical pill buttons link directly to each assignment's SPeCTRUM submission page.
+
+---
+
+### 3. Course Announcements & Notices Radar
+
+- **Universal Forum Scraper:** Scrapes lecturer announcements and news forums across all enrolled subjects.
+- **Instant Search & Course Filter:** Quickly filter announcements by subject code or search for keywords like *"exam"*, *"cancelled"*, or *"replacement"*.
+- **Mobile Push Alerts:** Forwards new lecturer announcements straight to your phone via Telegram.
+
+---
+
+### 4. 1-Click Week Pack Downloader
+
+- Discovers lecture slides, lab sheets, and tutorial worksheets across your course pages.
+- Categorizes materials by week (Week 1 through Week 14) and downloads them in neatly structured folders:  
+  `Downloads/Spectra/{Course_Code}/Week_{N}/`
+
+---
+
+### 5. Privacy & Local-First Security
+
+- **100% Local Processing:** Runs entirely inside your Chrome browser using Manifest V3. No Cloudflare worker, external server, or database required.
+- **Zero Third-Party Tracking:** No student passwords, analytics, or cookies are ever transmitted to any third-party server.
+- **Automatic Session Discovery:** Uses standard Chrome cookie permissions to discover your active `MoodleSession` on `spectrum.um.edu.my`. No manual token copying required.
+
+---
+
+## 💻 Quick Setup Guide (Under 3 Minutes)
+
+Follow these steps to get Spectra running on your computer.
 
 ### **Prerequisites**
-- Any modern Chromium browser: **Google Chrome** (recommended), Brave, Microsoft Edge, or Arc.
-- An active Universiti Malaya student account on [SPeCTRUM](https://spectrum.um.edu.my/).
-- A free [Telegram](https://telegram.org/) account on your phone or computer (for push alerts).
-- A free [Cloudflare](https://dash.cloudflare.com/) account (for 24/7 background duties when your laptop is off).
+- **Google Chrome** (or Chromium-based browsers: Brave, Microsoft Edge, Arc).
+- An active Universiti Malaya student login on [SPeCTRUM](https://spectrum.um.edu.my/).
+- *(Optional)* A free [Telegram](https://telegram.org/) account for phone push alerts.
 
 ---
 
-### **Step 1: Download the Extension Code**
+### **Step 1: Download the Extension**
 
-Choose either Option A or Option B:
+#### **Option A: Using Git (Recommended)**
+```bash
+git clone https://github.com/norman-AI-2025/spectra_um.git
+cd spectra_um
+```
 
-#### **Option A: Using Git (Fastest & Easiest to Update)**
-1. Open your terminal (**Terminal** on macOS, **PowerShell** / **Git Bash** on Windows).
-2. Clone the repository and enter the directory:
-   ```bash
-   git clone https://github.com/norman-AI-2025/spectra_um.git
-   cd spectra_um
-   ```
-
-#### **Option B: Direct ZIP Download (No Git Required)**
-1. In your browser, open: [`https://github.com/norman-AI-2025/spectra_um`](https://github.com/norman-AI-2025/spectra_um).
+#### **Option B: Direct ZIP Download**
+1. Visit the repository on GitHub: [`https://github.com/norman-AI-2025/spectra_um`](https://github.com/norman-AI-2025/spectra_um).
 2. Click the green **Code** button and select **Download ZIP**.
-3. Extract the downloaded ZIP file to a permanent location on your laptop (for example: `Documents/spectra_um`).
+3. Extract the ZIP file to a permanent folder on your laptop (e.g. `Documents/spectra_um`).
 
 ---
 
-### **Step 2: Load Spectra into Chrome**
+### **Step 2: Load into Google Chrome**
 
-1. Open **Google Chrome**.
-2. In the URL address bar, enter:
+1. Open Chrome and navigate to:
    ```
    chrome://extensions/
    ```
-   *(Or click Chrome Menu ⋮ → Extensions → Manage Extensions)*.
-3. In the top-right corner, switch the **"Developer mode"** toggle to **ON**.
-4. In the top-left corner, click the **"Load unpacked"** button.
-5. In the file picker, select the `spectra_um` directory (the folder containing [`manifest.json`](file:///Users/normanlee/Documents/GitHub/spectra_um/manifest.json)).
-6. **Spectra is now installed!**
-7. Click the Chrome toolbar **puzzle icon** (Extensions) 🧩 and click the **Pin 📌** icon next to Spectra so it stays visible in your toolbar.
+2. In the top-right corner, toggle **Developer mode** to **ON**.
+3. In the top-left corner, click **Load unpacked**.
+4. In the file picker, select the `spectra_um` folder (the folder containing `manifest.json`).
+5. Click the Chrome toolbar **puzzle icon** (Extensions) 🧩 and **Pin 📌** Spectra so it stays visible in your toolbar.
 
 ---
 
-### **Step 3: Connect to SPeCTRUM & Configure Your Occurrences**
+### **Step 3: Connect to SPeCTRUM & Set Occurrences**
 
-> [!NOTE]
-> You **do NOT need to manually copy or paste your MoodleSession cookie**. Spectra securely discovers your active session automatically through standard Chrome browser cookie permissions.
-
-1. In Chrome, navigate to [SPeCTRUM](https://spectrum.um.edu.my/my/) and log in with your UM student credentials.
-2. Click the **Spectra** extension icon in your browser toolbar.
-3. Spectra will automatically detect your login, fetch your name, and list all your currently enrolled courses.
-4. **Set Your Tutorial / Lab Occurrence:**
-   - Click the **Attendance** tab in Spectra.
-   - In the **"Choose Course to Set Occurrence"** dropdown, select your course.
-   - Enter your registered occurrence number (e.g. `Occ 1`, `Occ 2`, `Group 1`) and click **Save**.
-   - Repeat for your other enrolled courses.
-5. **What this does:**
-   - Filters attendance sessions to strictly reflect your class group.
-   - Filters submission deadlines so you only see dropboxes relevant to your occurrence.
-   - Configures the auto-attendance bot to strictly check into your class sessions.
+1. Log into [SPeCTRUM](https://spectrum.um.edu.my/my/) in Chrome with your `@siswa.um.edu.my` account.
+2. Click the **Spectra** icon in your browser toolbar. Spectra will automatically detect your login and enrolled courses.
+3. **Configure Your Tutorial / Lab Occurrence:**
+   - Go to the **Attendance** tab in Spectra.
+   - Select your course from the dropdown.
+   - Enter your registered occurrence (e.g. `Occ 1`, `Occ 2`, `Group 1`) and click **Save**.
+   - Repeat for your other enrolled subjects.
 
 ---
 
-### **Step 4: Set Up Phone Telegram Alerts**
+### **Step 4: Enable Phone Telegram Alerts**
 
-Receive real-time push notifications on your phone whenever an instructor posts an announcement, when an assignment is due in less than 24 hours, or when an attendance check-in is recorded.
+Receive real-time push alerts on your phone whenever attendance opens for your occurrence, when an assignment is due in less than 24 hours, or when an instructor posts an announcement.
 
 1. **Create Your Telegram Bot:**
-   - Open Telegram on your phone or desktop.
-   - Search for [`@BotFather`](https://t.me/BotFather) (verified bot with blue checkmark) and send `/newbot`.
-   - Choose a display name (e.g. `My Spectra Bot`) and a username ending in `bot` (e.g. `norman_spectra_um_bot`).
-   - BotFather will reply with your **HTTP API Bot Token** (looks like `7123456789:ABCdefGhIJKlmNoPQRsTUVwxyZ`). Copy this token.
+   - Open Telegram and search for [`@BotFather`](https://t.me/BotFather).
+   - Send `/newbot` and follow the prompts to choose a name and username.
+   - BotFather will provide your **HTTP API Bot Token** (e.g. `7123456789:ABCdefGhIJKlmNoPQRsTUVwxyZ`). Copy it.
 2. **Find Your Telegram Chat ID:**
    - Search for [`@userinfobot`](https://t.me/userinfobot) on Telegram and send `/start`.
-   - It will reply with your numeric `Id` (e.g. `987654321`). Copy this number.
-   - Open your newly created bot in Telegram and click **Start** (or send any message like `hello`).
+   - Copy the numeric `Id` it replies with (e.g. `987654321`).
+   - Open your new bot in Telegram and click **Start** (or send any text).
 3. **Save in Spectra:**
-   - Open the Spectra extension → click the **Settings** tab.
+   - Open Spectra → click the **Settings** tab.
    - Paste your **Bot Token** and **Chat ID**.
-   - Click **"Send Test Telegram"** — you should immediately hear a ping on your phone!
-   - Scroll to the bottom and click **"Save Preferences"**.
-
----
-
-### **Step 5: Set Up 24/7 Cloud Relay on Cloudflare**
-
-To enable attendance auto-filling, deadline alerts, and announcement notifications even when your laptop is turned off or sleeping, set up your free Cloudflare Worker:
-
-1. **Sign Up / Log In to Cloudflare:**
-   - Go to [dash.cloudflare.com](https://dash.cloudflare.com/) (free tier).
-2. **Create the Worker Application:**
-   - **Method A (Recommended - Connected to Git):**
-     - Go to **Workers & Pages** → **Create application** → **Workers** tab → **Connect to Git**.
-     - Select your `spectra_um` repository. Cloudflare will read [`wrangler.toml`](file:///Users/normanlee/Documents/GitHub/spectra_um/wrangler.toml) and deploy the worker automatically.
-   - **Method B (Direct Paste / Web Editor):**
-     - Go to **Workers & Pages** → **Create application** → **Create Worker**.
-     - Name it `spectra_um-relay` and click **Deploy**.
-     - Click **Edit code**, select all text, and paste the code from [`cloud/cloud-relay-worker.js`](file:///Users/normanlee/Documents/GitHub/spectra_um/cloud/cloud-relay-worker.js).
-     - Click **Deploy** / **Save and Deploy**.
-3. **Create & Bind KV Storage:**
-   - In Cloudflare, navigate to **Workers & Pages** → **KV** → Click **Create namespace**.
-   - Namespace Name: `spectra_um-kv` → click **Add**.
-   - Navigate back to **Workers & Pages** → click your worker (`spectra_um-relay`) → **Settings** → **Bindings** (or **Variables and Bindings**).
-   - Under **KV Namespace Bindings**, click **Add**:
-     - Variable Name: `SPECTRA_KV` *(must be exact uppercase)*
-     - KV Namespace: select `spectra_um-kv`
-   - Click **Save and deploy**.
-4. **Configure Worker Environment Secrets:**
-   - In your worker's **Settings** → **Variables and Secrets**, click **Add** under **Environment Variables / Secrets**:
-     - `RELAY_SECRET_KEY`: any private password of your choice (e.g. `my-spectra_um-secret-2026`)
-     - `TELEGRAM_BOT_TOKEN`: your Telegram bot token from Step 4
-     - `TELEGRAM_CHAT_ID`: your numeric Telegram chat ID from Step 4
-   - Click **Save and deploy**.
-5. **Verify the 1-Minute Cron Trigger:**
-   - In worker **Settings** → **Triggers**, verify that a Cron Trigger `* * * * *` is active.
-   - *(If missing, click **Add Cron Trigger** and enter `* * * * *`)*.
-6. **Connect the Extension to Cloudflare:**
-   - Copy your worker URL (e.g. `https://spectra_um-relay.<your-subdomain>.workers.dev`).
-   - Open Spectra → **Settings** → toggle **"Enable Cloud Relay Sync"** to ON.
-   - **Worker / Lambda Endpoint:**
-     ```
-     https://spectra_um-relay.<your-subdomain>.workers.dev/sync
-     ```
-     *(Ensure `/sync` is included at the end)*.
-   - **Bearer Secret Token:** enter the `RELAY_SECRET_KEY` you created above.
-   - Click **"Sync Session Now"**.
-   - You will see the confirmation toast: *"MoodleSession synced to Cloud Relay!"*
-
----
-
-## 🔄 Updating Spectra in the Future
-
-When new features or bug fixes are released on GitHub:
-
-### If You Installed via Git:
-```bash
-cd spectra_um
-git pull origin main
-```
-Then open `chrome://extensions/` and click the **Reload ↻** button on the Spectra card.
-
-### If You Installed via ZIP:
-1. Download the updated ZIP from GitHub.
-2. Extract and replace the files in your `spectra_um` folder.
-3. Open `chrome://extensions/` and click **Reload ↻** on Spectra.
-
----
-
-## ❓ Frequently Asked Questions (FAQ)
-
-<details>
-<summary><b>1. Will using Cloudflare disable any features in my extension?</b></summary>
-<br>
-<b>No.</b> All extension features (1-Click slide downloads, popup UI, deadlines radar, dark mode, in-browser check-in) remain 100% functional. Cloudflare acts purely as an additive background companion when your computer is closed.
-</details>
-
-<details>
-<summary><b>2. What happens when my Moodle session expires?</b></summary>
-<br>
-Moodle sessions periodically expire after several days of inactivity. When this occurs:
-- The Spectra extension badge will indicate <i>Session Expired</i>.
-- If Cloudflare is running, it will send a friendly Telegram notice: <i>"Your UM SPeCTRUM session has expired. Please open SPeCTRUM in your browser to renew your login."</i>
-- Simply open <a href="https://spectrum.um.edu.my/my/">SPeCTRUM</a> in Chrome and log in. Spectra will automatically capture the renewed session and push it to Cloudflare.
-</details>
-
-<details>
-<summary><b>3. How does Spectra know which class attendance or deadline belongs to me?</b></summary>
-<br>
-In Step 3, you configure your occurrence (e.g. <code>Occ 1</code>). Spectra's matching engine isolates group headers, descriptions, and activity titles:
-- Sessions matching <code>Occ 1</code> or universal sessions (<code>All students</code>) are included.
-- Sessions for other occurrences (e.g. <code>Occ 2</code>) are strictly excluded from metrics, attendance calculations, and auto-submission.
-</details>
-
-<details>
-<summary><b>4. What if a lecturer sets an attendance password?</b></summary>
-<br>
-You can save known class attendance passwords per course in the <b>Attendance</b> tab. If a password is required and already configured, Spectra auto-fills it. If no password has been entered, Spectra pauses and sends a Telegram alert informing you that a passcode is required.
-</details>
-
-<details>
-<summary><b>5. How do I test that my Cloudflare worker is functioning?</b></summary>
-<br>
-In your browser, visit:
-<code>https://spectra_um-relay.&lt;your-subdomain&gt;.workers.dev/status</code> with your Authorization header, or click <b>"Sync Session Now"</b> in Spectra settings. You can also trigger a test poll via curl:
-<pre>curl -X POST https://spectra_um-relay.&lt;your-subdomain&gt;.workers.dev/poll -H "Authorization: Bearer &lt;your-secret-key&gt;"</pre>
-</details>
+   - Click **"Send Test Telegram"** to verify the connection.
+   - Scroll down and click **"Save Settings"**.
 
 ---
 
@@ -242,64 +182,83 @@ In your browser, visit:
 ```
 spectra_um/
 ├── manifest.json              # Chrome Manifest V3 declaration & permission boundaries
-├── popup.html                 # Apple Bento-grid dashboard (Deadlines, Notices, Attendance, Prep & Settings)
-├── popup.css                  # Curated styling, responsive layouts, micro-animations
-├── popup.js                   # Extension frontend controller & reactive state manager
-├── background.js              # Service worker, periodic alarms, cookie monitor, notifications
-├── wrangler.toml              # Cloudflare Worker configuration & 15-minute cron trigger
-├── package.json               # Cloudflare & Node runtime declaration
+├── popup.html                 # Apple Bento-grid dashboard (Submissions, Attendance, Notices, Settings)
+├── popup.css                  # Modern design system, state colors, micro-animations
+├── popup.js                   # Frontend controller, reactive state manager, 3-tier card renderer
+├── background.js              # Service worker, periodic attendance alarms, Telegram push dispatcher
+├── content.js                 # Content script for SPeCTRUM pages (semi-automated Present check-in)
+├── assets/
+│   └── duitnow-qr.png         # DuitNow QR code for donations
+├── icons/                     # Extension branding icons (16px, 32px, 48px, 128px)
 ├── utils/
-│   ├── moodleApi.js           # Dynamic CSRF sesskey discovery & live enrolled course scraper
-│   ├── calendar.js            # Live Moodle AJAX calendar pipeline & deadline deduplication
-│   ├── courses.js             # Live enrolled courses & course announcement forum scrapers
-│   ├── attendance.js          # Multi-activity attendance parser, all-tabs reader & auto-submitter
+│   ├── moodleApi.js           # Dynamic CSRF sesskey discovery & enrolled course scraper
+│   ├── calendar.js            # Live Moodle calendar pipeline & deadline deduplication
+│   ├── courses.js             # Live courses & course announcement forum scrapers
+│   ├── attendance.js          # Multi-activity attendance parser, all-tabs reader & check-in submitter
 │   ├── telegram.js            # Telegram Bot API dispatcher, formatting & sanitization
 │   └── parser.js              # DOM & RegEx parser for calendar, courses, forums, dropboxes, attendance
-├── icons/                     # Extension icons (16px, 32px, 48px, 128px)
 └── cloud/
-    ├── cloud-relay-worker.js  # Production Cloudflare Worker script for 24/7 background polling
-    ├── local-dev-server.py    # Local Python relay server for offline testing
-    ├── test-deadlines.js      # Unit tests for top-to-bottom dropboxes & occurrence filtering
-    ├── test-attendance.js     # Comprehensive test suite for attendance parsing & auto-checkin
-    ├── test-worker.js         # Cloudflare Worker endpoint & cron execution test suite
-    └── test-telegram.js       # Telegram dispatcher & entity escaping test suite
+    ├── test-deadlines.js      # Comprehensive unit tests for submissions & occurrence filtering
+    └── test-attendance.js     # Comprehensive test suite for attendance parsing & occurrence isolation
 ```
 
 ---
 
-## 🛡️ Privacy & Security
+## ❓ Frequently Asked Questions (FAQ)
 
-- **Direct Communication:** Spectra operates client-side directly between your browser, Universiti Malaya's official SPeCTRUM servers, and the Telegram Bot API.
-- **Zero Third-Party Tracking:** No passwords, cookies, or student analytics are sent to external third parties.
-- **Least-Privilege MV3 Security:** Uses only the minimal required browser permissions (`cookies` for session discovery on `spectrum.um.edu.my`, `storage` for local preferences, `alarms` for background timers, and `downloads` for class prep packs).
-- **Private Cloud Worker:** Your Cloudflare Worker runs entirely inside your personal Cloudflare account, protected by a Bearer secret token.
+<details>
+<summary><b>1. Does Spectra require Cloudflare or any cloud server?</b></summary>
+<br>
+<b>No.</b> Spectra is completely local and runs directly in your Chrome browser. There are no cloud dependencies or external relays required.
+</details>
 
----
+<details>
+<summary><b>2. How does the 1-click attendance check-in work?</b></summary>
+<br>
+When attendance is open for your occurrence, Spectra displays an interactive banner and sends a Telegram alert. Clicking <b>Submit (Mark Present)</b> opens the check-in page in SPeCTRUM. Spectra's content script automatically selects <i>Present / Hadir</i>, fills the password if required, and submits the form. The extension popup then immediately updates to reflect that attendance has been recorded.
+</details>
 
-## 🤝 Support & Feedback
+<details>
+<summary><b>3. How does Spectra know which class occurrence belongs to me?</b></summary>
+<br>
+In the Attendance tab, you configure your occurrence (e.g. <code>Occ 1</code>). Spectra's matching engine isolates group headers, descriptions, and activity titles:
+- Sessions matching <code>Occ 1</code> or universal sessions (<code>All students</code>) are included.
+- Sessions for other occurrences (e.g. <code>Occ 2</code>) are strictly excluded from metrics, attendance calculations, and alerts.
+</details>
 
-Encountering an issue or have a suggestion?
-- Open an [Issue](https://github.com/norman-AI-2025/spectra_um/issues) on GitHub.
-- Contributions and Pull Requests are welcome!
+<details>
+<summary><b>4. What if a lecturer sets an attendance password?</b></summary>
+<br>
+You can enter the session password in the password drawer inside the attendance banner before clicking Submit. Spectra will automatically fill the password into the form.
+</details>
+
+<details>
+<summary><b>5. Are my student credentials safe?</b></summary>
+<br>
+Yes. Spectra never sees or stores your password. It communicates directly with Universiti Malaya's official SPeCTRUM servers via your existing browser session cookie, stored safely on your machine.
+</details>
 
 ---
 
 ## ☕ Support & Donations
 
-Spectra is an independent open-source project created with ❤️ to empower Universiti Malaya students to stay on top of coursework, attendance, and deadlines.
+Spectra is an independent, open-source project created with ❤️ to empower Universiti Malaya students to stay on top of coursework, attendance, and deadlines.
 
-If Spectra saved you from an absent mark, helped you organize your semester lecture slides in one click, or alerted you to an urgent midnight submission, consider buying me a coffee or supporting future development!
+If Spectra saved you from an absent mark, alerted you to an urgent midnight submission, or helped you organize your semester materials, consider supporting ongoing maintenance and future development!
 
 <div align="center">
 
-<img src="assets/duitnow-qr.png" alt="DuitNow QR - Malaysia National QR" width="260" />
-
 <br>
 
-**Scan to support via DuitNow QR**  
-*Compatible with **Touch 'n Go eWallet**, **MAE by Maybank**, **GrabPay**, **ShopeePay**, **CIMB OCTO**, and all Malaysian Banking Apps.*
+<img src="assets/duitnow-qr.png" alt="DuitNow QR - Malaysia National QR" width="280" style="border-radius: 16px; box-shadow: 0 4px 20px rgba(0,0,0,0.15);" />
 
-Every contribution directly helps cover serverless relay hosting and supports ongoing feature development for UM students! ❤️
+<br><br>
+
+### **Scan to Support via DuitNow QR**
+*Compatible with all Malaysian Banking Apps & e-Wallets:*  
+**Touch 'n Go eWallet** • **MAE by Maybank** • **GrabPay** • **ShopeePay** • **CIMB OCTO** • **Bank Islam** • **Hong Leong Connect** • **Public Bank** • **RHB Mobile**
+
+Every contribution directly supports ongoing updates, bug fixes, and new features for UM students! ❤️
 
 </div>
 
@@ -307,7 +266,7 @@ Every contribution directly helps cover serverless relay hosting and supports on
 
 ## 📄 License
 
-This project is licensed
+This project is open-source and licensed under the [MIT License](LICENSE).
 
 ```text
 Copyright (c) 2026 Norman Lee
@@ -316,5 +275,9 @@ Permission is hereby granted, free of charge, to any person obtaining a copy
 of this software and associated documentation files (the "Software"), to deal
 in the Software without restriction, including without limitation the rights
 to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
-copies of the Software...
+copies of the Software, and to permit persons to whom the Software is
+furnished to do so, subject to the following conditions:
+
+The above copyright notice and this permission notice shall be included in all
+copies or substantial portions of the Software.
 ```

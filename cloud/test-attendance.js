@@ -59,6 +59,28 @@ assert(matchesOccurrence("Occ 2", "Occ 1") === false, "Occ 2 does not match Occ 
 assert(matchesOccurrence("Group 3", "Occ 1") === false, "Group 3 does not match Occ 1");
 assert(matchesOccurrence("Occ 1", "all") === true, "Any group matches 'all'");
 
+// Multi-occurrence Lecture Group Tests (e.g. FSKTM WIA2007 Attendance Lecture Group 2 (OCC3-OCC5-OCC8-OCC9))
+const multiOccTitle = "Attendance Lecture Group 2 (OCC3-OCC5-OCC8-OCC9)";
+assert(matchesOccurrence("", "Occ 3", "", multiOccTitle) === true, "MultiOcc: Matches student Occ 3");
+assert(matchesOccurrence("", "Occ 5", "", multiOccTitle) === true, "MultiOcc: Matches student Occ 5");
+assert(matchesOccurrence("", "Occ 8", "", multiOccTitle) === true, "MultiOcc: Matches student Occ 8");
+assert(matchesOccurrence("", "Occ 9", "", multiOccTitle) === true, "MultiOcc: Matches student Occ 9");
+assert(matchesOccurrence("", "3", "", multiOccTitle) === true, "MultiOcc: Matches student purely configured as 3");
+assert(matchesOccurrence("", "Group 2", "", multiOccTitle) === true, "MultiOcc: Matches student configured as Group 2");
+assert(matchesOccurrence("", "Occ 2", "", multiOccTitle) === true, "MultiOcc: Matches student configured as Occ 2");
+assert(matchesOccurrence("", "Occ 1", "", multiOccTitle) === false, "MultiOcc: Strictly excludes student in Occ 1");
+assert(matchesOccurrence("", "Occ 4", "", multiOccTitle) === false, "MultiOcc: Strictly excludes student in Occ 4");
+assert(matchesOccurrence("OCC3-OCC5-OCC8-OCC9", "Occ 3") === true, "MultiOcc: Group column matches Occ 3");
+assert(matchesOccurrence("OCC3-OCC5-OCC8-OCC9", "Occ 5") === true, "MultiOcc: Group column matches Occ 5");
+assert(matchesOccurrence("OCC3-OCC5-OCC8-OCC9", "Occ 1") === false, "MultiOcc: Group column excludes Occ 1");
+
+// Occurrence Range Tests
+assert(matchesOccurrence("OCC 1-4", "Occ 2") === true, "Range: OCC 1-4 matches Occ 2");
+assert(matchesOccurrence("OCC 1 - OCC 4", "Occ 4") === true, "Range: OCC 1 - OCC 4 matches Occ 4");
+assert(matchesOccurrence("OCC 1-4", "Occ 5") === false, "Range: OCC 1-4 excludes Occ 5");
+assert(matchesOccurrence("Group 1-3", "Group 2") === true, "Range: Group 1-3 matches Group 2");
+assert(matchesOccurrence("Group 1-3", "Group 4") === false, "Range: Group 1-3 excludes Group 4");
+
 // -------------------------------------------------------------
 // 2. parseAttendanceIndex Tests
 // -------------------------------------------------------------

@@ -356,6 +356,24 @@ export async function fetchCourseAttendance({ courseId, courseCode = "UM", sessk
 /**
  * Fetch and aggregate attendance across all enrolled courses
  */
+export function resolveCourseOccurrence(course, occurrencesMap = {}) {
+  if (!course || !occurrencesMap) return "";
+  if (course.id && occurrencesMap[course.id]) return occurrencesMap[course.id];
+  if (course.id && occurrencesMap[String(course.id)]) return occurrencesMap[String(course.id)];
+  if (course.code && occurrencesMap[course.code]) return occurrencesMap[course.code];
+  if (course.code && occurrencesMap[String(course.code).toUpperCase()]) return occurrencesMap[String(course.code).toUpperCase()];
+  if (course.shortname && occurrencesMap[course.shortname]) return occurrencesMap[course.shortname];
+
+  // Check all codes found in course.name or course.shortname (e.g. WIA2007/WIX3004)
+  const allText = `${course.code || ""} ${course.shortname || ""} ${course.name || ""}`;
+  const codes = allText.match(/\b[A-Z]{3,4}\s*\d{4}[A-Z]?\b/gi) || [];
+  for (const c of codes) {
+    const clean = c.replace(/\s+/g, "").toUpperCase();
+    if (occurrencesMap[clean]) return occurrencesMap[clean];
+  }
+  return "";
+}
+
 export async function fetchLiveAllAttendance(courses = [], sesskey, occurrencesMap = {}, referenceDate) {
   const records = [];
   const openSessions = [];
@@ -369,7 +387,7 @@ export async function fetchLiveAllAttendance(courses = [], sesskey, occurrencesM
   let coursesWithAttendance = 0;
 
   const settledResults = await pMap(courses, async (course) => {
-    const occ = occurrencesMap[course.id] || occurrencesMap[course.code] || "";
+    const occ = resolveCourseOccurrence(course, occurrencesMap);
     try {
       return await fetchCourseAttendance({
         courseId: course.id,
@@ -404,7 +422,7 @@ export async function fetchLiveAllAttendance(courses = [], sesskey, occurrencesM
     const course = courses[i];
     const record = settledRecords[i];
     if (!record) continue;
-    const occ = occurrencesMap[course.id] || occurrencesMap[course.code] || "";
+    const occ = resolveCourseOccurrence(course, occurrencesMap);
 
     records.push(record);
 
