@@ -57,7 +57,6 @@ export default {
           expires,
           domain,
           courses,
-          attendanceUrls,
           occurrences,
           passwords,
           sesskey,
@@ -67,7 +66,7 @@ export default {
         } = body;
 
         if (!sessionToken) {
-          return new Response(JSON.stringify({ error: "Missing sessionToken" }), {
+          return new Response(JSON.stringify({ error: "Missing sessionToken or cookie" }), {
             status: 400,
             headers: { "Content-Type": "application/json", ...corsHeaders }
           });
@@ -79,7 +78,6 @@ export default {
           domain: domain || "spectrum.um.edu.my",
           expires: expires || null,
           courses: courses || [],
-          attendanceUrls: attendanceUrls || body.attendance_urls || [],
           occurrences: occurrences || {},
           passwords: passwords || {},
           sesskey: sesskey || "",
@@ -123,7 +121,6 @@ export default {
         status: "online",
         hasSession: Boolean(record?.sessionToken),
         coursesCount: record?.courses?.length || 0,
-        attendanceUrlsCount: record?.attendanceUrls?.length || 0,
         updatedAt: record?.updatedAt ? new Date(record.updatedAt).toISOString() : null,
         cronSchedule: "Every 1 minute"
       }), {
@@ -267,56 +264,14 @@ async function runSpectrumPollingJob(env) {
  * 24/7 Cloud Attendance Scanner & Self-Checkin Routine
  */
 async function checkAndRecordCloudAttendance(env, sessionData) {
-  const { sessionToken, occurrences = {}, passwords = {} } = sessionData;
-  if (!sessionToken) {
+  const { sessionToken, courses = [], occurrences = {}, passwords = {} } = sessionData;
+  if (!courses || courses.length === 0) {
     return { checked: 0, recorded: 0 };
   }
-
-  let courses = Array.isArray(sessionData.courses) ? [...sessionData.courses] : [];
-  const directAttendanceUrls = Array.isArray(sessionData.attendanceUrls) ? [...sessionData.attendanceUrls] : [];
 
   const cookieHeader = `MoodleSession=${sessionToken}`;
   const botToken = env.TELEGRAM_BOT_TOKEN || sessionData.telegramToken;
   const chatId = env.TELEGRAM_CHAT_ID || sessionData.telegramChatId;
-
-  // Session & Course Recovery: If courses is empty, auto-discover enrolled courses from /my/
-  if (courses.length === 0) {
-    try {
-      const myRes = await fetch("https://spectrum.um.edu.my/my/", {
-        headers: { "Cookie": cookieHeader, "User-Agent": "Mozilla/5.0 Spectra-Relay/1.0" }
-      });
-      if (myRes.ok) {
-        const myHtml = await myRes.text();
-        const discoveredCourses = [];
-        const seenIds = new Set();
-        const cRegex = /href=["'][^"']*\/course\/view\.php\?id=(\d+)[^"']*["'][^>]*>([\s\S]*?)<\/a>/gi;
-        let cm;
-        while ((cm = cRegex.exec(myHtml)) !== null) {
-          const cid = cm[1];
-          if (cid === "1" || seenIds.has(cid)) continue;
-          seenIds.add(cid);
-          const rawText = cm[2].replace(/<[^>]+>/g, "").trim();
-          const codeM = rawText.match(/\b([A-Z]{3,4}\d{4})\b/i);
-          const code = codeM ? codeM[1].toUpperCase() : `C${cid}`;
-          discoveredCourses.push({ id: cid, code, name: rawText });
-        }
-        if (discoveredCourses.length > 0) {
-          courses = discoveredCourses;
-          sessionData.courses = discoveredCourses;
-          if (env.SPECTRA_KV) {
-            env.SPECTRA_KV.put("moodle_session", JSON.stringify(sessionData)).catch(() => {});
-          }
-        }
-      }
-    } catch (err) {
-      console.warn("[Spectra Relay] Auto-discovering courses from /my/ failed:", err);
-    }
-  }
-
-  // If courses is still empty and no direct attendance URLs, abort
-  if (courses.length === 0 && directAttendanceUrls.length === 0) {
-    return { checked: 0, recorded: 0 };
-  }
 
   let recordedSessids = new Set();
   if (env.SPECTRA_KV) {
@@ -329,249 +284,15 @@ async function checkAndRecordCloudAttendance(env, sessionData) {
   }
 
   let recordedCount = 0;
-  let checkedCount = 0;
-  const processedViewUrls = new Set();
+  let checkedCourses = 0;
 
-  // Helper to resolve course metadata from view page HTML
-  function resolveCourseMeta(viewHtml, fallbackCourseId = "", fallbackCourseCode = "") {
-    let courseId = fallbackCourseId;
-    let courseCode = fallbackCourseCode;
-
-    if (!courseId) {
-      const cLinkMatch = viewHtml.match(/href=["'][^"']*\/course\/view\.php\?id=(\d+)[^"']*/i);
-      if (cLinkMatch && cLinkMatch[1] !== "1") {
-        courseId = cLinkMatch[1];
-      }
-    }
-
-    if (courseId && !courseCode) {
-      const matched = courses.find(c => String(c.id) === String(courseId));
-      if (matched) courseCode = matched.code || matched.name;
-    }
-
-    if (!courseCode) {
-      const titleM = viewHtml.match(/<title>([^<]+)<\/title>/i);
-      const codeM = titleM ? titleM[1].match(/\b([A-Z]{3,4}\s*\d{4}[A-Z]?)\b/i) : null;
-      courseCode = codeM ? codeM[1].replace(/\s+/g, "").toUpperCase() : (courseId ? `Course ${courseId}` : "SPeCTRUM Class");
-    }
-
-    return { courseId, courseCode };
-  }
-
-  // Process a single attendance view page
-  async function processAttendanceView(rawViewUrl, presetCourseId = "", presetCourseCode = "") {
-    let viewUrl = rawViewUrl;
-    if (!viewUrl.startsWith("http")) {
-      viewUrl = `https://spectrum.um.edu.my/${viewUrl.replace(/^\//, "")}`;
-    }
-
-    const normalizedKey = viewUrl.split("?")[1] || viewUrl;
-    if (processedViewUrls.has(normalizedKey)) return;
-    processedViewUrls.add(normalizedKey);
-
-    const allViewUrl = viewUrl.includes("view=") ? viewUrl.replace(/view=\d+/, "view=5") : `${viewUrl}&view=5`;
-
-    const viewRes = await fetch(allViewUrl, {
-      headers: { "Cookie": cookieHeader, "User-Agent": "Mozilla/5.0 Spectra-Relay/1.0" }
-    });
-    if (!viewRes.ok) return;
-    const viewHtml = await viewRes.text();
-
-    const { courseId, courseCode } = resolveCourseMeta(viewHtml, presetCourseId, presetCourseCode);
-    const studentOcc = occurrences[courseId] || occurrences[courseCode] || occurrences[courseCode.toLowerCase()] || "";
-    const storedPwd = passwords[courseId] || passwords[courseCode] || passwords[courseCode.toLowerCase()] || "";
-
-    checkedCount++;
-
-    // Collect all open sessions on this view page
-    const rowRegex = /<tr[^>]*>([\s\S]*?)<\/tr>/gi;
-    let rowM;
-    const openSessions = [];
-
-    while ((rowM = rowRegex.exec(viewHtml)) !== null) {
-      const rowHtml = rowM[1];
-      const submitM = rowHtml.match(/href=["']([^"']*attendance\.php\?sessid=(\d+)[^"']*)["'][^>]*>([\s\S]*?)<\/a>/i) ||
-        rowHtml.match(/href=["']([^"']*attendance\.php\?[^"']*sessid=(\d+)[^"']*)["'][^>]*>([\s\S]*?)<\/a>/i);
-      if (!submitM) continue;
-
-      const submitUrl = submitM[1];
-      const sessid = submitM[2];
-      if (recordedSessids.has(sessid)) continue;
-
-      const cellRegex = /<td[^>]*>([\s\S]*?)<\/td>/gi;
-      const cells = [];
-      let cM;
-      while ((cM = cellRegex.exec(rowHtml)) !== null) {
-        cells.push(cM[1].replace(/<[^>]+>/g, "").trim());
-      }
-
-      const dateText = cells[0] || "Today";
-      const timeText = cells[1] || "";
-      const groupText = cells.length >= 5 ? cells[2] : "All students";
-      const descText = cells.length >= 5 ? cells[3] : (cells[2] || "Class Session");
-
-      openSessions.push({
-        submitUrl,
-        sessid,
-        dateText,
-        timeText,
-        groupText,
-        descText
-      });
-    }
-
-    if (openSessions.length === 0) return;
-
-    // Permissive Occurrence Matching on Open Sessions:
-    // If only one active session exists in the course, treat it as eligible even if group text does not strictly match studentOcc
-    // (avoiding false skips on general lectures, while skipping explicit occurrence conflicts like Occ 2 vs Occ 1)
-    const isOnlyActiveSession = (openSessions.length === 1);
-
-    for (const session of openSessions) {
-      const { submitUrl, sessid, dateText, timeText, groupText, descText } = session;
-      if (recordedSessids.has(sessid)) continue;
-
-      const matchesOcc = matchesOccurrence(groupText, studentOcc, descText);
-      const isConflicting = isConflictingOccurrence(groupText, studentOcc);
-
-      if (studentOcc && !matchesOcc) {
-        if (isConflicting || !isOnlyActiveSession) {
-          console.log(`[Spectra Relay] Skipping sessid=${sessid} (${groupText}) - occurrence mismatch.`);
-          continue;
-        }
-      }
-
-      const formTargetUrl = submitUrl.startsWith("http")
-        ? submitUrl
-        : `https://spectrum.um.edu.my/${submitUrl.replace(/^\//, "")}`;
-
-      const formRes = await fetch(formTargetUrl, {
-        headers: { "Cookie": cookieHeader, "User-Agent": "Mozilla/5.0 Spectra-Relay/1.0" }
-      });
-      if (!formRes.ok) continue;
-      const formHtml = await formRes.text();
-
-      const sesskeyM = formHtml.match(/name=["']sesskey["'][^>]*value=["']([^"']+)["']/i) ||
-        formHtml.match(/value=["']([^"']+)["'][^>]*name=["']sesskey["']/i) ||
-        formHtml.match(/"sesskey":"([^"]+)"/);
-      const formSesskey = sesskeyM ? sesskeyM[1] : (sessionData.sesskey || "");
-
-      const formSessidM = formHtml.match(/name=["']sessid["'][^>]*value=["']([^"']+)["']/i) ||
-        formHtml.match(/value=["']([^"']+)["'][^>]*name=["']sessid["']/i);
-      const formSessid = formSessidM ? formSessidM[1] : sessid;
-
-      // Extract Present radio status ID (case-insensitive present|hadir|^p\b)
-      const statusId = extractPresentStatusId(formHtml);
-      if (!statusId) {
-        console.warn(`[Spectra Relay] Could not determine Present status ID for sessid=${sessid}`);
-        continue;
-      }
-
-      const requiresPassword = /<input[^>]+name=["'](studentpassword|password)["']/i.test(formHtml);
-      if (requiresPassword && !storedPwd) {
-        if (botToken && chatId) {
-          try {
-            await dispatchTelegram(
-              botToken,
-              chatId,
-              `⚠️ <b>Spectra Cloud Relay: Attendance Password Required</b>\n` +
-              `<b>Course:</b> ${courseCode}\n` +
-              `<b>Session:</b> ${descText} (${dateText} ${timeText})\n` +
-              `Please enter the attendance password in Spectra settings.`
-            );
-          } catch (_) {}
-        }
-        continue;
-      }
-
-      let bodyStr = "";
-      if (typeof URLSearchParams !== "undefined") {
-        const postParams = new URLSearchParams();
-        postParams.append("sessid", formSessid);
-        postParams.append("sesskey", formSesskey);
-        postParams.append("mform_is_submitted", "1");
-        postParams.append("status", statusId);
-        postParams.append("submitbutton", "Save changes");
-        if (storedPwd) {
-          postParams.append("studentpassword", storedPwd);
-          postParams.append("password", storedPwd);
-        }
-        bodyStr = postParams.toString();
-      } else {
-        const parts = [
-          `sessid=${encodeURIComponent(formSessid)}`,
-          `sesskey=${encodeURIComponent(formSesskey)}`,
-          "mform_is_submitted=1",
-          `status=${encodeURIComponent(statusId)}`,
-          `submitbutton=${encodeURIComponent("Save changes")}`
-        ];
-        if (storedPwd) {
-          parts.push(`studentpassword=${encodeURIComponent(storedPwd)}`);
-          parts.push(`password=${encodeURIComponent(storedPwd)}`);
-        }
-        bodyStr = parts.join("&");
-      }
-
-      const postRes = await fetch("https://spectrum.um.edu.my/mod/attendance/attendance.php", {
-        method: "POST",
-        headers: {
-          "Cookie": cookieHeader,
-          "Content-Type": "application/x-www-form-urlencoded",
-          "User-Agent": "Mozilla/5.0 Spectra-Relay/1.0"
-        },
-        body: bodyStr
-      });
-
-      const postText = await postRes.text();
-      const redirectedToView = postRes.redirected && /\/mod\/attendance\/view\.php(?:\?|$)/i.test(postRes.url || "");
-      const confirmationText = /(?:your attendance has been (?:successfully )?recorded|attendance (?:has been|was) successfully recorded|kehadiran anda telah direkodkan|attendance recorded successfully)/i.test(postText);
-
-      if (postRes.ok && (redirectedToView || confirmationText)) {
-        recordedSessids.add(sessid);
-        recordedCount++;
-
-        if (botToken && chatId) {
-          try {
-            const timestamp = new Date().toLocaleString("en-MY", {
-              timeZone: "Asia/Kuala_Lumpur",
-              dateStyle: "medium",
-              timeStyle: "short"
-            });
-            await dispatchTelegram(
-              botToken,
-              chatId,
-              `✅ <b>Spectra Cloud Relay: Auto-Attendance Recorded!</b>\n` +
-              `<b>Course:</b> ${courseCode}\n` +
-              `<b>Session:</b> ${descText} (${dateText} ${timeText})\n` +
-              `<b>Occurrence:</b> ${studentOcc || "General"}\n` +
-              `<b>Status:</b> Present\n` +
-              `<b>Timestamp:</b> ${timestamp}\n` +
-              `<i>Submitted automatically 24/7 via Cloudflare Relay!</i>`
-            );
-          } catch (tgErr) {
-            console.error("[Spectra Relay] Telegram dispatch failed:", tgErr);
-          }
-        }
-      }
-    }
-  }
-
-  // 1. Query direct URLs from sessionData.attendanceUrls first
-  for (const directUrl of directAttendanceUrls) {
-    if (directUrl && typeof directUrl === "string") {
-      try {
-        await processAttendanceView(directUrl);
-      } catch (err) {
-        console.warn(`[Spectra Relay] Error processing direct attendance URL ${directUrl}:`, err);
-      }
-    }
-  }
-
-  // 2. Query enrolled courses via mod/attendance/index.php and fallback to course/view.php
   for (const course of courses) {
     const courseId = typeof course === "object" ? (course.id || course.courseId) : course;
     const courseCode = typeof course === "object" ? (course.code || courseId) : course;
     if (!courseId) continue;
+
+    const studentOcc = occurrences[courseId] || occurrences[courseCode] || "";
+    const storedPwd = passwords[courseId] || passwords[courseCode] || "";
 
     try {
       let viewMatches = [];
@@ -596,13 +317,195 @@ async function checkAndRecordCloudAttendance(env, sessionData) {
 
       if (viewMatches.length === 0) continue;
 
+      checkedCourses++;
+
       for (const rawMatch of viewMatches) {
         const urlMatch = rawMatch.match(/href=["']([^"']+)["']/i);
         if (!urlMatch) continue;
-        await processAttendanceView(urlMatch[1], courseId, courseCode);
+        let viewUrl = urlMatch[1];
+        if (!viewUrl.startsWith("http")) {
+          viewUrl = `https://spectrum.um.edu.my/${viewUrl.replace(/^\//, "")}`;
+        }
+
+        const allViewUrl = viewUrl.includes("view=") ? viewUrl.replace(/view=\d+/, "view=5") : `${viewUrl}&view=5`;
+
+        const viewRes = await fetch(allViewUrl, {
+          headers: { "Cookie": cookieHeader, "User-Agent": "Mozilla/5.0 Spectra-Relay/1.0" }
+        });
+        if (!viewRes.ok) continue;
+        const viewHtml = await viewRes.text();
+
+        const rowRegex = /<tr[^>]*>([\s\S]*?)<\/tr>/gi;
+        let rowM;
+        while ((rowM = rowRegex.exec(viewHtml)) !== null) {
+          const rowHtml = rowM[1];
+          const submitM = rowHtml.match(/href=["']([^"']*attendance\.php\?sessid=(\d+)[^"']*)["'][^>]*>([\s\S]*?)<\/a>/i);
+          if (!submitM) continue;
+
+          const submitUrl = submitM[1];
+          const sessid = submitM[2];
+
+          if (recordedSessids.has(sessid)) continue;
+
+          const cellRegex = /<td[^>]*>([\s\S]*?)<\/td>/gi;
+          const cells = [];
+          let cM;
+          while ((cM = cellRegex.exec(rowHtml)) !== null) {
+            cells.push(cM[1].replace(/<[^>]+>/g, "").trim());
+          }
+
+          const dateText = cells[0] || "Today";
+          const timeText = cells[1] || "";
+          const groupText = cells.length >= 6 ? cells[2] : "All students";
+          const descText = cells.length >= 6 ? cells[3] : cells[2] || "Class Session";
+
+          if (studentOcc && !matchesOccurrence(groupText, studentOcc, descText)) {
+            continue;
+          }
+
+          const formTargetUrl = submitUrl.startsWith("http")
+            ? submitUrl
+            : `https://spectrum.um.edu.my/${submitUrl.replace(/^\//, "")}`;
+
+          const formRes = await fetch(formTargetUrl, {
+            headers: { "Cookie": cookieHeader, "User-Agent": "Mozilla/5.0 Spectra-Relay/1.0" }
+          });
+          if (!formRes.ok) continue;
+          const formHtml = await formRes.text();
+
+          const sesskeyM = formHtml.match(/name=["']sesskey["'][^>]*value=["']([^"']+)["']/i) ||
+            formHtml.match(/value=["']([^"']+)["'][^>]*name=["']sesskey["']/i) ||
+            formHtml.match(/"sesskey":"([^"]+)"/);
+          const formSesskey = sesskeyM ? sesskeyM[1] : (sessionData.sesskey || "");
+
+          const formSessidM = formHtml.match(/name=["']sessid["'][^>]*value=["']([^"']+)["']/i) ||
+            formHtml.match(/value=["']([^"']+)["'][^>]*name=["']sessid["']/i);
+          const formSessid = formSessidM ? formSessidM[1] : sessid;
+
+          let statusId = null;
+          const inputStatusRegex = /<input[^>]*name=["']status["'][^>]*>/gi;
+          let inMatch;
+          while ((inMatch = inputStatusRegex.exec(formHtml)) !== null) {
+            const tagStr = inMatch[0];
+            const valM = tagStr.match(/value=["'](\d+)["']/i);
+            const idM = tagStr.match(/id=["']([^"']+)["']/i);
+            if (!valM) continue;
+            const val = valM[1];
+
+            let isPresent = false;
+            if (idM) {
+              const labelForRegex = new RegExp(`<label[^>]*for=["']${idM[1]}["'][^>]*>([\\s\\S]*?)<\\/label>`, "i");
+              const lMatch = formHtml.match(labelForRegex);
+              if (lMatch && /present|hadir|^p\b/i.test(lMatch[1].replace(/<[^>]+>/g, "").trim())) {
+                isPresent = true;
+              }
+            }
+            if (!isPresent) {
+              const afterInput = formHtml.substring(inputStatusRegex.lastIndex, inputStatusRegex.lastIndex + 300);
+              const nextLabelM = afterInput.match(/^[\s\S]*?<label[^>]*>([\s\S]*?)<\/label>/i);
+              if (nextLabelM && /present|hadir|^p\b/i.test(nextLabelM[1].replace(/<[^>]+>/g, "").trim())) {
+                isPresent = true;
+              }
+            }
+            if (!isPresent) {
+              const surrounding = formHtml.substring(Math.max(0, inMatch.index - 50), Math.min(formHtml.length, inMatch.index + 200));
+              if (/present|hadir/i.test(surrounding)) {
+                isPresent = true;
+              }
+            }
+            if (isPresent) {
+              statusId = val;
+              break;
+            }
+          }
+
+          if (!statusId) {
+            const anyRadio = formHtml.match(/name=["']status["'][^>]*value=["'](\d+)["']/i) ||
+              formHtml.match(/value=["'](\d+)["'][^>]*name=["']status["']/i) ||
+              formHtml.match(/<input[^>]+type=["']radio["'][^>]*value=["'](\d+)["']/i) ||
+              formHtml.match(/value=["'](\d+)["'][^>]*type=["']radio["']/i);
+            if (anyRadio) statusId = anyRadio[1];
+          }
+
+          if (!statusId) continue;
+
+          const requiresPassword = /<input[^>]+name=["'](studentpassword|password)["']/i.test(formHtml);
+          if (requiresPassword && !storedPwd) {
+            if (botToken && chatId) {
+              await dispatchTelegram(
+                botToken,
+                chatId,
+                `⚠️ <b>Spectra Cloud Relay: Attendance Password Required</b>\n` +
+                `<b>Course:</b> ${courseCode}\n` +
+                `<b>Session:</b> ${descText} (${dateText} ${timeText})\n` +
+                `Please enter the attendance password in Spectra settings.`
+              );
+            }
+            continue;
+          }
+
+          let bodyStr = "";
+          if (typeof URLSearchParams !== "undefined") {
+            const postParams = new URLSearchParams();
+            postParams.append("sessid", formSessid);
+            postParams.append("sesskey", formSesskey);
+            postParams.append("mform_is_submitted", "1");
+            postParams.append("status", statusId);
+            postParams.append("submitbutton", "Save changes");
+            if (storedPwd) {
+              postParams.append("studentpassword", storedPwd);
+              postParams.append("password", storedPwd);
+            }
+            bodyStr = postParams.toString();
+          } else {
+            const parts = [
+              `sessid=${encodeURIComponent(formSessid)}`,
+              `sesskey=${encodeURIComponent(formSesskey)}`,
+              "mform_is_submitted=1",
+              `status=${encodeURIComponent(statusId)}`,
+              `submitbutton=${encodeURIComponent("Save changes")}`
+            ];
+            if (storedPwd) {
+              parts.push(`studentpassword=${encodeURIComponent(storedPwd)}`);
+              parts.push(`password=${encodeURIComponent(storedPwd)}`);
+            }
+            bodyStr = parts.join("&");
+          }
+
+          const postRes = await fetch("https://spectrum.um.edu.my/mod/attendance/attendance.php", {
+            method: "POST",
+            headers: {
+              "Cookie": cookieHeader,
+              "Content-Type": "application/x-www-form-urlencoded",
+              "User-Agent": "Mozilla/5.0 Spectra-Relay/1.0"
+            },
+            body: bodyStr
+          });
+
+          const postText = await postRes.text();
+          const redirectedToView = postRes.redirected && /\/mod\/attendance\/view\.php(?:\?|$)/i.test(postRes.url || "");
+          const confirmationText = /(?:your attendance has been (?:successfully )?recorded|attendance (?:has been|was) successfully recorded|kehadiran anda telah direkodkan|attendance recorded successfully)/i.test(postText);
+          if (postRes.ok && (redirectedToView || confirmationText)) {
+            recordedSessids.add(sessid);
+            recordedCount++;
+
+            if (botToken && chatId) {
+              await dispatchTelegram(
+                botToken,
+                chatId,
+                `✅ <b>Spectra Cloud Relay: Auto-Attendance Recorded!</b>\n` +
+                `<b>Course:</b> ${courseCode}\n` +
+                `<b>Occurrence:</b> ${studentOcc || "General"}\n` +
+                `<b>Session:</b> ${descText} (${dateText} ${timeText})\n` +
+                `<b>Status:</b> Present\n` +
+                `<i>Submitted automatically 24/7 via Cloudflare Relay!</i>`
+              );
+            }
+          }
+        }
       }
     } catch (err) {
-      console.warn(`[Spectra Relay] Error checking attendance for course ${courseCode}:`, err);
+      console.warn(`[Spectra Relay] Error checking attendance for ${courseCode}:`, err);
     }
   }
 
@@ -610,67 +513,7 @@ async function checkAndRecordCloudAttendance(env, sessionData) {
     await env.SPECTRA_KV.put("recorded_sessids", JSON.stringify(Array.from(recordedSessids)));
   }
 
-  return { checked: checkedCount, recorded: recordedCount };
-}
-
-/**
- * Robust extraction of Present radio status ID (case-insensitive present|hadir|^p\b)
- */
-function extractPresentStatusId(formHtml) {
-  const statusRegex = /present|hadir|^p\b/i;
-
-  // 1. Check labels with for="id"
-  const labelMatches = formHtml.matchAll(/<label[^>]*for=["']([^"']+)["'][^>]*>([\s\S]*?)<\/label>/gi);
-  for (const lm of labelMatches) {
-    const labelFor = lm[1];
-    const labelText = lm[2].replace(/<[^>]+>/g, "").trim();
-    if (statusRegex.test(labelText)) {
-      const inputRegex = new RegExp(`<input[^>]*id=["']${labelFor}["'][^>]*>`, "i");
-      const inputMatch = formHtml.match(inputRegex);
-      if (inputMatch) {
-        const valM = inputMatch[0].match(/value=["'](\d+)["']/i);
-        if (valM) return valM[1];
-      }
-    }
-  }
-
-  // 2. Iterate all status input radio tags
-  const inputStatusRegex = /<input[^>]*name=["']status["'][^>]*>/gi;
-  let inMatch;
-  while ((inMatch = inputStatusRegex.exec(formHtml)) !== null) {
-    const tagStr = inMatch[0];
-    const valM = tagStr.match(/value=["'](\d+)["']/i);
-    const idM = tagStr.match(/id=["']([^"']+)["']/i);
-    if (!valM) continue;
-    const val = valM[1];
-
-    if (idM) {
-      const labelForRegex = new RegExp(`<label[^>]*for=["']${idM[1]}["'][^>]*>([\\s\\S]*?)<\\/label>`, "i");
-      const lMatch = formHtml.match(labelForRegex);
-      if (lMatch && statusRegex.test(lMatch[1].replace(/<[^>]+>/g, "").trim())) {
-        return val;
-      }
-    }
-
-    const afterInput = formHtml.substring(inputStatusRegex.lastIndex, inputStatusRegex.lastIndex + 300);
-    const nextLabelM = afterInput.match(/^[\s\S]*?<label[^>]*>([\s\S]*?)<\/label>/i);
-    if (nextLabelM && statusRegex.test(nextLabelM[1].replace(/<[^>]+>/g, "").trim())) {
-      return val;
-    }
-
-    const surrounding = formHtml.substring(Math.max(0, inMatch.index - 80), Math.min(formHtml.length, inMatch.index + 250));
-    const surroundingClean = surrounding.replace(/<[^>]+>/g, " ").replace(/\s+/g, " ").trim();
-    if (statusRegex.test(surroundingClean)) {
-      return val;
-    }
-  }
-
-  // Fallback: Pick first radio option
-  const anyRadio = formHtml.match(/name=["']status["'][^>]*value=["'](\d+)["']/i) ||
-    formHtml.match(/value=["'](\d+)["'][^>]*name=["']status["']/i) ||
-    formHtml.match(/<input[^>]+type=["']radio["'][^>]*value=["'](\d+)["']/i) ||
-    formHtml.match(/value=["'](\d+)["'][^>]*type=["']radio["']/i);
-  return anyRadio ? anyRadio[1] : null;
+  return { checked: checkedCourses, recorded: recordedCount };
 }
 
 function matchesOccurrence(groupStr, studentOcc, descStr = "") {
@@ -693,23 +536,6 @@ function matchesOccurrence(groupStr, studentOcc, descStr = "") {
   }
   return parseInt(studentNumberMatch[1] || studentNumberMatch[0], 10) ===
     parseInt(targetNumberMatch[1] || targetNumberMatch[0], 10);
-}
-
-function isConflictingOccurrence(groupStr, studentOcc) {
-  const g = String(groupStr || "").trim().toLowerCase();
-  const occ = String(studentOcc || "").trim().toLowerCase();
-  if (!occ || !g) return false;
-  const marker = /\b(?:occ(?:urrence)?|kumpulan|group|tutorial|tut)\s*#?\s*0*(\d+)\b/i;
-  const sM = occ.match(marker) || occ.match(/\b0*(\d+)\b/);
-  const gM = g.match(marker) || g.match(/\b0*(\d+)\b/);
-  if (sM && gM) {
-    const sNum = parseInt(sM[1] || sM[0], 10);
-    const gNum = parseInt(gM[1] || gM[0], 10);
-    if (!isNaN(sNum) && !isNaN(gNum) && sNum !== gNum) {
-      return true; // Explicitly different occurrence numbers
-    }
-  }
-  return false;
 }
 
 function isAttendanceWorkerActivity(title, url = "") {

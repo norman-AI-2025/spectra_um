@@ -478,8 +478,6 @@
     console.log("[Spectra Attendance] Active on attendance form page:", window.location.href);
 
     const sessidMatch = window.location.href.match(/sessid=(\d+)/);
-    const sessidInput = document.querySelector('input[name="sessid"]');
-    const sessid = sessidMatch ? sessidMatch[1] : (sessidInput?.value || "");
 
     // Check if attendance is already recorded
     const bodyText = document.body ? document.body.innerText : "";
@@ -489,15 +487,10 @@
       bodyText.includes("Attendance has been recorded")
     ) {
       showSpectraToast("Attendance recorded as Present! ✅", "success");
-      if (sessid) {
+      if (sessidMatch) {
         chrome.runtime.sendMessage({
           action: "RECORD_ATTENDANCE_SUCCESS",
-          payload: {
-            sessid,
-            courseCode: document.title.split(":")[0]?.trim() || "SPeCTRUM Class",
-            status: "Present",
-            sessionDescription: "In-Browser Attendance Check-In"
-          }
+          payload: { sessid: sessidMatch[1], status: "Present" }
         }).catch(() => { });
       }
       return;
@@ -511,19 +504,6 @@
         matchedPwd = String(val).trim();
         break;
       }
-    }
-
-    // Immediately notify background before submitAttendanceDOM() triggers navigation/unloads the DOM
-    if (sessid) {
-      chrome.runtime.sendMessage({
-        action: "RECORD_ATTENDANCE_SUCCESS",
-        payload: {
-          sessid,
-          courseCode: document.title.split(":")[0]?.trim() || "SPeCTRUM Class",
-          status: "Present",
-          sessionDescription: "In-Browser Attendance Check-In"
-        }
-      }).catch(() => {});
     }
 
     showSpectraToast("Submitting attendance as Present... ⏳", "info");

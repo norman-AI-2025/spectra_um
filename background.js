@@ -295,10 +295,6 @@ async function syncSessionToCloudRelay(sessionData, relayUrl, secretKey) {
 
     const store = await chrome.storage.local.get([
       "cached_courses",
-      "courses",
-      "spectrum_live_session",
-      "trackedAttendanceUrls",
-      "cached_attendance",
       "course_occurrences",
       "course_passwords",
       "moodle_session_key",
@@ -308,41 +304,11 @@ async function syncSessionToCloudRelay(sessionData, relayUrl, secretKey) {
       "calendar_ical_url"
     ]);
 
-    // Ensure courses falls back across store.cached_courses, store.courses, and store.spectrum_live_session?.courses
-    const rawCourses = (Array.isArray(store.cached_courses) && store.cached_courses.length > 0)
-      ? store.cached_courses
-      : ((Array.isArray(store.courses) && store.courses.length > 0)
-        ? store.courses
-        : (store.spectrum_live_session?.courses || []));
-
-    const courses = (rawCourses || []).map((c) => ({
-      id: String(c.id || c.courseId || ""),
-      code: c.code || c.shortname || String(c.id || ""),
-      name: c.name || c.fullname || ""
-    })).filter(c => c.id && c.id !== "1");
-
-    // Extract explicit attendance view URLs directly
-    const attendanceUrlsSet = new Set();
-    if (Array.isArray(store.trackedAttendanceUrls)) {
-      for (const u of store.trackedAttendanceUrls) {
-        if (typeof u === "string" && u.includes("/mod/attendance/view.php")) {
-          attendanceUrlsSet.add(u.trim());
-        }
-      }
-    }
-    if (Array.isArray(store.cached_attendance?.courses)) {
-      for (const cr of store.cached_attendance.courses) {
-        if (cr.viewUrl && typeof cr.viewUrl === "string") attendanceUrlsSet.add(cr.viewUrl.trim());
-        if (cr.attendanceUrl && typeof cr.attendanceUrl === "string") attendanceUrlsSet.add(cr.attendanceUrl.trim());
-        if (Array.isArray(cr.instances)) {
-          for (const inst of cr.instances) {
-            if (inst.viewUrl) attendanceUrlsSet.add(inst.viewUrl.trim());
-            if (inst.url) attendanceUrlsSet.add(inst.url.trim());
-          }
-        }
-      }
-    }
-    const attendanceUrls = Array.from(attendanceUrlsSet);
+    const courses = (store.cached_courses || []).map((c) => ({
+      id: String(c.id),
+      code: c.code || String(c.id),
+      name: c.name || ""
+    }));
 
     const cleanBase = (relayUrl || "").replace(/\/+(?:sync-cookie|sync)?\/?$/, "");
     const targetUrl = cleanBase ? `${cleanBase}/sync-cookie` : relayUrl;
@@ -356,10 +322,9 @@ async function syncSessionToCloudRelay(sessionData, relayUrl, secretKey) {
       sessionToken: sessionData.value,
       moodleSession: sessionData.value,
       expires: sessionData.expires,
-      sesskey: store.moodle_session_key || sessionData.sesskey || store.spectrum_live_session?.sesskey || "",
+      sesskey: store.moodle_session_key || "",
       calendarIcalUrl: store.calendarIcalUrl || store.calendar_ical_url || "",
       courses,
-      attendanceUrls,
       occurrences: store.course_occurrences || {},
       passwords: store.course_passwords || {},
       telegramToken: store.telegram_bot_token || "",
@@ -572,18 +537,9 @@ let lastAttendanceScanTime = 0;
 
 async function checkAutoAttendance() {
   const now = Date.now();
-  // Concurrency & rate-limiting guard: reset stuck lock (>120s), skip if running or throttled <25s
-  if (isAttendanceScanning) {
-    if (now - lastAttendanceScanTime > 120000) {
-      console.warn("[Spectra] Resetting stuck isAttendanceScanning lock (>120s).");
-      isAttendanceScanning = false;
-    } else {
-      console.log("[Spectra] Attendance scan skipped (already running).");
-      return;
-    }
-  }
-  if (now - lastAttendanceScanTime < 25000) {
-    console.log("[Spectra] Attendance scan throttled (<25s).");
+  // Concurrency & rate-limiting guard: skip if already running or ran < 25 seconds ago
+  if (isAttendanceScanning || (now - lastAttendanceScanTime < 25000)) {
+    console.log("[Spectra] Attendance scan skipped (already running or throttled <25s).");
     return;
   }
   isAttendanceScanning = true;
@@ -610,7 +566,6 @@ async function checkAutoAttendance() {
       "telegram_chat_id",
       "cached_courses",
       "courses",
-      "spectrum_live_session",
       "moodle_session"
     ]);
 
@@ -626,12 +581,8 @@ async function checkAutoAttendance() {
 
     // 2. Fetch list of user's active attendance links (from trackedAttendanceUrls or resolve dynamically)
     let trackedUrls = Array.isArray(store.trackedAttendanceUrls) ? [...store.trackedAttendanceUrls] : [];
-    let courses = (Array.isArray(store.cached_courses) && store.cached_courses.length > 0)
-      ? store.cached_courses
-      : ((Array.isArray(store.courses) && store.courses.length > 0)
-        ? store.courses
-        : (store.spectrum_live_session?.courses || []));
-    let sesskey = store.moodle_session?.sesskey || store.spectrum_live_session?.sesskey || store.verifiedSesskey || "";
+    let courses = store.cached_courses || store.courses || [];
+    let sesskey = store.moodle_session?.sesskey || store.verifiedSesskey || "";
 
     if (trackedUrls.length === 0 || !courses || courses.length === 0) {
       try {
@@ -647,9 +598,6 @@ async function checkAutoAttendance() {
         for (const course of courses) {
           const cid = course.id || course.courseId;
           if (!cid) continue;
-
-          let foundForCourse = false;
-          // Try /mod/attendance/index.php?id=${cid}
           try {
             const indexRes = await fetch(`https://spectrum.um.edu.my/mod/attendance/index.php?id=${encodeURIComponent(cid)}`, {
               credentials: "include"
@@ -662,31 +610,10 @@ async function checkAutoAttendance() {
                 if (uMatch) {
                   const fullUrl = uMatch[1].startsWith("http") ? uMatch[1] : `https://spectrum.um.edu.my/${uMatch[1].replace(/^\//, "")}`;
                   discoveredUrls.add(fullUrl);
-                  foundForCourse = true;
                 }
               }
             }
           } catch (_) { }
-
-          // Fallback: If mod/attendance/index.php had no attendance links, inspect /course/view.php?id=${cid} directly
-          if (!foundForCourse) {
-            try {
-              const courseRes = await fetch(`https://spectrum.um.edu.my/course/view.php?id=${encodeURIComponent(cid)}`, {
-                credentials: "include"
-              });
-              if (courseRes.ok) {
-                const courseHtml = await courseRes.text();
-                const matches = courseHtml.match(/href=["']([^"']*\/mod\/attendance\/view\.php\?[^"']*)["']/gi) || [];
-                for (const m of matches) {
-                  const uMatch = m.match(/href=["']([^"']+)["']/i);
-                  if (uMatch) {
-                    const fullUrl = uMatch[1].startsWith("http") ? uMatch[1] : `https://spectrum.um.edu.my/${uMatch[1].replace(/^\//, "")}`;
-                    discoveredUrls.add(fullUrl);
-                  }
-                }
-              }
-            } catch (_) { }
-          }
         }
         if (discoveredUrls.size > 0) {
           trackedUrls = Array.from(discoveredUrls);
@@ -858,23 +785,12 @@ async function checkAutoAttendance() {
           // Dispatch Telegram notification if configured
           if (store.telegram_bot_token && store.telegram_chat_id) {
             try {
-              let detectedCode = "SPeCTRUM Class";
-              const titleM = viewHtml.match(/<title>([^<]+)<\/title>/i);
-              if (titleM) {
-                const codeM = titleM[1].match(/\b([A-Z]{3,4}\s*\d{4}[A-Z]?)\b/i);
-                if (codeM) detectedCode = codeM[1].replace(/\s+/g, "").toUpperCase();
-              }
-              const nowFormatted = new Date().toLocaleString("en-MY", {
-                timeZone: "Asia/Kuala_Lumpur",
-                dateStyle: "medium",
-                timeStyle: "short"
-              });
               const html = formatAttendanceTelegram({
-                courseCode: detectedCode,
+                courseCode: "SPeCTRUM Class",
                 occurrence: "Auto",
                 status: "Present",
                 sessionDescription: "Headless Background Check-In",
-                time: nowFormatted,
+                time: "Just now",
                 success: true
               });
               await sendTelegramMessage(store.telegram_bot_token, store.telegram_chat_id, html);
@@ -1101,34 +1017,23 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
           const { sessid, courseCode, status = "Present", sessionDescription, url } = payload || {};
           const store = await chrome.storage.local.get([
             "recorded_attendance_sessids",
-            "submittedSessions",
             "telegram_bot_token",
             "telegram_chat_id"
           ]);
 
           const recorded = new Set(store.recorded_attendance_sessids || []);
-          const submitted = new Set(store.submittedSessions || []);
           if (sessid && !recorded.has(sessid)) {
             recorded.add(sessid);
-            submitted.add(sessid);
-            await chrome.storage.local.set({
-              recorded_attendance_sessids: Array.from(recorded),
-              submittedSessions: Array.from(submitted)
-            });
+            await chrome.storage.local.set({ recorded_attendance_sessids: Array.from(recorded) });
 
             if (store.telegram_bot_token && store.telegram_chat_id) {
               try {
-                const nowFormatted = new Date().toLocaleString("en-MY", {
-                  timeZone: "Asia/Kuala_Lumpur",
-                  dateStyle: "medium",
-                  timeStyle: "short"
-                });
                 const html = formatAttendanceTelegram({
                   courseCode: courseCode || "SPeCTRUM Class",
                   occurrence: "General",
                   status,
-                  sessionDescription: sessionDescription || "In-Browser Attendance Check-In",
-                  time: nowFormatted,
+                  sessionDescription: sessionDescription || "In-Page Auto-Checkin",
+                  time: "Just now",
                   success: true
                 });
                 await sendTelegramMessage(store.telegram_bot_token, store.telegram_chat_id, html);
