@@ -1540,8 +1540,8 @@ export function extractAllOccurrenceNumbers(text) {
     if (!isNaN(n)) numbers.add(n);
   }
 
-  // 3. Check for lists following an occurrence prefix, e.g. "OCC 3, 5, 8, 9" or "OCC3-5-8-9"
-  const listAfterPrefixRegex = /\b(?:occ(?:urrence)?|kumpulan|kump|group|tut(?:orial)?|lecture\s+group|lec\s+group|kumpulan\s+kuliah)\s*#?\s*0*(\d+)(?:\s*[,/&-]\s*0*(\d+))+/gi;
+  // 3. Check for lists following an occurrence prefix, e.g. "OCC 3, 5, 8, 9", "OCC 3, 4, 5, 6, and 7", or "OCC3-5-8-9"
+  const listAfterPrefixRegex = /\b(?:occ(?:urrence)?|kumpulan|kump|group|tut(?:orial)?|lecture\s+group|lec\s+group|kumpulan\s+kuliah)\s*#?\s*0*(\d+)(?:(?:\s*[,/&-]\s*|\s+(?:and|dan)\s*|\s*,\s*(?:and|dan)\s*)\s*0*(\d+))+/gi;
   let listMatch;
   while ((listMatch = listAfterPrefixRegex.exec(str)) !== null) {
     const subDigits = listMatch[0].match(/\b0*(\d+)\b/g);
@@ -2016,92 +2016,190 @@ export function parseAttendanceView(html, studentOccurrence = "", referenceDate 
       const doc = parser.parseFromString(html, "text/html");
 
       // Extract Sessions Table
-      const rows = doc.querySelectorAll("table.attlist tr, table.generaltable tr");
-      rows.forEach((tr, idx) => {
-        const cells = tr.querySelectorAll("td");
-        if (cells.length < 3) return; // Header or empty row
+      const tables = doc.querySelectorAll("table.attlist, table.generaltable");
+      tables.forEach((table) => {
+        let colDate = -1;
+        let colTime = -1;
+        let colGroup = -1;
+        let colDesc = -1;
+        let colStatus = -1;
+        let colPoints = -1;
+        let colRemarks = -1;
 
-        const dateText = cells[0]?.textContent?.trim() || "Session";
-        const timeText = cells[1]?.textContent?.trim() || "";
-        const groupText = cells.length >= 6 ? cells[2]?.textContent?.trim() || "All students" : "All students";
-        const descText = cells.length >= 6 ? cells[3]?.textContent?.trim() || "" : cells[2]?.textContent?.trim() || "";
-        const statusCell = cells.length >= 6 ? cells[4] : cells[3];
-        const pointsCell = cells.length >= 6 ? cells[5] : cells[4];
-        const remarksCell = cells.length >= 7 ? cells[6] : null;
+        const ths = table.querySelectorAll("th");
+        ths.forEach((th, i) => {
+          const h = th.textContent.trim().toLowerCase();
+          if (h.includes("date") || h.includes("tarikh")) colDate = i;
+          else if (h.includes("time") || h.includes("masa")) colTime = i;
+          else if (h.includes("group") || h.includes("kumpulan") || h.includes("type") || h.includes("jenis")) colGroup = i;
+          else if (h.includes("desc") || h.includes("keterangan") || h.includes("deskripsi")) colDesc = i;
+          else if (h.includes("status") || h.includes("keadaan")) colStatus = i;
+          else if (h.includes("point") || h.includes("mata") || h.includes("markah") || h.includes("score")) colPoints = i;
+          else if (h.includes("remark") || h.includes("catatan") || h.includes("nota")) colRemarks = i;
+        });
 
-        const statusRaw = statusCell?.textContent?.trim() || "";
-        const pointsText = pointsCell?.textContent?.trim() || "";
-        const remarksText = remarksCell?.textContent?.trim() || "";
+        const rows = table.querySelectorAll("tbody tr, tr");
+        rows.forEach((tr, idx) => {
+          const cells = tr.querySelectorAll("td");
+          if (cells.length < 3) return; // Header or empty row
 
-        // Check for self-recording submit link
-        const submitLinkEl = tr.querySelector("a[href*='attendance.php?sessid='], a[href*='mod/attendance/attendance.php']");
-        const submitUrl = submitLinkEl ? (
-          submitLinkEl.getAttribute("href").startsWith("http")
-            ? submitLinkEl.getAttribute("href")
-            : `https://spectrum.um.edu.my/${submitLinkEl.getAttribute("href").replace(/^\//, "")}`
-        ) : null;
+          let curColDate = colDate;
+          let curColTime = colTime;
+          let curColGroup = colGroup;
+          let curColDesc = colDesc;
+          let curColStatus = colStatus;
+          let curColPoints = colPoints;
+          let curColRemarks = colRemarks;
 
-        const sessidMatch = (submitUrl || tr.innerHTML).match(/sessid=(\d+)/);
-        const sessid = sessidMatch ? sessidMatch[1] : `sess_${idx}`;
+          if (curColDate === -1 || curColStatus === -1) {
+            if (cells.length === 5) {
+              const c2Text = cells[2]?.textContent?.trim() || "";
+              const c3Text = cells[3]?.textContent?.trim() || "";
+              const c2HasLink = Boolean(cells[2]?.querySelector("a[href*='attendance.php']"));
+              if (c2HasLink || /present|hadir|late|lewat|absent|tidak hadir|excused|dimaafkan|submit|record|unrecorded/i.test(c2Text) || /\d+\s*\/\s*\d+/.test(c3Text)) {
+                // 5 cols: Date (+embedded Time) | Description | Status | Points | Remarks
+                curColDate = 0;
+                curColTime = -1;
+                curColGroup = -1;
+                curColDesc = 1;
+                curColStatus = 2;
+                curColPoints = 3;
+                curColRemarks = 4;
+              } else {
+                // 5 cols: Date | Time | Description | Status | Points
+                curColDate = 0;
+                curColTime = 1;
+                curColGroup = -1;
+                curColDesc = 2;
+                curColStatus = 3;
+                curColPoints = 4;
+                curColRemarks = -1;
+              }
+            } else if (cells.length === 4) {
+              curColDate = 0;
+              curColTime = -1;
+              curColGroup = -1;
+              curColDesc = 1;
+              curColStatus = 2;
+              curColPoints = 3;
+              curColRemarks = -1;
+            } else if (cells.length >= 6) {
+              curColDate = 0;
+              curColTime = 1;
+              const c2Text = cells[2]?.textContent?.trim() || "";
+              if (/group|occ|kump|all students|semua pelajar/i.test(c2Text)) {
+                curColGroup = 2;
+                curColDesc = 3;
+                curColStatus = 4;
+                curColPoints = 5;
+                curColRemarks = cells.length >= 7 ? 6 : -1;
+              } else {
+                curColGroup = -1;
+                curColDesc = 2;
+                curColStatus = 3;
+                curColPoints = 4;
+                curColRemarks = 5;
+              }
+            } else {
+              curColDate = 0;
+              curColTime = 1;
+              curColDesc = 2;
+              curColStatus = cells.length > 3 ? 3 : -1;
+              curColPoints = cells.length > 4 ? 4 : -1;
+            }
+          }
 
-        let status = "unrecorded";
-        let statusLabel = statusRaw || "Unrecorded";
+          let dateText = (curColDate >= 0 ? cells[curColDate]?.textContent?.trim() : "") || "Session";
+          let timeText = (curColTime >= 0 ? cells[curColTime]?.textContent?.trim() : "") || "";
+          const groupText = (curColGroup >= 0 ? cells[curColGroup]?.textContent?.trim() : "") || "All students";
+          const descText = (curColDesc >= 0 ? cells[curColDesc]?.textContent?.trim() : "") || "";
+          const statusCell = curColStatus >= 0 ? cells[curColStatus] : null;
+          const pointsCell = curColPoints >= 0 ? cells[curColPoints] : null;
+          const remarksCell = curColRemarks >= 0 ? cells[curColRemarks] : null;
 
-        if (submitUrl || statusRaw.toLowerCase().includes("submit") || statusRaw.toLowerCase().includes("record")) {
-          status = "open";
-          statusLabel = "Open for Check-In";
-        } else if (/present|hadir/i.test(statusRaw)) {
-          status = "present";
-          statusLabel = "Present";
-        } else if (/late|lewat/i.test(statusRaw)) {
-          status = "late";
-          statusLabel = "Late";
-        } else if (/absent|tidak hadir/i.test(statusRaw)) {
-          status = "absent";
-          statusLabel = "Absent";
-        } else if (/excused|dimaafkan/i.test(statusRaw)) {
-          status = "excused";
-          statusLabel = "Excused";
-        }
+          // If time is missing or embedded in dateText (e.g. "Mon 12 Oct 2026 2PM - 4PM")
+          if (!timeText || curColTime === -1) {
+            const timeInDateMatch = dateText.match(/\b(\d{1,2}(?::\d{2})?\s*(?:am|pm)?\s*[-–—]\s*\d{1,2}(?::\d{2})?\s*(?:am|pm)?|\d{1,2}:\d{2}\s*(?:am|pm)?|\d{1,2}\s*(?:am|pm))\b/i);
+            if (timeInDateMatch) {
+              timeText = timeInDateMatch[0];
+              dateText = dateText.replace(timeInDateMatch[0], "").trim();
+            }
+          }
 
-        const isMatch = matchesOccurrence(groupText, studentOccurrence, descText, activityName);
-        const sessionTs = parseAttendanceSessionDate(dateText, timeText, referenceDate);
-        const isPastOrCurrent = isAttendanceSessionPastOrCurrent(dateText, timeText, status, referenceDate);
+          const statusRaw = statusCell?.textContent?.trim() || "";
+          const pointsText = pointsCell?.textContent?.trim() || "";
+          const remarksText = remarksCell?.textContent?.trim() || "";
 
-        // Check if session is on the current date (today)
-        const isToday = Boolean(
-          String(dateText).toLowerCase().includes("today") ||
-          String(dateText).toLowerCase().includes("hari ini") ||
-          (sessionTs && (
-            new Date(sessionTs).getFullYear() === ref.getFullYear() &&
-            new Date(sessionTs).getMonth() === ref.getMonth() &&
-            new Date(sessionTs).getDate() === ref.getDate()
-          ))
-        );
+          // Check for self-recording submit link
+          const submitLinkEl = tr.querySelector("a[href*='attendance.php?sessid='], a[href*='mod/attendance/attendance.php']");
+          const submitUrl = submitLinkEl ? (
+            submitLinkEl.getAttribute("href").startsWith("http")
+              ? submitLinkEl.getAttribute("href")
+              : `https://spectrum.um.edu.my/${submitLinkEl.getAttribute("href").replace(/^\//, "")}`
+          ) : null;
 
-        if (status === "unrecorded" && isToday) {
-          status = "today";
-          const startT = timeText ? timeText.split("-")[0].trim() : "";
-          statusLabel = startT ? `Scheduled Today (${startT})` : "Scheduled Today";
-        }
+          const sessidMatch = (submitUrl || tr.innerHTML).match(/sessid=(\d+)/);
+          const sessid = sessidMatch ? sessidMatch[1] : `sess_${idx}`;
 
-        sessions.push({
-          id: sessid,
-          sessid,
-          date: dateText,
-          time: timeText,
-          timestamp: sessionTs,
-          isToday,
-          isPastOrCurrent,
-          group: groupText,
-          description: descText,
-          activityName,
-          status,
-          statusLabel,
-          points: pointsText,
-          remarks: remarksText,
-          submitUrl,
-          matchesOccurrence: isMatch
+          let status = "unrecorded";
+          let statusLabel = statusRaw || "Unrecorded";
+
+          if (submitUrl || /submit|record|daftar/i.test(statusRaw)) {
+            status = "open";
+            statusLabel = "Open for Check-In";
+          } else if (/present|hadir/i.test(statusRaw)) {
+            status = "present";
+            statusLabel = "Present";
+          } else if (/late|lewat/i.test(statusRaw)) {
+            status = "late";
+            statusLabel = "Late";
+          } else if (/absent|tidak hadir/i.test(statusRaw)) {
+            status = "absent";
+            statusLabel = "Absent";
+          } else if (/excused|dimaafkan/i.test(statusRaw)) {
+            status = "excused";
+            statusLabel = "Excused";
+          }
+
+          const isMatch = matchesOccurrence(groupText, studentOccurrence, descText, activityName);
+          const sessionTs = parseAttendanceSessionDate(dateText, timeText, referenceDate);
+          const isPastOrCurrent = isAttendanceSessionPastOrCurrent(dateText, timeText, status, referenceDate);
+
+          // Check if session is on the current date (today)
+          const isToday = Boolean(
+            String(dateText).toLowerCase().includes("today") ||
+            String(dateText).toLowerCase().includes("hari ini") ||
+            (sessionTs && (
+              new Date(sessionTs).getFullYear() === ref.getFullYear() &&
+              new Date(sessionTs).getMonth() === ref.getMonth() &&
+              new Date(sessionTs).getDate() === ref.getDate()
+            ))
+          );
+
+          if (status === "unrecorded" && isToday) {
+            status = "today";
+            const startT = timeText ? timeText.split("-")[0].trim() : "";
+            statusLabel = startT ? `Scheduled Today (${startT})` : "Scheduled Today";
+          }
+
+          sessions.push({
+            id: sessid,
+            sessid,
+            date: dateText,
+            time: timeText,
+            timestamp: sessionTs,
+            isToday,
+            isPastOrCurrent,
+            group: groupText,
+            description: descText,
+            activityName,
+            status,
+            statusLabel,
+            points: pointsText,
+            remarks: remarksText,
+            submitUrl,
+            matchesOccurrence: isMatch
+          });
         });
       });
 
@@ -2119,6 +2217,21 @@ export function parseAttendanceView(html, studentOccurrence = "", referenceDate 
             summary.percentage = val.includes("%") ? val : `${val}%`;
           }
         });
+      }
+
+      const pageText = (doc.body?.textContent || html);
+      const takenMatch = pageText.match(/(?:taken sessions?|sesi diambil)\s*:\s*(\d+)/i);
+      if (takenMatch && !summary.takenSessions) {
+        summary.takenSessions = parseInt(takenMatch[1], 10);
+      }
+      const pointsMatch = pageText.match(/(?:points(?: over taken sessions)?|mata(?: atas sesi diambil)?)\s*:\s*([0-9\.\s\/]+)/i);
+      if (pointsMatch && (!summary.points || summary.points === "0 / 0")) {
+        summary.points = pointsMatch[1].trim();
+      }
+      const pctMatch = pageText.match(/(?:percentage(?: over taken sessions)?|peratus(?: atas sesi diambil)?)\s*:\s*([0-9\.]+\s*%?)/i);
+      if (pctMatch && (!summary.percentage || summary.percentage === "0.0%")) {
+        const p = pctMatch[1].trim();
+        summary.percentage = p.includes("%") ? p : `${p}%`;
       }
     } catch (e) {
       console.warn("[Spectra Parser] DOM attendance parsing error:", e);
@@ -2141,12 +2254,63 @@ export function parseAttendanceView(html, studentOccurrence = "", referenceDate 
 
       if (cells.length < 3) continue;
 
-      const dateText = cells[0] || "Session";
-      const timeText = cells[1] || "";
-      const groupText = cells.length >= 6 ? cells[2] || "All students" : "All students";
-      const descText = cells.length >= 6 ? cells[3] || "" : cells[2] || "";
-      const statusRaw = cells.length >= 6 ? cells[4] || "" : cells[3] || "";
-      const pointsText = cells.length >= 6 ? cells[5] || "" : cells[4] || "";
+      let dateText = cells[0] || "Session";
+      let timeText = "";
+      let groupText = "All students";
+      let descText = "";
+      let statusRaw = "";
+      let pointsText = "";
+      let remarksText = "";
+
+      if (cells.length === 5) {
+        if (/present|hadir|late|lewat|absent|tidak hadir|excused|dimaafkan|submit|record/i.test(cells[2]) || /\d+\s*\/\s*\d+/.test(cells[3])) {
+          // Date (+time) | Description | Status | Points | Remarks
+          dateText = cells[0];
+          descText = cells[1];
+          statusRaw = cells[2];
+          pointsText = cells[3];
+          remarksText = cells[4];
+        } else {
+          // Date | Time | Description | Status | Points
+          dateText = cells[0];
+          timeText = cells[1];
+          descText = cells[2];
+          statusRaw = cells[3];
+          pointsText = cells[4];
+        }
+      } else if (cells.length === 4) {
+        dateText = cells[0];
+        descText = cells[1];
+        statusRaw = cells[2];
+        pointsText = cells[3];
+      } else if (cells.length >= 6) {
+        timeText = cells[1];
+        if (/group|occ|kump|all students|semua pelajar/i.test(cells[2])) {
+          groupText = cells[2];
+          descText = cells[3];
+          statusRaw = cells[4];
+          pointsText = cells[5];
+          remarksText = cells.length >= 7 ? cells[6] : "";
+        } else {
+          descText = cells[2];
+          statusRaw = cells[3];
+          pointsText = cells[4];
+          remarksText = cells[5] || "";
+        }
+      } else {
+        timeText = cells[1] || "";
+        descText = cells[2] || "";
+        statusRaw = cells[3] || "";
+        pointsText = cells[4] || "";
+      }
+
+      if (!timeText) {
+        const timeInDateMatch = dateText.match(/\b(\d{1,2}(?::\d{2})?\s*(?:am|pm)?\s*[-–—]\s*\d{1,2}(?::\d{2})?\s*(?:am|pm)?|\d{1,2}:\d{2}\s*(?:am|pm)?|\d{1,2}\s*(?:am|pm))\b/i);
+        if (timeInDateMatch) {
+          timeText = timeInDateMatch[0];
+          dateText = dateText.replace(timeInDateMatch[0], "").trim();
+        }
+      }
 
       let submitUrl = null;
       const submitMatch = rowContent.match(/href=["']([^"']*attendance\.php\?sessid=\d+[^"']*)["']/i);
@@ -2214,7 +2378,7 @@ export function parseAttendanceView(html, studentOccurrence = "", referenceDate 
         status,
         statusLabel,
         points: pointsText,
-        remarks: "",
+        remarks: remarksText,
         submitUrl,
         matchesOccurrence: isMatch
       });
@@ -2222,13 +2386,13 @@ export function parseAttendanceView(html, studentOccurrence = "", referenceDate 
 
     // Regex summary fallback
     const takenMatch = html.match(/(?:taken sessions?|sesi diambil)[^:]*:?\s*(\d+)/i);
-    if (takenMatch) summary.takenSessions = parseInt(takenMatch[1], 10);
+    if (takenMatch && !summary.takenSessions) summary.takenSessions = parseInt(takenMatch[1], 10);
 
     const pointsMatch = html.match(/(?:points over taken sessions?|mata sesi diambil)[^:]*:?\s*([\d\s/]+)/i);
-    if (pointsMatch) summary.points = pointsMatch[1].trim();
+    if (pointsMatch && (!summary.points || summary.points === "0 / 0")) summary.points = pointsMatch[1].trim();
 
     const pctMatch = html.match(/(?:percentage over taken sessions?|peratus sesi diambil)[^:]*:?\s*([\d.]+)%?/i);
-    if (pctMatch) summary.percentage = `${pctMatch[1]}%`;
+    if (pctMatch && (!summary.percentage || summary.percentage === "0.0%")) summary.percentage = `${pctMatch[1]}%`;
   }
 
   // STRICT REQUIREMENT: Only show the attendance from first till the current date

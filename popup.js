@@ -72,7 +72,8 @@ const state = {
   telegramSentAnnouncementIds: new Set(),
   telegramSentDeadlineIds: new Set(),
   countdownIntervalId: null,
-  loginTabId: null
+  loginTabId: null,
+  calendarIcalUrl: ""
 };
 
 // ===================================================================
@@ -140,11 +141,18 @@ function initDOMListeners() {
     footerDemoBtn.addEventListener("click", enableDemoPreview);
   }
 
+  // Settings Donate QR toggle button
+  const settingDonateBtn = document.getElementById("settingDonateBtn");
+  if (settingDonateBtn) {
+    settingDonateBtn.addEventListener("click", () => expandDonationQr());
+  }
+
   // Footer Donate button
   const footerDonateBtn = document.getElementById("footerDonateBtn");
   if (footerDonateBtn) {
     footerDonateBtn.addEventListener("click", () => {
       switchTab("settings");
+      expandDonationQr(true);
       setTimeout(() => {
         const donationCard = document.getElementById("donationCard");
         if (donationCard) {
@@ -618,6 +626,35 @@ function initDOMListeners() {
   if (testTelegramBtn) {
     testTelegramBtn.addEventListener("click", handleTestTelegram);
   }
+
+  // Settings: Cloud Relay Listeners
+  const cloudToggle = document.getElementById("cloudRelayToggle");
+  const cloudFields = document.getElementById("cloudRelayFields");
+  if (cloudToggle && cloudFields) {
+    cloudToggle.addEventListener("change", (e) => {
+      cloudFields.classList.toggle("hidden", !e.target.checked);
+    });
+  }
+
+  const toggleCloudSecretBtn = document.getElementById("toggleCloudSecretVisibility");
+  const cloudSecretInput = document.getElementById("cloudRelaySecret");
+  if (toggleCloudSecretBtn && cloudSecretInput) {
+    toggleCloudSecretBtn.addEventListener("click", () => {
+      if (cloudSecretInput.type === "password") {
+        cloudSecretInput.type = "text";
+        toggleCloudSecretBtn.textContent = "🔒";
+      } else {
+        cloudSecretInput.type = "password";
+        toggleCloudSecretBtn.textContent = "👁️";
+      }
+    });
+  }
+
+  const syncCloudNowBtn = document.getElementById("syncCloudNowBtn");
+  if (syncCloudNowBtn) {
+    syncCloudNowBtn.addEventListener("click", handleManualCloudSync);
+  }
+
   const saveSettingsBtn = document.getElementById("saveSettingsBtn");
   if (saveSettingsBtn) {
     saveSettingsBtn.addEventListener("click", handleSaveSettings);
@@ -669,7 +706,7 @@ function initDOMListeners() {
         const btnIcon = document.getElementById("submitBtnIcon");
         if (btnIcon) btnIcon.textContent = "✓";
         setTimeout(() => {
-          loadLiveAttendanceData(false).catch(() => {});
+          loadLiveAttendanceData(false).catch(() => { });
         }, 1200);
       }
     });
@@ -2064,7 +2101,7 @@ async function loadLiveAttendanceData(force = false) {
         state.courses = await getLiveEnrolledCourses(state.sesskey);
       }
 
-      attendanceData = await fetchLiveAllAttendance(state.courses, state.sesskey, state.courseOccurrences);
+      attendanceData = await fetchLiveAllAttendance(state.courses, state.sesskey, state.courseOccurrences, undefined, state.studentOccurrence);
 
       if (typeof chrome !== "undefined" && chrome.storage?.local) {
         await chrome.storage.local.set({
@@ -2479,8 +2516,8 @@ function renderAttendanceRecords() {
         titleEl.textContent = currentFilter === "upcoming"
           ? "No Upcoming Sessions"
           : currentFilter === "history"
-          ? "No Attendance History"
-          : "No Attendance Sessions";
+            ? "No Attendance History"
+            : "No Attendance Sessions";
       }
       if (descEl) {
         descEl.textContent = currentFilter === "upcoming"
@@ -2662,7 +2699,9 @@ async function handleScanAttendanceNow() {
     const liveAttendance = await fetchLiveAllAttendance(
       state.courses,
       state.sesskey,
-      state.courseOccurrences
+      state.courseOccurrences,
+      undefined,
+      state.studentOccurrence
     );
 
     state.attendance = liveAttendance;
@@ -3118,6 +3157,12 @@ async function handleSaveSettings() {
   const notifyDeadlines = document.getElementById("prefDeadlines").checked;
 
   state.notifyAttendanceOpen = notifyAttendanceOpen;
+  state.calendarIcalUrl = icalUrl;
+
+  const cloudToggle = document.getElementById("cloudRelayToggle");
+  const cloudEnabled = cloudToggle ? cloudToggle.checked : false;
+  const cloudUrl = document.getElementById("cloudRelayUrl") ? document.getElementById("cloudRelayUrl").value.trim() : "";
+  const cloudSecret = document.getElementById("cloudRelaySecret") ? document.getElementById("cloudRelaySecret").value.trim() : "";
 
   if (typeof chrome !== "undefined" && chrome.storage?.local) {
     await chrome.storage.local.set({
@@ -3128,16 +3173,92 @@ async function handleSaveSettings() {
       poll_interval_mins: pollMins,
       notify_attendance_open: notifyAttendanceOpen,
       notify_announcements: notifyAnnounce,
-      notify_urgent_deadlines: notifyDeadlines
+      notify_urgent_deadlines: notifyDeadlines,
+      cloud_relay_enabled: cloudEnabled,
+      cloud_relay_url: cloudUrl,
+      cloud_relay_secret: cloudSecret
     });
 
     chrome.runtime.sendMessage({
       action: "UPDATE_ALARMS",
       payload: { intervalMinutes: pollMins }
     });
+
+    if (cloudEnabled && cloudUrl) {
+      chrome.runtime.sendMessage({
+        action: "SYNC_CLOUD_RELAY_NOW",
+        payload: { relayUrl: cloudUrl, secretKey: cloudSecret }
+      }).catch(() => {});
+    }
   }
 
   showToast("Settings saved successfully!", "success");
+}
+
+async function handleManualCloudSync() {
+  const urlInput = document.getElementById("cloudRelayUrl");
+  const secretInput = document.getElementById("cloudRelaySecret");
+  const relayUrl = urlInput ? urlInput.value.trim() : "";
+  const secretKey = secretInput ? secretInput.value.trim() : "";
+
+  if (!relayUrl) {
+    showToast("Please enter your Cloudflare Worker URL first", "error");
+    if (urlInput) urlInput.focus();
+    return;
+  }
+
+  const btn = document.getElementById("syncCloudNowBtn");
+  const origText = btn ? btn.innerHTML : "";
+  if (btn) {
+    btn.disabled = true;
+    btn.textContent = "Syncing to Cloud...";
+  }
+
+  if (typeof chrome !== "undefined" && chrome.storage?.local) {
+    await chrome.storage.local.set({
+      cloud_relay_url: relayUrl,
+      cloud_relay_secret: secretKey,
+      cloud_relay_enabled: true
+    });
+  }
+
+  const cloudToggle = document.getElementById("cloudRelayToggle");
+  if (cloudToggle) cloudToggle.checked = true;
+  const cloudFields = document.getElementById("cloudRelayFields");
+  if (cloudFields) cloudFields.classList.remove("hidden");
+
+  if (typeof chrome !== "undefined" && chrome.runtime?.sendMessage) {
+    chrome.runtime.sendMessage({
+      action: "SYNC_CLOUD_RELAY_NOW",
+      payload: { relayUrl, secretKey }
+    }, (response) => {
+      if (btn) {
+        btn.disabled = false;
+        btn.innerHTML = origText;
+      }
+
+      if (response && response.success) {
+        const badge = document.getElementById("cloudRelayStatusBadge");
+        if (badge) {
+          badge.className = "session-status-badge status-connected";
+          badge.textContent = "🟢 Synced";
+        }
+        const lbl = document.getElementById("lastCloudSyncLabel");
+        if (lbl) {
+          const now = new Date();
+          lbl.textContent = `Synced: ${now.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })}`;
+        }
+        showToast("Session synced to Cloudflare Relay 24/7!", "success");
+      } else {
+        const badge = document.getElementById("cloudRelayStatusBadge");
+        if (badge) {
+          badge.className = "session-status-badge status-invalid";
+          badge.textContent = "🔴 Sync Failed";
+        }
+        showToast(response?.error || response?.message || "Sync failed", "error");
+      }
+    });
+  }
 }
 
 async function handleAutoDiscoverIcal(silent = false) {
@@ -3158,6 +3279,8 @@ async function handleAutoDiscoverIcal(silent = false) {
     if (icalInput) {
       icalInput.value = icalUrl;
     }
+
+    state.calendarIcalUrl = icalUrl;
 
     if (typeof chrome !== "undefined" && chrome.storage?.local) {
       await chrome.storage.local.set({
@@ -3184,6 +3307,31 @@ async function handleAutoDiscoverIcal(silent = false) {
       btn.disabled = false;
       btn.innerHTML = origText;
     }
+  }
+}
+
+// ===================================================================
+// Donation QR Expand / Collapse Controller
+// ===================================================================
+function expandDonationQr(forceOpen = null) {
+  const qrContainer = document.getElementById("donateQrContainer");
+  const btnText = document.getElementById("settingDonateBtnText");
+  const chevron = document.getElementById("settingDonateChevron");
+  if (!qrContainer) return;
+
+  const isCurrentlyOpen = !qrContainer.classList.contains("hidden") && qrContainer.style.display !== "none";
+  const shouldOpen = forceOpen !== null ? forceOpen : !isCurrentlyOpen;
+
+  if (shouldOpen) {
+    qrContainer.classList.remove("hidden");
+    qrContainer.style.display = "flex";
+    if (chevron) chevron.style.transform = "rotate(180deg)";
+    if (btnText) btnText.textContent = "☕ Hide QR Code";
+  } else {
+    qrContainer.classList.add("hidden");
+    qrContainer.style.display = "none";
+    if (chevron) chevron.style.transform = "rotate(0deg)";
+    if (btnText) btnText.textContent = "☕ Donate (DuitNow QR)";
   }
 }
 
@@ -3326,6 +3474,8 @@ async function loadStoredPreferences() {
     stored = await chrome.storage.local.get([
       "telegram_bot_token",
       "telegram_chat_id",
+      "calendarIcalUrl",
+      "calendar_ical_url",
       "poll_interval_mins",
       "notify_announcements",
       "notify_urgent_deadlines",
@@ -3336,7 +3486,12 @@ async function loadStoredPreferences() {
       "courseOccurrences",
       "studentOccurrence",
       "telegram_sent_announcement_ids",
-      "telegram_sent_deadline_ids"
+      "telegram_sent_deadline_ids",
+      "cloud_relay_enabled",
+      "cloud_relay_url",
+      "cloud_relay_secret",
+      "last_cloud_sync_timestamp",
+      "cloud_relay_status"
     ]);
   }
 
@@ -3376,8 +3531,39 @@ async function loadStoredPreferences() {
   const tgChatInput = document.getElementById("telegramChatId");
   if (tgChatInput && stored.telegram_chat_id) tgChatInput.value = stored.telegram_chat_id;
   const icalInput = document.getElementById("calendarIcalUrl");
-  if (icalInput && (stored.calendarIcalUrl || stored.calendar_ical_url)) {
-    icalInput.value = stored.calendarIcalUrl || stored.calendar_ical_url;
+  const savedIcal = stored.calendarIcalUrl || stored.calendar_ical_url || "";
+  if (savedIcal) {
+    state.calendarIcalUrl = savedIcal;
+    if (icalInput) {
+      icalInput.value = savedIcal;
+    }
+  }
+
+  // Cloud Relay Settings Restoration
+  const cloudEnabled = Boolean(stored.cloud_relay_enabled);
+  const cloudToggle = document.getElementById("cloudRelayToggle");
+  const cloudFields = document.getElementById("cloudRelayFields");
+  if (cloudToggle) cloudToggle.checked = cloudEnabled;
+  if (cloudFields) cloudFields.classList.toggle("hidden", !cloudEnabled);
+  const cloudUrlInput = document.getElementById("cloudRelayUrl");
+  if (cloudUrlInput && stored.cloud_relay_url) cloudUrlInput.value = stored.cloud_relay_url;
+  const cloudSecretInput = document.getElementById("cloudRelaySecret");
+  if (cloudSecretInput && stored.cloud_relay_secret) cloudSecretInput.value = stored.cloud_relay_secret;
+
+  const cloudSyncLabel = document.getElementById("lastCloudSyncLabel");
+  const cloudBadge = document.getElementById("cloudRelayStatusBadge");
+  if (stored.last_cloud_sync_timestamp) {
+    const d = new Date(stored.last_cloud_sync_timestamp);
+    if (cloudSyncLabel) {
+      cloudSyncLabel.textContent = `Synced: ${d.toLocaleDateString()} ${d.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })}`;
+    }
+    if (cloudBadge) {
+      cloudBadge.className = "session-status-badge status-connected";
+      cloudBadge.textContent = "🟢 Synced";
+    }
+  } else if (cloudBadge) {
+    cloudBadge.className = "session-status-badge status-unset";
+    cloudBadge.textContent = "⚪ Not Synced";
   }
 
   const pollInterval = document.getElementById("pollIntervalSelect");

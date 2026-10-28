@@ -49,6 +49,9 @@ chrome.runtime.onInstalled.addListener(async (details) => {
     poll_interval_mins: 15,
     notify_announcements: true,
     notify_urgent_deadlines: true,
+    cloud_relay_enabled: false,
+    cloud_relay_url: "",
+    cloud_relay_secret: "",
     completed_assignment_ids: [],
     telegram_sent_announcement_ids: [],
     telegram_sent_deadline_ids: [],
@@ -234,6 +237,13 @@ chrome.cookies.onChanged.addListener(async (changeInfo) => {
     await setupDeclarativeCookieRule(sessionData.value);
   }
 
+  // Auto-sync updated session to Cloud Relay if configured
+  try {
+    const config = await chrome.storage.local.get(["cloud_relay_enabled", "cloud_relay_url", "cloud_relay_secret"]);
+    if (config.cloud_relay_enabled && config.cloud_relay_url) {
+      syncSessionToCloudRelay(config.cloud_relay_url, config.cloud_relay_secret).catch(() => {});
+    }
+  } catch (_) {}
 
   // Only trigger immediate attendance check if the session cookie was newly established or changed
   if (isInitialOrChanged) {
@@ -277,6 +287,105 @@ async function checkActiveSession() {
   }
 }
 
+// -------------------------------------------------------------
+// Cloudflare Relay Synchronization
+// -------------------------------------------------------------
+async function syncSessionToCloudRelay(explicitUrl, explicitSecret) {
+  try {
+    const store = await chrome.storage.local.get([
+      "cloud_relay_url",
+      "cloud_relay_secret",
+      "cloud_relay_enabled",
+      "moodle_session",
+      "manualMoodleSession",
+      "moodle_session_key",
+      "cached_courses",
+      "course_occurrences",
+      "course_passwords",
+      "calendarIcalUrl",
+      "calendar_ical_url",
+      "telegram_bot_token",
+      "telegram_chat_id"
+    ]);
+
+    const relayUrl = (explicitUrl || store.cloud_relay_url || "").trim();
+    const secretKey = (explicitSecret !== undefined ? explicitSecret : store.cloud_relay_secret || "").trim();
+
+    if (!relayUrl) {
+      return { success: false, error: "Cloud Relay URL is not configured." };
+    }
+
+    let token = "";
+    if (store.manualMoodleSession) {
+      token = store.manualMoodleSession;
+    } else if (store.moodle_session?.value) {
+      token = store.moodle_session.value;
+    } else {
+      const active = await checkActiveSession();
+      if (active.authenticated && active.session?.value) {
+        token = active.session.value;
+      }
+    }
+
+    const courses = (store.cached_courses || []).map((c) => ({
+      id: String(c.id),
+      code: c.code || String(c.id),
+      name: c.name || ""
+    }));
+
+    const icalUrl = store.calendarIcalUrl || store.calendar_ical_url || "";
+
+    if (!token && !icalUrl) {
+      return { success: false, error: "Neither active MoodleSession nor iCal URL found to sync." };
+    }
+
+    const payload = {
+      action: "SESSION_SYNC",
+      timestamp: Date.now(),
+      domain: "spectrum.um.edu.my",
+      sessionToken: token || "dummy_token_for_ical_only",
+      sesskey: store.moodle_session?.sesskey || store.moodle_session_key || "",
+      courses,
+      occurrences: store.course_occurrences || {},
+      passwords: store.course_passwords || {},
+      calendarIcalUrl: icalUrl,
+      telegramToken: store.telegram_bot_token || "",
+      telegramChatId: store.telegram_chat_id || "",
+      client: "Spectra Chrome Extension"
+    };
+
+    let targetUrl = relayUrl;
+    if (!targetUrl.endsWith("/sync") && !targetUrl.endsWith("/sync-cookie")) {
+      targetUrl = targetUrl.replace(/\/+$/, "") + "/sync";
+    }
+
+    const headers = { "Content-Type": "application/json" };
+    if (secretKey) {
+      headers["Authorization"] = `Bearer ${secretKey}`;
+    }
+
+    const res = await fetch(targetUrl, {
+      method: "POST",
+      headers,
+      body: JSON.stringify(payload)
+    });
+
+    const resData = await res.json().catch(() => ({}));
+
+    if (res.ok && resData.success !== false) {
+      const now = Date.now();
+      await chrome.storage.local.set({
+        last_cloud_sync_timestamp: now,
+        cloud_relay_status: "online"
+      });
+      return { success: true, message: resData.message || "Session synchronized to Cloud Relay successfully!" };
+    } else {
+      return { success: false, error: resData.error || `Worker returned HTTP ${res.status}: ${res.statusText}` };
+    }
+  } catch (err) {
+    return { success: false, error: err.message };
+  }
+}
 
 // -------------------------------------------------------------
 // Notification Dispatcher (Telegram)
@@ -650,7 +759,9 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
         }
 
         case "SYNC_CLOUD_RELAY_NOW": {
-          sendResponse({ success: false, message: "Cloud Relay is disabled. Spectra runs 100% locally in Chrome." });
+          const { relayUrl, secretKey } = payload || {};
+          const result = await syncSessionToCloudRelay(relayUrl, secretKey);
+          sendResponse(result);
           break;
         }
 

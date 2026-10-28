@@ -7,7 +7,9 @@
   <title>Spectra - UM SPeCTRUM Companion</title>
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-  <link href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;500;600;700;800&family=JetBrains+Mono:wght@400;500;600&display=swap" rel="stylesheet">
+  <link
+    href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;500;600;700;800&family=JetBrains+Mono:wght@400;500;600&display=swap"
+    rel="stylesheet">
   <link rel="stylesheet" href="popup.css">
 </head>
 
@@ -22,7 +24,8 @@
         <!-- Folded Squircle Logo Icon matching pop_up_design_2 -->
         <div class="brand-icon">
           <svg viewBox="0 0 38 38" width="34" height="34" fill="none">
-            <rect x="3" y="8" width="24" height="24" rx="8" fill="#84CC16" fill-opacity="0.9" transform="rotate(-7 15 20)" />
+            <rect x="3" y="8" width="24" height="24" rx="8" fill="#84CC16" fill-opacity="0.9"
+              transform="rotate(-7 15 20)" />
             <rect x="8" y="5" width="25" height="25" rx="8" fill="#2563EB" />
             <rect x="12" y="9" width="17" height="17" rx="5" fill="#FFFFFF" fill-opacity="0.28" />
           </svg>
@@ -75,7 +78,8 @@
       <div class="banner-dark-left">
         <div class="banner-dark-icon">
           <svg viewBox="0 0 22 22" width="18" height="18" fill="none">
-            <rect x="2" y="5" width="13" height="13" rx="4" fill="#84CC16" fill-opacity="0.9" transform="rotate(-8 8 11)" />
+            <rect x="2" y="5" width="13" height="13" rx="4" fill="#84CC16" fill-opacity="0.9"
+              transform="rotate(-8 8 11)" />
             <rect x="6" y="3" width="14" height="14" rx="4" fill="#3B82F6" />
           </svg>
         </div>
@@ -144,7 +148,8 @@
           <div class="loading-spinner-sm"></div>
           <div class="waiting-text">
             <strong>Login tab opened!</strong>
-            <p>Sign in with your <code>@siswa.um.edu.my</code> account. Spectra connects automatically once complete.</p>
+            <p>Sign in with your <code>@siswa.um.edu.my</code> account. Spectra connects automatically once complete.
+            </p>
           </div>
         </div>
 
@@ -242,7 +247,8 @@
               <span class="toggle-label-text" id="submissionsPendingLabel">0 Pending Submissions</span>
             </div>
             <div class="flex-align-center" style="gap: 6px;">
-              <a id="openSpectrumCalendarBtn" href="https://spectrum.um.edu.my/calendar/view.php?view=upcoming" target="_blank" rel="noopener noreferrer" class="link-btn-pill">
+              <a id="openSpectrumCalendarBtn" href="https://spectrum.um.edu.my/calendar/view.php?view=upcoming"
+                target="_blank" rel="noopener noreferrer" class="link-btn-pill">
                 SPeCTRUM Calendar ↗
               </a>
             </div>
@@ -257,14 +263,17 @@
                 d="M8 4a4 4 0 100 8 4 4 0 000-8zM2 8a6 6 0 1110.89 3.476l4.817 4.817a1 1 0 01-1.414 1.414l-4.816-4.816A6 6 0 012 8z"
                 clip-rule="evenodd" />
             </svg>
-            <input type="text" id="deadlineSearch" placeholder="Search tasks, dropboxes, or course codes..." autocomplete="off">
+            <input type="text" id="deadlineSearch" placeholder="Search tasks, dropboxes, or course codes..."
+              autocomplete="off">
             <button id="clearSearchBtn" class="clear-search hidden" aria-label="Clear Search">&times;</button>
           </div>
 
           <div class="filter-pills-row">
             <button class="pill-btn active" data-filter="all">All (<span id="countAll">0</span>)</button>
-            <button class="pill-btn filter-urgent" data-filter="urgent">🔴 &lt;24h (<span id="countUrgent">0</span>)</button>
-            <button class="pill-btn filter-week" data-filter="this_week">🟡 This Week (<span id="countWeek">0</span>)</button>
+            <button class="pill-btn filter-urgent" data-filter="urgent">🔴 &lt;24h (<span
+                id="countUrgent">0</span>)</button>
+            <button class="pill-btn filter-week" data-filter="this_week">🟡 This Week (<span
+                id="countWeek">0</span>)</button>
             <button class="pill-btn" data-filter="upcoming">🟢 Later (<span id="countLater">0</span>)</button>
             <button class="pill-btn" data-filter="completed">✅ Done (<span id="countDone">0</span>)</button>
           </div>
@@ -315,11 +324,13 @@
           <div class="empty-icon-wrap">
             <svg viewBox="0 0 48 48" width="40" height="40" fill="none">
               <circle cx="24" cy="24" r="22" fill="#ECFDF5" stroke="#10B981" stroke-width="2" />
-              <path d="M15 24L21 30L33 18" stroke="#059669" stroke-width="3.5" stroke-linecap="round" stroke-linejoin="round" />
+              <path d="M15 24L21 30L33 18" stroke="#059669" stroke-width="3.5" stroke-linecap="round"
+                stroke-linejoin="round" />
             </svg>
           </div>
           <h3 class="empty-title">All Caught Up!</h3>
-          <p id="emptyStateMessage" class="empty-desc">No impending submission dropboxes found across your enrolled courses.</p>
+          <p id="emptyStateMessage" class="empty-desc">No impending submission dropboxes found across your enrolled
+            courses.</p>
         </div>
       </main>
 
@@ -365,7 +376,8 @@
 
           <!-- Toggle & Action Row -->
           <div class="attendance-toggle-row">
-            <div class="toggle-control-group" title="Send Telegram alert when attendance session opens for your occurrence">
+            <div class="toggle-control-group"
+              title="Send Telegram alert when attendance session opens for your occurrence">
               <label class="switch">
                 <input type="checkbox" id="telegramAttendanceOpenToggle" checked>
                 <span class="slider round"></span>
@@ -373,10 +385,12 @@
               <span class="toggle-label-text" id="telegramAttendanceOpenLabel">Telegram Open Alert</span>
             </div>
             <div class="flex-align-center" style="gap: 6px;">
-              <button type="button" id="testSubmissionContainerBtn" class="btn-ghost-pill" title="Preview interactive submission container">
+              <button type="button" id="testSubmissionContainerBtn" class="btn-ghost-pill"
+                title="Preview interactive submission container">
                 ⚡ Preview Check-In
               </button>
-              <a id="openSpectrumHeaderBtn" href="https://spectrum.um.edu.my/my/" target="_blank" rel="noopener noreferrer" class="link-btn-pill">
+              <a id="openSpectrumHeaderBtn" href="https://spectrum.um.edu.my/my/" target="_blank"
+                rel="noopener noreferrer" class="link-btn-pill">
                 SPeCTRUM ↗
               </a>
             </div>
@@ -402,7 +416,8 @@
           <!-- Title & Context -->
           <div class="open-banner-body">
             <h4 id="openAttendanceTitle" class="open-banner-title">Lecture Session Check-In Open</h4>
-            <p id="openAttendanceDesc" class="open-banner-subtitle">Matches your occurrence. Ready for instant submission.</p>
+            <p id="openAttendanceDesc" class="open-banner-subtitle">Matches your occurrence. Ready for instant
+              submission.</p>
           </div>
 
           <!-- Interactive 3-Step Submission Flow Stepper -->
@@ -417,7 +432,8 @@
               <span class="stepper-label">Submit</span>
             </div>
             <div class="stepper-connector"></div>
-            <div class="stepper-step step-pending" id="stepperStep3" title="Spectra will navigate and auto-fill Present">
+            <div class="stepper-step step-pending" id="stepperStep3"
+              title="Spectra will navigate and auto-fill Present">
               <span class="stepper-icon">🤖</span>
               <span class="stepper-label">Auto-Fill</span>
             </div>
@@ -432,23 +448,29 @@
             </button>
             <div id="openAttendancePasswordWrap" class="open-password-wrap hidden">
               <div class="password-input-group">
-                <input type="password" id="openAttendancePasswordInput" placeholder="Enter session password if required..." class="modern-input input-sm" autocomplete="off">
-                <button type="button" id="toggleOpenPwdVisBtn" class="pwd-vis-btn" title="Show or hide password">👁️</button>
+                <input type="password" id="openAttendancePasswordInput"
+                  placeholder="Enter session password if required..." class="modern-input input-sm" autocomplete="off">
+                <button type="button" id="toggleOpenPwdVisBtn" class="pwd-vis-btn"
+                  title="Show or hide password">👁️</button>
               </div>
             </div>
           </div>
 
           <!-- Interactive Action Buttons -->
           <div class="open-banner-actions">
-            <button type="button" id="submitOpenAttendanceBtn" class="btn-primary-action btn-submit-interactive" title="Bring to attendance page and fill Present automatically">
+            <button type="button" id="submitOpenAttendanceBtn" class="btn-primary-action btn-submit-interactive"
+              title="Bring to attendance page and fill Present automatically">
               <span class="submit-btn-icon" id="submitBtnIcon">⚡</span>
               <span class="submit-btn-label" id="submitBtnLabel">Submit (Mark Present) &rarr;</span>
               <span class="submit-btn-shine"></span>
             </button>
-            <button type="button" id="copyAttendanceUrlBtn" class="btn-secondary-action btn-icon-only" title="Copy check-in link to clipboard">
+            <button type="button" id="copyAttendanceUrlBtn" class="btn-secondary-action btn-icon-only"
+              title="Copy check-in link to clipboard">
               <span id="copyUrlBtnIcon">📋</span>
             </button>
-            <a id="openAttendancePageLink" href="https://spectrum.um.edu.my/mod/attendance/view.php" target="_blank" rel="noopener noreferrer" class="btn-secondary-action btn-pill-md" title="View attendance history on SPeCTRUM">
+            <a id="openAttendancePageLink" href="https://spectrum.um.edu.my/mod/attendance/view.php" target="_blank"
+              rel="noopener noreferrer" class="btn-secondary-action btn-pill-md"
+              title="View attendance history on SPeCTRUM">
               View Page ↗
             </a>
           </div>
@@ -520,7 +542,8 @@
           <div class="flex-between" style="margin-bottom: 8px;">
             <h4 class="card-section-title">Attendance Sessions</h4>
             <div class="flex-align-center" style="gap: 8px;">
-              <a id="openCourseAttendancePageBtn" href="https://spectrum.um.edu.my/my/" target="_blank" rel="noopener noreferrer" class="link-btn-subtle" style="font-size: 11px;">
+              <a id="openCourseAttendancePageBtn" href="https://spectrum.um.edu.my/my/" target="_blank"
+                rel="noopener noreferrer" class="link-btn-subtle" style="font-size: 11px;">
                 Open Attendance Page ↗
               </a>
               <span class="field-hint" id="attendanceSessionsCountBadge">0 Sessions</span>
@@ -663,7 +686,8 @@
             </svg>
           </div>
           <h3 class="empty-title">No Course Notices</h3>
-          <p id="emptyAnnouncementsMsg" class="empty-desc">No forum announcements found on SPeCTRUM for your courses.</p>
+          <p id="emptyAnnouncementsMsg" class="empty-desc">No forum announcements found on SPeCTRUM for your courses.
+          </p>
         </div>
       </main>
 
@@ -690,7 +714,8 @@
             <div class="password-input-wrapper">
               <input type="password" id="moodle-session-input" placeholder="e.g. uhe4fg1agh90g925grgtk22ob0"
                 class="modern-input font-mono" autocomplete="off" spellcheck="false">
-              <button type="button" id="toggle-moodle-session-visibility" class="btn-input-icon" title="Toggle visibility">
+              <button type="button" id="toggle-moodle-session-visibility" class="btn-input-icon"
+                title="Toggle visibility">
                 👁️
               </button>
             </div>
@@ -752,7 +777,9 @@
               Moodle iCal Export URL
               <span class="field-hint">Auto-generated</span>
             </label>
-            <input type="url" id="calendarIcalUrl" placeholder="https://spectrum.um.edu.my/calendar/export_execute.php?userid=...&amp;authtoken=..." class="modern-input">
+            <input type="url" id="calendarIcalUrl"
+              placeholder="https://spectrum.um.edu.my/calendar/export_execute.php?userid=...&amp;authtoken=..."
+              class="modern-input">
           </div>
 
           <div class="action-btn-row flex-between">
@@ -780,7 +807,8 @@
               <span class="field-hint">From @BotFather</span>
             </label>
             <div class="password-input-wrapper">
-              <input type="password" id="telegramToken" placeholder="123456789:ABCdefGhIJKlmNoPQRsTUVwxyZ" class="modern-input">
+              <input type="password" id="telegramToken" placeholder="123456789:ABCdefGhIJKlmNoPQRsTUVwxyZ"
+                class="modern-input">
               <button type="button" id="toggleTokenVisibility" class="btn-input-icon" title="Toggle visibility">
                 👁️
               </button>
@@ -802,6 +830,58 @@
             <span class="field-hint" id="telegramSentSummaryLabel">
               Sent: <b id="tgSentNoticesCount">0</b> notices, <b id="tgSentDeadlinesCount">0</b> tasks
             </span>
+          </div>
+        </div>
+
+        <!-- 24/7 Cloudflare Relay Worker Bento Card -->
+        <div class="bento-card">
+          <div class="card-header-clean">
+            <div>
+              <h3 class="card-main-title">24/7 Cloudflare Relay</h3>
+              <p class="card-main-sub">Scan deadlines &amp; attendance 24/7 in the cloud even when your laptop is closed</p>
+            </div>
+            <span id="cloudRelayStatusBadge" class="session-status-badge status-unset">⚪ Not Synced</span>
+          </div>
+
+          <div class="attendance-toggle-row margin-top-xs">
+            <div>
+              <span style="font-weight: 600; font-size: 13px; color: var(--text-main);">Enable Cloud Relay</span>
+              <p class="card-main-sub" style="margin: 0; font-size: 11px;">Sync session &amp; iCal to Cloudflare Worker</p>
+            </div>
+            <label class="switch">
+              <input type="checkbox" id="cloudRelayToggle">
+              <span class="slider round"></span>
+            </label>
+          </div>
+
+          <div id="cloudRelayFields" class="nested-form-fields hidden margin-top-sm">
+            <div class="form-group">
+              <label for="cloudRelayUrl" class="form-label">
+                Cloudflare Worker URL
+                <span class="field-hint">e.g. https://spectra-relay.&lt;subdomain&gt;.workers.dev</span>
+              </label>
+              <input type="url" id="cloudRelayUrl" placeholder="https://spectra-relay.yourname.workers.dev" class="modern-input font-mono">
+            </div>
+
+            <div class="form-group">
+              <label for="cloudRelaySecret" class="form-label">
+                Relay Secret Key (RELAY_SECRET_KEY)
+                <span class="field-hint">Optional bearer secret configured in worker</span>
+              </label>
+              <div class="password-input-wrapper">
+                <input type="password" id="cloudRelaySecret" placeholder="worker-auth-secret-key" class="modern-input font-mono" autocomplete="off">
+                <button type="button" id="toggleCloudSecretVisibility" class="btn-input-icon" title="Toggle visibility">
+                  👁️
+                </button>
+              </div>
+            </div>
+
+            <div class="action-btn-row flex-between margin-top-xs">
+              <button type="button" id="syncCloudNowBtn" class="btn-primary-action btn-pill-md">
+                Sync Session to Cloud
+              </button>
+              <span id="lastCloudSyncLabel" class="field-hint">Never synced</span>
+            </div>
           </div>
         </div>
 
@@ -853,16 +933,33 @@
         </div>
 
         <!-- Support & Donations Bento Card -->
-        <div class="bento-card" id="donationCard" style="text-align: center; border-color: #FECDD3; background: linear-gradient(145deg, #FFFFFF 0%, #FFF5F5 100%); margin-top: 12px;">
+        <div class="bento-card" id="donationCard"
+          style="text-align: center; border-color: #FECDD3; background: linear-gradient(145deg, #FFFFFF 0%, #FFF5F5 100%); margin-top: 12px;">
           <div style="font-size: 24px; margin-bottom: 2px;">☕</div>
           <h3 class="card-main-title" style="color: #9F1239; margin-bottom: 4px;">Support Spectra</h3>
           <p class="card-main-sub" style="margin-bottom: 12px; font-size: 11.5px; line-height: 1.4;">
             Spectra is an independent open-source project made with ❤️ for Universiti Malaya students.
           </p>
-          <div style="display: flex; flex-direction: column; align-items: center; justify-content: center; margin: 6px 0;">
-            <img src="assets/duitnow-qr.png" alt="DuitNow QR" style="width: 170px; max-width: 100%; border-radius: 12px; border: 1.5px solid #FDA4AF; box-shadow: 0 4px 14px rgba(244, 63, 94, 0.15); padding: 4px; background: #FFFFFF;" />
-            <span style="font-size: 11.5px; font-weight: 700; color: #BE123C; margin-top: 8px;">Scan via DuitNow QR</span>
-            <span style="font-size: 10px; color: var(--text-muted); margin-top: 2px;">Touch 'n Go • Maybank MAE • GrabPay • ShopeePay • Bank Apps</span>
+          <div style="display: flex; justify-content: center; margin-bottom: 2px;">
+            <button type="button" id="settingDonateBtn" class="btn-primary-action btn-pill-md"
+              style="background: linear-gradient(135deg, #E11D48 0%, #BE123C 100%); color: #FFFFFF; font-weight: 700; gap: 6px; box-shadow: 0 4px 12px rgba(225, 29, 72, 0.25);">
+              <span id="settingDonateBtnText">☕ Donate (DuitNow QR)</span>
+              <svg id="settingDonateChevron" viewBox="0 0 20 20" width="14" height="14" fill="currentColor"
+                style="transition: transform 0.25s ease;">
+                <path fill-rule="evenodd"
+                  d="M5.293 7.293a1 1 0 011.414 0L10 10.586l3.293-3.293a1 1 0 111.414 1.414l-4 4a1 1 0 01-1.414 0l-4-4a1 1 0 010-1.414z"
+                  clip-rule="evenodd" />
+              </svg>
+            </button>
+          </div>
+          <div id="donateQrContainer" class="hidden"
+            style="display: none; flex-direction: column; align-items: center; justify-content: center; margin-top: 12px;">
+            <img src="assets/duitnow-qr.png" alt="DuitNow QR"
+              style="width: 170px; max-width: 100%; border-radius: 12px; border: 1.5px solid #FDA4AF; box-shadow: 0 4px 14px rgba(244, 63, 94, 0.15); padding: 4px; background: #FFFFFF;" />
+            <span style="font-size: 11.5px; font-weight: 700; color: #BE123C; margin-top: 8px;">Scan via DuitNow
+              QR</span>
+            <span style="font-size: 10px; color: var(--text-muted); margin-top: 2px;">Touch 'n Go • Maybank MAE •
+              GrabPay • ShopeePay • Bank Apps</span>
           </div>
         </div>
 
@@ -877,7 +974,8 @@
         <div class="footer-profile-left">
           <div class="footer-avatar-circle">
             <svg viewBox="0 0 24 24" width="16" height="16" fill="currentColor">
-              <path d="M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm0 3c1.66 0 3 1.34 3 3s-1.34 3-3 3-3-1.34-3-3 1.34-3 3-3zm0 14.2c-2.5 0-4.71-1.28-6-3.22.03-1.99 4-3.08 6-3.08 1.99 0 5.97 1.09 6 3.08-1.29 1.94-3.5 3.22-6 3.22z"/>
+              <path
+                d="M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm0 3c1.66 0 3 1.34 3 3s-1.34 3-3 3-3-1.34-3-3 1.34-3 3-3zm0 14.2c-2.5 0-4.71-1.28-6-3.22.03-1.99 4-3.08 6-3.08 1.99 0 5.97 1.09 6 3.08-1.29 1.94-3.5 3.22-6 3.22z" />
             </svg>
           </div>
           <div class="footer-profile-text">
@@ -885,10 +983,12 @@
             <span class="footer-student-handle">@siswa.um.edu.my</span>
           </div>
         </div>
-        <a href="https://spectrum.um.edu.my/my/" target="_blank" rel="noopener noreferrer" class="footer-portal-link" title="Open SPeCTRUM Portal">
+        <a href="https://spectrum.um.edu.my/my/" target="_blank" rel="noopener noreferrer" class="footer-portal-link"
+          title="Open SPeCTRUM Portal">
           <svg viewBox="0 0 20 20" width="14" height="14" fill="currentColor">
-            <path d="M11 3a1 1 0 100 2h2.586l-6.293 6.293a1 1 0 101.414 1.414L15 6.414V9a1 1 0 102 0V4a1 1 0 00-1-1h-5z"/>
-            <path d="M5 5a2 2 0 00-2 2v8a2 2 0 002 2h8a2 2 0 002-2v-3a1 1 0 10-2 0v3H5V7h3a1 1 0 000-2H5z"/>
+            <path
+              d="M11 3a1 1 0 100 2h2.586l-6.293 6.293a1 1 0 101.414 1.414L15 6.414V9a1 1 0 102 0V4a1 1 0 00-1-1h-5z" />
+            <path d="M5 5a2 2 0 00-2 2v8a2 2 0 002 2h8a2 2 0 002-2v-3a1 1 0 10-2 0v3H5V7h3a1 1 0 000-2H5z" />
           </svg>
         </a>
       </div>
@@ -896,7 +996,8 @@
       <div class="footer-utility-row">
         <a href="https://spectrum.um.edu.my/" target="_blank" class="footer-chip-btn">SPeCTRUM ↗</a>
         <a href="https://t.me/" target="_blank" class="footer-chip-btn">Telegram Bot</a>
-        <button type="button" id="footerDonateBtn" class="footer-chip-btn" style="color: #BE123C; font-weight: 700;">☕ Donate</button>
+        <button type="button" id="footerDonateBtn" class="footer-chip-btn" style="color: #BE123C; font-weight: 700;">☕
+          Donate</button>
         <button type="button" id="footerDemoBtn" class="footer-chip-btn">Demo Mode</button>
       </div>
     </footer>

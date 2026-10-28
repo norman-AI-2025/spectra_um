@@ -364,6 +364,15 @@ export function resolveCourseOccurrence(course, occurrencesMap = {}) {
   if (course.code && occurrencesMap[String(course.code).toUpperCase()]) return occurrencesMap[String(course.code).toUpperCase()];
   if (course.shortname && occurrencesMap[course.shortname]) return occurrencesMap[course.shortname];
 
+  // If course.code contains slashes e.g. "WIA2003/WIB2003"
+  if (course.code && course.code.includes("/")) {
+    const parts = course.code.split("/");
+    for (const p of parts) {
+      const cleanP = p.trim().toUpperCase();
+      if (occurrencesMap[cleanP]) return occurrencesMap[cleanP];
+    }
+  }
+
   // Check all codes found in course.name or course.shortname (e.g. WIA2007/WIX3004)
   const allText = `${course.code || ""} ${course.shortname || ""} ${course.name || ""}`;
   const codes = allText.match(/\b[A-Z]{3,4}\s*\d{4}[A-Z]?\b/gi) || [];
@@ -374,7 +383,7 @@ export function resolveCourseOccurrence(course, occurrencesMap = {}) {
   return "";
 }
 
-export async function fetchLiveAllAttendance(courses = [], sesskey, occurrencesMap = {}, referenceDate) {
+export async function fetchLiveAllAttendance(courses = [], sesskey, occurrencesMap = {}, referenceDate, defaultOccurrence = "") {
   const records = [];
   const openSessions = [];
 
@@ -387,7 +396,7 @@ export async function fetchLiveAllAttendance(courses = [], sesskey, occurrencesM
   let coursesWithAttendance = 0;
 
   const settledResults = await pMap(courses, async (course) => {
-    const occ = resolveCourseOccurrence(course, occurrencesMap);
+    const occ = resolveCourseOccurrence(course, occurrencesMap) || defaultOccurrence || "";
     try {
       return await fetchCourseAttendance({
         courseId: course.id,
@@ -422,7 +431,7 @@ export async function fetchLiveAllAttendance(courses = [], sesskey, occurrencesM
     const course = courses[i];
     const record = settledRecords[i];
     if (!record) continue;
-    const occ = resolveCourseOccurrence(course, occurrencesMap);
+    const occ = resolveCourseOccurrence(course, occurrencesMap) || defaultOccurrence || "";
 
     records.push(record);
 

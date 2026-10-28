@@ -5,9 +5,9 @@
  */
 if (typeof console === "undefined") {
   globalThis.console = {
-    log: typeof print !== "undefined" ? print : () => {},
-    warn: typeof print !== "undefined" ? print : () => {},
-    error: typeof print !== "undefined" ? print : () => {}
+    log: typeof print !== "undefined" ? print : () => { },
+    warn: typeof print !== "undefined" ? print : () => { },
+    error: typeof print !== "undefined" ? print : () => { }
   };
 }
 
@@ -19,7 +19,8 @@ import {
   parseAttendanceForm,
   parseAttendanceSessionDate,
   isAttendanceSessionPastOrCurrent,
-  extractStartTime
+  extractStartTime,
+  extractAllOccurrenceNumbers
 } from "../utils/parser.js";
 
 import {
@@ -855,6 +856,72 @@ assert(courseAttResult.summary.takenSessions === 2, "Metrics takenSessions is 2 
 assert(courseAttResult.summary.presentCount === 1, "Present count is 1");
 assert(courseAttResult.summary.absentCount === 1, "Absent count is 1");
 assert(courseAttResult.summary.percentage === "50.0%", "Attendance score is 50.0% (not penalized by upcoming sessions)");
+
+// -------------------------------------------------------------
+// 10. Real SPeCTRUM 5-Column Table & Multi-Occurrence [OCC 3, 4, 5, 6, and 7] Tests
+// -------------------------------------------------------------
+console.log("\n=== Testing Real SPeCTRUM 5-Column Attendance Format (WIA2003) ===");
+const realMoodle5ColHtml = `
+  <div class="attendance_view">
+    <table class="generaltable attlist">
+      <thead>
+        <tr>
+          <th>Date</th><th>Description</th><th>Status</th><th>Points</th><th>Remarks</th>
+        </tr>
+      </thead>
+      <tbody>
+        <tr>
+          <td>Mon 12 Oct 2026 2PM - 4PM</td>
+          <td>Regular class session</td>
+          <td>Present</td>
+          <td>2 / 2</td>
+          <td>Self-recorded</td>
+        </tr>
+        <tr>
+          <td>Mon 19 Oct 2026 2PM - 4PM</td>
+          <td>Regular class session</td>
+          <td>Present</td>
+          <td>2 / 2</td>
+          <td>Self-recorded</td>
+        </tr>
+        <tr>
+          <td>Mon 26 Oct 2026 2PM - 4PM</td>
+          <td>Regular class session</td>
+          <td>Present</td>
+          <td>2 / 2</td>
+          <td>Self-recorded</td>
+        </tr>
+      </tbody>
+    </table>
+    <div class="box generalbox">
+      <div>Taken sessions: 3</div>
+      <div>Points over taken sessions: 6 / 6</div>
+      <div>Percentage over taken sessions: 100.0%</div>
+    </div>
+  </div>
+`;
+
+const tarakActName = "Attendance for Lecture (OCC 3, 4, 5, 6, 7)";
+const tarakSection = "Announcements by Dr. Tarak Nandy [OCC 3, 4, 5, 6, and 7]";
+
+// Test multi-occurrence extraction with "and"
+const secOccs = extractAllOccurrenceNumbers(tarakSection);
+assert(secOccs.includes(3), "Section extracts Occ 3");
+assert(secOccs.includes(7), "Section extracts Occ 7 with 'and 7'");
+
+// Test parsing 5-column table
+const parsed5Col = parseAttendanceView(realMoodle5ColHtml, "Occ 3", new Date("2026-10-28"), tarakActName);
+assert(parsed5Col.sessions.length === 3, "Parses all 3 sessions from 5-column table");
+assert(parsed5Col.sessions[0].status === "present", "Session 1 recognized as Present");
+assert(parsed5Col.sessions[0].date === "Mon 12 Oct 2026", "Session 1 clean date without embedded time");
+assert(parsed5Col.sessions[0].time === "2PM - 4PM", "Session 1 embedded time cleanly extracted");
+assert(parsed5Col.sessions[0].points === "2 / 2", "Session 1 points cleanly extracted");
+assert(parsed5Col.sessions[0].remarks === "Self-recorded", "Session 1 remarks cleanly extracted");
+assert(parsed5Col.summary.presentCount === 3, "All 3 sessions counted as Present");
+assert(parsed5Col.summary.unrecordedCount === 0, "0 unrecorded sessions");
+assert(parsed5Col.summary.takenSessions === 3, "Summary taken sessions is 3");
+assert(parsed5Col.summary.points === "6 / 6", "Summary points is 6 / 6");
+assert(parsed5Col.summary.percentage === "100.0%", "Summary percentage is 100.0%");
 
 console.log(`\n=== All Attendance Tests Finished: ${passed} passed, ${failed} failed ===`);
 if (failed > 0) {

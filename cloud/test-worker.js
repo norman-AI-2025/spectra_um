@@ -9,6 +9,9 @@
 // -------------------------------------------------------------------
 // Polyfills & Mock Runtime for Cloudflare Workers Environment
 // -------------------------------------------------------------------
+if (typeof print === "undefined") {
+  globalThis.print = console.log;
+}
 if (typeof console === "undefined") {
   globalThis.console = {
     log: (...args) => print("[WORKER]", ...args),
