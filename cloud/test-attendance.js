@@ -75,6 +75,16 @@ assert(matchesOccurrence("OCC3-OCC5-OCC8-OCC9", "Occ 3") === true, "MultiOcc: Gr
 assert(matchesOccurrence("OCC3-OCC5-OCC8-OCC9", "Occ 5") === true, "MultiOcc: Group column matches Occ 5");
 assert(matchesOccurrence("OCC3-OCC5-OCC8-OCC9", "Occ 1") === false, "MultiOcc: Group column excludes Occ 1");
 
+// Hyphen separated list tests (e.g. SPeCTRUM "Attendance for Occ - 3, 6, 9, 12")
+const hyphenOccTitle = "Attendance for Occ - 3, 6, 9, 12";
+assert(matchesOccurrence("", "Occ 3", "", hyphenOccTitle) === true, "HyphenOcc: Matches Occ 3");
+assert(matchesOccurrence("", "Occ 6", "", hyphenOccTitle) === true, "HyphenOcc: Matches Occ 6");
+assert(matchesOccurrence("", "Occ 9", "", hyphenOccTitle) === true, "HyphenOcc: Matches Occ 9");
+assert(matchesOccurrence("", "Occ 12", "", hyphenOccTitle) === true, "HyphenOcc: Matches Occ 12");
+assert(matchesOccurrence("", "3", "", hyphenOccTitle) === true, "HyphenOcc: Matches student purely configured as 3");
+assert(matchesOccurrence("", "Occ 1", "", hyphenOccTitle) === false, "HyphenOcc: Strictly excludes Occ 1");
+assert(matchesOccurrence("", "Occ 2", "", hyphenOccTitle) === false, "HyphenOcc: Strictly excludes Occ 2");
+
 // Occurrence Range Tests
 assert(matchesOccurrence("OCC 1-4", "Occ 2") === true, "Range: OCC 1-4 matches Occ 2");
 assert(matchesOccurrence("OCC 1 - OCC 4", "Occ 4") === true, "Range: OCC 1 - OCC 4 matches Occ 4");

@@ -121,6 +121,27 @@ export function isOverdueMoreThan40Days(dueTimestamp, now = Date.now()) {
 export const isOverdueMoreThan100Days = isOverdueMoreThan40Days;
 
 /**
+ * Safely parses HTML into a DOM Document without violating Chrome Extension MV3 CSP.
+ * Pre-strips <script> blocks and inline event handler attributes (onload, onerror, onclick, onchange, etc.)
+ * before passing the string to DOMParser, preventing inline script/handler execution warnings.
+ */
+export function safeParseHtml(html) {
+  if (!html || typeof html !== "string") return null;
+  if (typeof DOMParser === "undefined") return null;
+
+  try {
+    const cleanHtml = html
+      .replace(/<script\b[^<]*(?:(?!<\/script>)<[^<]*)*<\/script>/gi, "")
+      .replace(/\s+on[a-zA-Z]+\s*=\s*(?:"[^"]*"|'[^']*'|[^\s>]+)/gi, "");
+
+    const parser = new DOMParser();
+    return parser.parseFromString(cleanHtml, "text/html");
+  } catch (_) {
+    return null;
+  }
+}
+
+/**
  * Strict differentiator:
  * Identifies whether an activity or calendar event represents an Attendance check-in / session,
  * to ensure attendance is NEVER mixed into coursework submission due / dropboxes.
@@ -226,8 +247,8 @@ export function parseCalendarEvents(sourceData) {
 
   // Case 2: Raw HTML string parsing
   if (typeof sourceData === "string") {
-    const parser = new DOMParser();
-    const doc = parser.parseFromString(sourceData, "text/html");
+    const doc = safeParseHtml(sourceData);
+    if (!doc) return [];
     const events = [];
 
     // Query calendar event containers
@@ -447,10 +468,9 @@ export function parseCourseAssignmentsIndex(html, courseCode = "", courseName = 
   // 1. DOMParser Method (Browser / Extensions)
   if (typeof DOMParser !== "undefined") {
     try {
-      const parser = new DOMParser();
-      const doc = parser.parseFromString(html, "text/html");
-
-      const rows = doc.querySelectorAll("table.generaltable tr, table.mod_index tr");
+      const doc = safeParseHtml(html);
+      if (doc) {
+        const rows = doc.querySelectorAll("table.generaltable tr, table.mod_index tr");
       rows.forEach((tr, idx) => {
         const linkEl = tr.querySelector("a[href*='mod/assign/view.php']");
         if (!linkEl) return;
@@ -517,6 +537,7 @@ export function parseCourseAssignmentsIndex(html, courseCode = "", courseName = 
       });
 
       if (assignments.length > 0) return assignments;
+      }
     } catch (e) {
       console.warn("[Spectra Parser] DOM parseCourseAssignmentsIndex error:", e);
     }
@@ -603,10 +624,9 @@ export function parseCourseQuizzesIndex(html, courseCode = "", courseName = "", 
   // 1. DOMParser Method (Browser / Extensions)
   if (typeof DOMParser !== "undefined") {
     try {
-      const parser = new DOMParser();
-      const doc = parser.parseFromString(html, "text/html");
-
-      const rows = doc.querySelectorAll("table.generaltable tr, table.mod_index tr");
+      const doc = safeParseHtml(html);
+      if (doc) {
+        const rows = doc.querySelectorAll("table.generaltable tr, table.mod_index tr");
       rows.forEach((tr, idx) => {
         const linkEl = tr.querySelector("a[href*='mod/quiz/view.php']");
         if (!linkEl) return;
@@ -676,6 +696,7 @@ export function parseCourseQuizzesIndex(html, courseCode = "", courseName = "", 
       });
 
       if (quizzes.length > 0) return quizzes;
+      }
     } catch (e) {
       console.warn("[Spectra Parser] DOM parseCourseQuizzesIndex error:", e);
     }
@@ -766,8 +787,9 @@ export function parseAssignmentViewPage(html) {
 
   if (typeof DOMParser !== "undefined") {
     try {
-      const doc = new DOMParser().parseFromString(html, "text/html");
-      const rows = doc.querySelectorAll("table.generaltable tr, .submissionstatustable tr, table tr");
+      const doc = safeParseHtml(html);
+      if (doc) {
+        const rows = doc.querySelectorAll("table.generaltable tr, .submissionstatustable tr, table tr");
       rows.forEach((tr) => {
         const th = (tr.querySelector("th, td.c0, td:first-child")?.textContent || "").trim().toLowerCase();
         const td = (tr.querySelector("td.c1, td:last-child")?.textContent || "").trim();
@@ -829,6 +851,7 @@ export function parseAssignmentViewPage(html) {
             submissionStatus = "Submitted";
           }
         }
+      }
       }
     } catch (_) { }
   }
@@ -901,10 +924,9 @@ export function parseCourseViewSubmissions(html, courseCode = "", courseName = "
   // 1. DOMParser Method
   if (typeof DOMParser !== "undefined") {
     try {
-      const parser = new DOMParser();
-      const doc = parser.parseFromString(html, "text/html");
-
-      const activityLinks = doc.querySelectorAll(
+      const doc = safeParseHtml(html);
+      if (doc) {
+        const activityLinks = doc.querySelectorAll(
         "a[href*='mod/assign/view.php'], a[href*='mod/quiz/view.php'], a[href*='mod/workshop/view.php'], a[href*='mod/turnitintooltwo/view.php']"
       );
 
@@ -1003,6 +1025,7 @@ export function parseCourseViewSubmissions(html, courseCode = "", courseName = "
       });
 
       if (submissions.length > 0) return submissions;
+      }
     } catch (e) {
       console.warn("[Spectra Parser] DOM parseCourseViewSubmissions error:", e);
     }
@@ -1142,8 +1165,8 @@ export function detectFileExtension(title, url, iconSrc = "") {
 export function parseCoursePage(html, requestedWeek = null) {
   if (!html) return {};
 
-  const parser = new DOMParser();
-  const doc = parser.parseFromString(html, "text/html");
+  const doc = safeParseHtml(html);
+  if (!doc) return {};
   const weeksMap = {};
 
   // Sections in Moodle are typically li.section, div.section, or #section-N
@@ -1222,8 +1245,8 @@ export function parseCoursePage(html, requestedWeek = null) {
  */
 export function parseEnrolledCourses(html) {
   if (!html) return [];
-  const parser = new DOMParser();
-  const doc = parser.parseFromString(html, "text/html");
+  const doc = safeParseHtml(html);
+  if (!doc) return [];
   const courses = [];
   const seenIds = new Set();
 
@@ -1344,10 +1367,9 @@ export function parseForumDiscussions(html, courseCode = "UM") {
   // Method 1: DOMParser (when available in window / browser context)
   if (typeof DOMParser !== "undefined") {
     try {
-      const parser = new DOMParser();
-      const doc = parser.parseFromString(html, "text/html");
-
-      const rows = doc.querySelectorAll("tr.discussion, .discussion-list .discussion, tr[data-discussionid]");
+      const doc = safeParseHtml(html);
+      if (doc) {
+        const rows = doc.querySelectorAll("tr.discussion, .discussion-list .discussion, tr[data-discussionid]");
       rows.forEach((row, idx) => {
         try {
           const topicEl = row.querySelector(".topic a, a[href*='discuss.php?d=']");
@@ -1402,6 +1424,7 @@ export function parseForumDiscussions(html, courseCode = "UM") {
           return idB - idA;
         });
         return discussions;
+      }
       }
     } catch (domErr) {
       console.warn("DOMParser error in parseForumDiscussions, falling back to regex:", domErr);
@@ -1511,7 +1534,7 @@ export function extractAllOccurrenceNumbers(text) {
   const numbers = new Set();
 
   // 1. Check for explicit ranges: e.g. "occ 1 to 4", "occ 1 to occ 4", "group 1 hingga 3", or "group 1-3" / "occ 1-4"
-  const rangeWordRegex = /\b(?:occ(?:urrence)?|kumpulan|kump|group|tut(?:orial)?|lecture\s+group|lec\s+group|kumpulan\s+kuliah)\s*#?\s*0*(\d+)\s*(?:to|hingga|sampai)\s*(?:(?:occ(?:urrence)?|kumpulan|kump|group|tut(?:orial)?|lecture\s+group|lec\s+group|kumpulan\s+kuliah)\s*#?\s*)?0*(\d+)\b/gi;
+  const rangeWordRegex = /\b(?:occ(?:urrence)?|kumpulan|kump|group|tut(?:orial)?|lecture\s+group|lec\s+group|kumpulan\s+kuliah)\s*[-–—:#]?\s*#?\s*0*(\d+)\s*(?:to|hingga|sampai)\s*(?:(?:occ(?:urrence)?|kumpulan|kump|group|tut(?:orial)?|lecture\s+group|lec\s+group|kumpulan\s+kuliah)\s*[-–—:#]?\s*#?\s*)?0*(\d+)\b/gi;
   let rangeMatch;
   while ((rangeMatch = rangeWordRegex.exec(str)) !== null) {
     const start = parseInt(rangeMatch[1], 10);
@@ -1522,7 +1545,7 @@ export function extractAllOccurrenceNumbers(text) {
   }
 
   // Pure hyphen range without prefix on second number: e.g. "group 1-3" or "occ 1-4" (not "occ3-occ5")
-  const hyphenRangeRegex = /\b(?:occ(?:urrence)?|kumpulan|kump|group|tut(?:orial)?)\s*#?\s*0*(\d+)\s*-\s*0*(\d+)\b(?!\s*-\s*(?:occ|group|kump|\d))/gi;
+  const hyphenRangeRegex = /\b(?:occ(?:urrence)?|kumpulan|kump|group|tut(?:orial)?)\s*[-–—:#]?\s*#?\s*0*(\d+)\s*-\s*0*(\d+)\b(?!\s*-\s*(?:occ|group|kump|\d))/gi;
   while ((rangeMatch = hyphenRangeRegex.exec(str)) !== null) {
     const start = parseInt(rangeMatch[1], 10);
     const end = parseInt(rangeMatch[2], 10);
@@ -1531,17 +1554,8 @@ export function extractAllOccurrenceNumbers(text) {
     }
   }
 
-  // 2. Check for tokens with explicit occurrence/group prefixes:
-  // e.g. "Group 2", "OCC3", "OCC5", "kumpulan 1", "tutorial 3", "Lecture Group 2"
-  const tokenRegex = /(?:\b(?:occ(?:urrence)?|kumpulan|kump|group|tut(?:orial)?|lecture\s+group|lec\s+group|kumpulan\s+kuliah)\s*#?\s*|\b[ktg]\s*#?\s*)0*(\d+)\b/gi;
-  let tokenMatch;
-  while ((tokenMatch = tokenRegex.exec(str)) !== null) {
-    const n = parseInt(tokenMatch[1], 10);
-    if (!isNaN(n)) numbers.add(n);
-  }
-
-  // 3. Check for lists following an occurrence prefix, e.g. "OCC 3, 5, 8, 9", "OCC 3, 4, 5, 6, and 7", or "OCC3-5-8-9"
-  const listAfterPrefixRegex = /\b(?:occ(?:urrence)?|kumpulan|kump|group|tut(?:orial)?|lecture\s+group|lec\s+group|kumpulan\s+kuliah)\s*#?\s*0*(\d+)(?:(?:\s*[,/&-]\s*|\s+(?:and|dan)\s*|\s*,\s*(?:and|dan)\s*)\s*0*(\d+))+/gi;
+  // 2. Check for lists following an occurrence prefix, e.g. "OCC 3, 5, 8, 9", "OCC - 3, 6, 9, 12", "OCC 3, 4, 5, 6, and 7", or "OCC3-5-8-9"
+  const listAfterPrefixRegex = /\b(?:occ(?:urrence)?|kumpulan|kump|group|tut(?:orial)?|lecture\s+group|lec\s+group|kumpulan\s+kuliah)\s*[-–—:#]?\s*#?\s*0*(\d+)(?:(?:\s*[,/&-]\s*|\s+(?:and|dan)\s*|\s*,\s*(?:and|dan)\s*)\s*0*(\d+))+/gi;
   let listMatch;
   while ((listMatch = listAfterPrefixRegex.exec(str)) !== null) {
     const subDigits = listMatch[0].match(/\b0*(\d+)\b/g);
@@ -1551,6 +1565,15 @@ export function extractAllOccurrenceNumbers(text) {
         if (!isNaN(n)) numbers.add(n);
       });
     }
+  }
+
+  // 3. Check for tokens with explicit occurrence/group prefixes:
+  // e.g. "Group 2", "OCC3", "OCC - 3", "kumpulan 1", "tutorial 3", "Lecture Group 2"
+  const tokenRegex = /(?:\b(?:occ(?:urrence)?|kumpulan|kump|group|tut(?:orial)?|lecture\s+group|lec\s+group|kumpulan\s+kuliah)\s*[-–—:#]?\s*#?\s*|\b[ktg]\s*[-–—:#]?\s*#?\s*)0*(\d+)\b/gi;
+  let tokenMatch;
+  while ((tokenMatch = tokenRegex.exec(str)) !== null) {
+    const n = parseInt(tokenMatch[1], 10);
+    if (!isNaN(n)) numbers.add(n);
   }
 
   // 4. If the string is purely numeric or just a number with padding, e.g. "01", "1", "2"
@@ -1667,35 +1690,35 @@ export function parseAttendanceIndex(html) {
 
   if (typeof DOMParser !== "undefined") {
     try {
-      const parser = new DOMParser();
-      const doc = parser.parseFromString(html, "text/html");
-
-      // 1. Look for view.php links anywhere on the page
-      const aEls = doc.querySelectorAll("a[href*='mod/attendance/view.php']");
-      aEls.forEach((a) => {
-        const href = a.getAttribute("href") || "";
-        const idMatch = href.match(/id=(\d+)/);
-        if (idMatch) {
-          const text = a.textContent.trim() || a.getAttribute("title") || "Attendance";
-          addInstance(idMatch[1], text, href);
-        }
-      });
-
-      // 2. Look for modtype_attendance containers across all sections (top to bottom)
-      const actContainers = doc.querySelectorAll(".modtype_attendance, li.activity.attendance, div.activityinstance");
-      actContainers.forEach((el) => {
-        const a = el.querySelector("a[href*='mod/attendance/']");
-        if (a) {
+      const doc = safeParseHtml(html);
+      if (doc) {
+        // 1. Look for view.php links anywhere on the page
+        const aEls = doc.querySelectorAll("a[href*='mod/attendance/view.php']");
+        aEls.forEach((a) => {
           const href = a.getAttribute("href") || "";
           const idMatch = href.match(/id=(\d+)/);
           if (idMatch) {
-            const text = a.textContent.trim() || el.querySelector(".instancename")?.textContent?.trim() || "Attendance";
+            const text = a.textContent.trim() || a.getAttribute("title") || "Attendance";
             addInstance(idMatch[1], text, href);
           }
-        }
-      });
+        });
 
-      if (links.length > 0) return links;
+        // 2. Look for modtype_attendance containers across all sections (top to bottom)
+        const actContainers = doc.querySelectorAll(".modtype_attendance, li.activity.attendance, div.activityinstance");
+        actContainers.forEach((el) => {
+          const a = el.querySelector("a[href*='mod/attendance/']");
+          if (a) {
+            const href = a.getAttribute("href") || "";
+            const idMatch = href.match(/id=(\d+)/);
+            if (idMatch) {
+              const text = a.textContent.trim() || el.querySelector(".instancename")?.textContent?.trim() || "Attendance";
+              addInstance(idMatch[1], text, href);
+            }
+          }
+        });
+
+        if (links.length > 0) return links;
+      }
     } catch (e) { }
   }
 
@@ -1738,34 +1761,34 @@ export function parseAttendanceTabs(html, cmid, baseUrl = "https://spectrum.um.e
 
   if (typeof DOMParser !== "undefined") {
     try {
-      const parser = new DOMParser();
-      const doc = parser.parseFromString(html, "text/html");
-
-      // Tab navigation: nav-tabs, nav-pills, tabtree, attendance-tabs, ul.nav, etc.
-      const tabLinks = doc.querySelectorAll(
-        ".nav-tabs a, .nav-pills a, .tabtree a, .attendance-tabs a, ul.nav a, a[href*='mod/attendance/view.php']"
-      );
-      tabLinks.forEach((a) => {
-        const href = a.getAttribute("href") || "";
-        const label = a.textContent.trim();
-        if (href && (href.includes("view=") || href.includes("group=") || href.includes("curdate="))) {
-          addTab(label, href, href.includes("group="));
-        }
-      });
-
-      // Group select dropdowns: <select name="group">
-      const groupSelects = doc.querySelectorAll("select[name='group']");
-      groupSelects.forEach((select) => {
-        select.querySelectorAll("option").forEach((opt) => {
-          const val = opt.getAttribute("value");
-          const label = opt.textContent.trim();
-          if (val && val !== "0" && cmid) {
-            addTab(label, `/mod/attendance/view.php?id=${cmid}&group=${val}&view=5`, true);
+      const doc = safeParseHtml(html);
+      if (doc) {
+        // Tab navigation: nav-tabs, nav-pills, tabtree, attendance-tabs, ul.nav, etc.
+        const tabLinks = doc.querySelectorAll(
+          ".nav-tabs a, .nav-pills a, .tabtree a, .attendance-tabs a, ul.nav a, a[href*='mod/attendance/view.php']"
+        );
+        tabLinks.forEach((a) => {
+          const href = a.getAttribute("href") || "";
+          const label = a.textContent.trim();
+          if (href && (href.includes("view=") || href.includes("group=") || href.includes("curdate="))) {
+            addTab(label, href, href.includes("group="));
           }
         });
-      });
 
-      if (tabs.length > 0) return tabs;
+        // Group select dropdowns: <select name="group">
+        const groupSelects = doc.querySelectorAll("select[name='group']");
+        groupSelects.forEach((select) => {
+          select.querySelectorAll("option").forEach((opt) => {
+            const val = opt.getAttribute("value");
+            const label = opt.textContent.trim();
+            if (val && val !== "0" && cmid) {
+              addTab(label, `/mod/attendance/view.php?id=${cmid}&group=${val}&view=5`, true);
+            }
+          });
+        });
+
+        if (tabs.length > 0) return tabs;
+      }
     } catch (e) { }
   }
 
@@ -2012,11 +2035,15 @@ export function parseAttendanceView(html, studentOccurrence = "", referenceDate 
   // 1. DOMParser Method (Browser / Popup)
   if (typeof DOMParser !== "undefined") {
     try {
-      const parser = new DOMParser();
-      const doc = parser.parseFromString(html, "text/html");
+      const doc = safeParseHtml(html);
+      if (doc) {
+        // Discover page-level heading or occurrence title if present (e.g. "Attendance for Occ - 3, 6, 9, 12")
+        const pageHeadingEl = doc.querySelector("h2, h3, .page-header-headings h1, .page-header-headings h2, #page-header h2");
+        const pageHeading = pageHeadingEl ? pageHeadingEl.textContent.trim() : "";
+        const effectiveActivityName = [activityName, pageHeading].filter(Boolean).join(" ");
 
-      // Extract Sessions Table
-      const tables = doc.querySelectorAll("table.attlist, table.generaltable");
+        // Extract Sessions Table
+        const tables = doc.querySelectorAll("table.attlist, table.generaltable");
       tables.forEach((table) => {
         let colDate = -1;
         let colTime = -1;
@@ -2161,7 +2188,7 @@ export function parseAttendanceView(html, studentOccurrence = "", referenceDate 
             statusLabel = "Excused";
           }
 
-          const isMatch = matchesOccurrence(groupText, studentOccurrence, descText, activityName);
+          const isMatch = matchesOccurrence(groupText, studentOccurrence, descText, effectiveActivityName);
           const sessionTs = parseAttendanceSessionDate(dateText, timeText, referenceDate);
           const isPastOrCurrent = isAttendanceSessionPastOrCurrent(dateText, timeText, status, referenceDate);
 
@@ -2192,7 +2219,7 @@ export function parseAttendanceView(html, studentOccurrence = "", referenceDate 
             isPastOrCurrent,
             group: groupText,
             description: descText,
-            activityName,
+            activityName: effectiveActivityName || activityName,
             status,
             statusLabel,
             points: pointsText,
@@ -2233,6 +2260,7 @@ export function parseAttendanceView(html, studentOccurrence = "", referenceDate 
         const p = pctMatch[1].trim();
         summary.percentage = p.includes("%") ? p : `${p}%`;
       }
+      }
     } catch (e) {
       console.warn("[Spectra Parser] DOM attendance parsing error:", e);
     }
@@ -2240,6 +2268,10 @@ export function parseAttendanceView(html, studentOccurrence = "", referenceDate 
 
   // 2. Regex Method Fallback (if DOMParser is not available or returned 0 sessions)
   if (sessions.length === 0) {
+    const headingMatch = html.match(/<h[23][^>]*>([\s\S]*?)<\/h[23]>/i) || html.match(/class=["'][^"']*page-header-headings[^"']*["'][^>]*>([\s\S]*?)<\/div>/i);
+    const pageHeading = headingMatch ? headingMatch[1].replace(/<[^>]+>/g, "").trim() : "";
+    const effectiveActivityName = [activityName, pageHeading].filter(Boolean).join(" ");
+
     const rowRegex = /<tr[^>]*>([\s\S]*?)<\/tr>/gi;
     let rowMatch;
     let idx = 0;
@@ -2343,7 +2375,7 @@ export function parseAttendanceView(html, studentOccurrence = "", referenceDate 
         statusLabel = "Excused";
       }
 
-      const isMatch = matchesOccurrence(groupText, studentOccurrence, descText, activityName);
+      const isMatch = matchesOccurrence(groupText, studentOccurrence, descText, effectiveActivityName);
       const sessionTs = parseAttendanceSessionDate(dateText, timeText, referenceDate);
       const isPastOrCurrent = isAttendanceSessionPastOrCurrent(dateText, timeText, status, referenceDate);
 
@@ -2374,7 +2406,7 @@ export function parseAttendanceView(html, studentOccurrence = "", referenceDate 
         isPastOrCurrent,
         group: groupText,
         description: descText,
-        activityName,
+        activityName: effectiveActivityName || activityName,
         status,
         statusLabel,
         points: pointsText,
@@ -2482,24 +2514,26 @@ export function parseAttendanceForm(html) {
   // 1. DOMParser approach if available (Browser context)
   if (typeof DOMParser !== "undefined") {
     try {
-      const doc = new DOMParser().parseFromString(html, "text/html");
-      const presentRadio = Array.from(doc.querySelectorAll('label, span, div'))
-        .find(el => {
-          const txt = el.textContent.trim().toLowerCase();
-          return txt === 'present' || txt === 'hadir';
-        })
-        ?.closest('label')?.querySelector('input[type="radio"]') 
-        || Array.from(doc.querySelectorAll('input[type="radio"]')).find(r => {
-          const id = r.id;
-          const lbl = id ? doc.querySelector(`label[for="${id}"]`) : null;
-          const parentLbl = r.closest('label');
-          const txt = `${lbl?.textContent || ""} ${parentLbl?.textContent || ""} ${r.parentElement?.textContent || ""}`.trim().toLowerCase();
-          return /present|hadir|^p\b/.test(txt);
-        })
-        || doc.querySelector('input[type="radio"]');
+      const doc = safeParseHtml(html);
+      if (doc) {
+        const presentRadio = Array.from(doc.querySelectorAll('label, span, div'))
+          .find(el => {
+            const txt = el.textContent.trim().toLowerCase();
+            return txt === 'present' || txt === 'hadir';
+          })
+          ?.closest('label')?.querySelector('input[type="radio"]') 
+          || Array.from(doc.querySelectorAll('input[type="radio"]')).find(r => {
+            const id = r.id;
+            const lbl = id ? doc.querySelector(`label[for="${id}"]`) : null;
+            const parentLbl = r.closest('label');
+            const txt = `${lbl?.textContent || ""} ${parentLbl?.textContent || ""} ${r.parentElement?.textContent || ""}`.trim().toLowerCase();
+            return /present|hadir|^p\b/.test(txt);
+          })
+          || doc.querySelector('input[type="radio"]');
 
-      if (presentRadio && presentRadio.value) {
-        statusId = presentRadio.value;
+        if (presentRadio && presentRadio.value) {
+          statusId = presentRadio.value;
+        }
       }
     } catch (_) { }
   }
@@ -2895,33 +2929,35 @@ export function parseGradebookAttendance(html) {
   // 1. DOMParser approach (Browser)
   if (typeof DOMParser !== "undefined") {
     try {
-      const doc = new DOMParser().parseFromString(html, "text/html");
-      const rows = doc.querySelectorAll("table.user-grade tr, table.generaltable tr");
-      for (const tr of rows) {
-        const itemCell = tr.querySelector("th.item, td.item, td:first-child");
-        const itemText = (itemCell?.textContent || "").toLowerCase();
-        if (itemText.includes("attendance") || itemText.includes("kehadiran")) {
-          const cells = Array.from(tr.querySelectorAll("td"));
-          let gradeVal = "";
-          let rangeVal = "";
-          let percentageVal = "";
+      const doc = safeParseHtml(html);
+      if (doc) {
+        const rows = doc.querySelectorAll("table.user-grade tr, table.generaltable tr");
+        for (const tr of rows) {
+          const itemCell = tr.querySelector("th.item, td.item, td:first-child");
+          const itemText = (itemCell?.textContent || "").toLowerCase();
+          if (itemText.includes("attendance") || itemText.includes("kehadiran")) {
+            const cells = Array.from(tr.querySelectorAll("td"));
+            let gradeVal = "";
+            let rangeVal = "";
+            let percentageVal = "";
 
-          for (const td of cells) {
-            const text = td.textContent.trim();
-            if (/\d+[\.\,]?\d*\s*%/i.test(text)) {
-              percentageVal = text;
-            } else if (/^\d+[\.\,]?\d*(?:\s*\/\s*\d+[\.\,]?\d*)?$/.test(text) && !gradeVal) {
-              gradeVal = text;
-            } else if (/^\d+\s*[-–]\s*\d+$/.test(text) && !rangeVal) {
-              rangeVal = text;
+            for (const td of cells) {
+              const text = td.textContent.trim();
+              if (/\d+[\.\,]?\d*\s*%/i.test(text)) {
+                percentageVal = text;
+              } else if (/^\d+[\.\,]?\d*(?:\s*\/\s*\d+[\.\,]?\d*)?$/.test(text) && !gradeVal) {
+                gradeVal = text;
+              } else if (/^\d+\s*[-–]\s*\d+$/.test(text) && !rangeVal) {
+                rangeVal = text;
+              }
             }
-          }
 
-          return {
-            hasAttendance: true,
-            percentage: percentageVal || "N/A",
-            points: gradeVal ? (rangeVal ? `${gradeVal} / ${rangeVal}` : gradeVal) : "N/A"
-          };
+            return {
+              hasAttendance: true,
+              percentage: percentageVal || "N/A",
+              points: gradeVal ? (rangeVal ? `${gradeVal} / ${rangeVal}` : gradeVal) : "N/A"
+            };
+          }
         }
       }
     } catch (_) { }

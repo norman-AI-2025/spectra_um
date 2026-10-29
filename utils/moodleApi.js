@@ -8,7 +8,7 @@
  * 3. AUTH_REQUIRED UI state
  */
 
-import { extractCourseCode, parseCoursePage, parseEnrolledCourses } from "./parser.js";
+import { extractCourseCode, parseCoursePage, parseEnrolledCourses, safeParseHtml } from "./parser.js";
 
 const SPECTRUM_BASE_URL = "https://spectrum.um.edu.my";
 
@@ -491,31 +491,31 @@ export async function verifyAndFetchSesskey(sessionCookie) {
   }
 
   try {
-    const parser = new DOMParser();
-    const doc = parser.parseFromString(html, "text/html");
-
-    // Student Name DOM fallback
-    if (userName === "UM Student") {
-      const nameEl = doc.querySelector(".usertext, .logininfo a, .usermenu .usertext, span.user-name");
-      if (nameEl && nameEl.textContent.trim()) {
-        userName = nameEl.textContent.trim();
-      } else {
-        const altMatch = html.match(/alt="Picture of ([^"]+)"/i);
-        if (altMatch) userName = altMatch[1].trim();
+    const doc = safeParseHtml(html);
+    if (doc) {
+      // Student Name DOM fallback
+      if (userName === "UM Student") {
+        const nameEl = doc.querySelector(".usertext, .logininfo a, .usermenu .usertext, span.user-name");
+        if (nameEl && nameEl.textContent.trim()) {
+          userName = nameEl.textContent.trim();
+        } else {
+          const altMatch = html.match(/alt="Picture of ([^"]+)"/i);
+          if (altMatch) userName = altMatch[1].trim();
+        }
       }
-    }
 
-    // Student User ID
-    const userProfileLink = doc.querySelector('a[href*="/user/profile.php?id="], a[href*="/user/view.php?id="]');
-    if (userProfileLink) {
-      const idMatch = userProfileLink.href.match(/id=(\d+)/);
-      if (idMatch) userId = idMatch[1];
-    }
+      // Student User ID
+      const userProfileLink = doc.querySelector('a[href*="/user/profile.php?id="], a[href*="/user/view.php?id="]');
+      if (userProfileLink) {
+        const idMatch = userProfileLink.href.match(/id=(\d+)/);
+        if (idMatch) userId = idMatch[1];
+      }
 
-    // Avatar URL
-    const avatarEl = doc.querySelector(".userpicture, .userbutton img, .avatars img");
-    if (avatarEl) {
-      userAvatarUrl = avatarEl.getAttribute("src") || "";
+      // Avatar URL
+      const avatarEl = doc.querySelector(".userpicture, .userbutton img, .avatars img");
+      if (avatarEl) {
+        userAvatarUrl = avatarEl.getAttribute("src") || "";
+      }
     }
   } catch (domErr) {
     console.warn("[Spectra] Could not parse student profile elements:", domErr);
