@@ -235,7 +235,7 @@ async function runSpectrumPollingJob(env) {
       } catch (_) { }
     }
 
-    // 2. 24/7 Cloud Attendance Scanner & Auto-Submission
+    // 2. 24/7 Cloud Attendance Scanner & Alert
     const attendanceResult = await checkAndRecordCloudAttendance(env, sessionData);
 
     // 3. 24/7 Cloud Submission Deadline Scanner & Urgent Alert Dispatch
@@ -261,7 +261,7 @@ async function runSpectrumPollingJob(env) {
 }
 
 /**
- * 24/7 Cloud Attendance Scanner & Self-Checkin Routine
+ * 24/7 Cloud Attendance Scanner & Alert Routine
  */
 async function checkAndRecordCloudAttendance(env, sessionData) {
   const { sessionToken, courses = [], occurrences = {}, passwords = {} } = sessionData;
@@ -367,141 +367,41 @@ async function checkAndRecordCloudAttendance(env, sessionData) {
             ? submitUrl
             : `https://spectrum.um.edu.my/${submitUrl.replace(/^\//, "")}`;
 
-          const formRes = await fetch(formTargetUrl, {
-            headers: { "Cookie": cookieHeader, "User-Agent": "Mozilla/5.0 Spectra-Relay/1.0" }
-          });
-          if (!formRes.ok) continue;
-          const formHtml = await formRes.text();
-
-          const sesskeyM = formHtml.match(/name=["']sesskey["'][^>]*value=["']([^"']+)["']/i) ||
-            formHtml.match(/value=["']([^"']+)["'][^>]*name=["']sesskey["']/i) ||
-            formHtml.match(/"sesskey":"([^"]+)"/);
-          const formSesskey = sesskeyM ? sesskeyM[1] : (sessionData.sesskey || "");
-
-          const formSessidM = formHtml.match(/name=["']sessid["'][^>]*value=["']([^"']+)["']/i) ||
-            formHtml.match(/value=["']([^"']+)["'][^>]*name=["']sessid["']/i);
-          const formSessid = formSessidM ? formSessidM[1] : sessid;
-
-          let statusId = null;
-          const inputStatusRegex = /<input[^>]*name=["']status["'][^>]*>/gi;
-          let inMatch;
-          while ((inMatch = inputStatusRegex.exec(formHtml)) !== null) {
-            const tagStr = inMatch[0];
-            const valM = tagStr.match(/value=["'](\d+)["']/i);
-            const idM = tagStr.match(/id=["']([^"']+)["']/i);
-            if (!valM) continue;
-            const val = valM[1];
-
-            let isPresent = false;
-            if (idM) {
-              const labelForRegex = new RegExp(`<label[^>]*for=["']${idM[1]}["'][^>]*>([\\s\\S]*?)<\\/label>`, "i");
-              const lMatch = formHtml.match(labelForRegex);
-              if (lMatch && /present|hadir|^p\b/i.test(lMatch[1].replace(/<[^>]+>/g, "").trim())) {
-                isPresent = true;
+          // Inspect form to check whether attendance requires a password
+          let passwordText = "";
+          try {
+            const formRes = await fetch(formTargetUrl, {
+              headers: { "Cookie": cookieHeader, "User-Agent": "Mozilla/5.0 Spectra-Relay/1.0" }
+            });
+            if (formRes.ok) {
+              const formHtml = await formRes.text();
+              const requiresPassword = /<input[^>]+name=["'](studentpassword|password)["']/i.test(formHtml);
+              if (requiresPassword) {
+                if (storedPwd) {
+                  passwordText = `\n🔑 <b>Password:</b> <code>${storedPwd}</code>`;
+                } else {
+                  passwordText = `\n🔑 <b>Password:</b> Required (Check with your lecturer)`;
+                }
               }
             }
-            if (!isPresent) {
-              const afterInput = formHtml.substring(inputStatusRegex.lastIndex, inputStatusRegex.lastIndex + 300);
-              const nextLabelM = afterInput.match(/^[\s\S]*?<label[^>]*>([\s\S]*?)<\/label>/i);
-              if (nextLabelM && /present|hadir|^p\b/i.test(nextLabelM[1].replace(/<[^>]+>/g, "").trim())) {
-                isPresent = true;
-              }
-            }
-            if (!isPresent) {
-              const surrounding = formHtml.substring(Math.max(0, inMatch.index - 50), Math.min(formHtml.length, inMatch.index + 200));
-              if (/present|hadir/i.test(surrounding)) {
-                isPresent = true;
-              }
-            }
-            if (isPresent) {
-              statusId = val;
-              break;
-            }
+          } catch (_) { }
+
+          // Dispatch alert to user with direct submission link instead of auto-submitting
+          if (botToken && chatId) {
+            await dispatchTelegram(
+              botToken,
+              chatId,
+              `📢 <b>Spectra Alert: Attendance Submission Open!</b>\n` +
+              `<b>Course:</b> ${courseCode}\n` +
+              `<b>Occurrence:</b> ${studentOcc || groupText || "All students"}\n` +
+              `<b>Session:</b> ${descText} (${dateText} ${timeText})${passwordText}\n\n` +
+              `👉 <b>Please submit your attendance here:</b>\n` +
+              `<a href="${formTargetUrl}">${formTargetUrl}</a>`
+            );
           }
 
-          if (!statusId) {
-            const anyRadio = formHtml.match(/name=["']status["'][^>]*value=["'](\d+)["']/i) ||
-              formHtml.match(/value=["'](\d+)["'][^>]*name=["']status["']/i) ||
-              formHtml.match(/<input[^>]+type=["']radio["'][^>]*value=["'](\d+)["']/i) ||
-              formHtml.match(/value=["'](\d+)["'][^>]*type=["']radio["']/i);
-            if (anyRadio) statusId = anyRadio[1];
-          }
-
-          if (!statusId) continue;
-
-          const requiresPassword = /<input[^>]+name=["'](studentpassword|password)["']/i.test(formHtml);
-          if (requiresPassword && !storedPwd) {
-            if (botToken && chatId) {
-              await dispatchTelegram(
-                botToken,
-                chatId,
-                `⚠️ <b>Spectra Cloud Relay: Attendance Password Required</b>\n` +
-                `<b>Course:</b> ${courseCode}\n` +
-                `<b>Session:</b> ${descText} (${dateText} ${timeText})\n` +
-                `Please enter the attendance password in Spectra settings.`
-              );
-            }
-            continue;
-          }
-
-          let bodyStr = "";
-          if (typeof URLSearchParams !== "undefined") {
-            const postParams = new URLSearchParams();
-            postParams.append("sessid", formSessid);
-            postParams.append("sesskey", formSesskey);
-            postParams.append("mform_is_submitted", "1");
-            postParams.append("status", statusId);
-            postParams.append("submitbutton", "Save changes");
-            if (storedPwd) {
-              postParams.append("studentpassword", storedPwd);
-              postParams.append("password", storedPwd);
-            }
-            bodyStr = postParams.toString();
-          } else {
-            const parts = [
-              `sessid=${encodeURIComponent(formSessid)}`,
-              `sesskey=${encodeURIComponent(formSesskey)}`,
-              "mform_is_submitted=1",
-              `status=${encodeURIComponent(statusId)}`,
-              `submitbutton=${encodeURIComponent("Save changes")}`
-            ];
-            if (storedPwd) {
-              parts.push(`studentpassword=${encodeURIComponent(storedPwd)}`);
-              parts.push(`password=${encodeURIComponent(storedPwd)}`);
-            }
-            bodyStr = parts.join("&");
-          }
-
-          const postRes = await fetch("https://spectrum.um.edu.my/mod/attendance/attendance.php", {
-            method: "POST",
-            headers: {
-              "Cookie": cookieHeader,
-              "Content-Type": "application/x-www-form-urlencoded",
-              "User-Agent": "Mozilla/5.0 Spectra-Relay/1.0"
-            },
-            body: bodyStr
-          });
-
-          const postText = await postRes.text();
-          const redirectedToView = postRes.redirected && /\/mod\/attendance\/view\.php(?:\?|$)/i.test(postRes.url || "");
-          const confirmationText = /(?:your attendance has been (?:successfully )?recorded|attendance (?:has been|was) successfully recorded|kehadiran anda telah direkodkan|attendance recorded successfully)/i.test(postText);
-          if (postRes.ok && (redirectedToView || confirmationText)) {
-            recordedSessids.add(sessid);
-            recordedCount++;
-
-            if (botToken && chatId) {
-              await dispatchTelegram(
-                botToken,
-                chatId,
-                `✅ <b>Spectra Cloud Relay: Auto-Attendance Recorded!</b>\n` +
-                `<b>Course:</b> ${courseCode}\n` +
-                `<b>Occurrence:</b> ${studentOcc || "General"}\n` +
-                `<b>Session:</b> ${descText} (${dateText} ${timeText})\n` +
-                `<b>Status:</b> Present\n` +
-                `<i>Submitted automatically 24/7 via Cloudflare Relay!</i>`
-              );
-            }
-          }
+          recordedSessids.add(sessid);
+          recordedCount++;
         }
       }
     } catch (err) {
