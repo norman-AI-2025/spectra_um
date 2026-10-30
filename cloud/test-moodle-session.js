@@ -1,3 +1,7 @@
+if (typeof print === "undefined") {
+  globalThis.print = console.log;
+}
+
 if (typeof console === "undefined") {
   globalThis.console = {
     log: typeof print !== "undefined" ? print : () => {},

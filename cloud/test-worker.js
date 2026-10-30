@@ -429,6 +429,18 @@ async function runTestSuite() {
   const storedAnnouncements = await kv.get("sent_announcement_ids");
   assert(storedAnnouncements !== null && storedAnnouncements.includes("5501"), "Announcement 5501 persisted in sent_announcement_ids in KV");
 
+  // Test 13: Cloudflare -> Telegram Test Alert Route (POST /test-telegram)
+  print("\nTest 13: Cloudflare -> Telegram Test Alert Route");
+  const req13 = new MockRequest("https://worker.spectra.dev/test-telegram", {
+    method: "POST",
+    headers: { "Authorization": "Bearer test-auth-secret-123" }
+  });
+  const res13 = await worker.fetch(req13, env, new MockExecutionContext());
+  assert(res13.status === 200, "POST /test-telegram executes successfully");
+  const body13 = await res13.json();
+  assert(body13.success === true, "Reports success: true");
+  assert(body13.message.includes("successfully"), "Returns success confirmation message");
+
   // Summary
   print("\n=================================================================");
   print(`  Test Results: ${passedTests} passed, ${failedTests} failed`);

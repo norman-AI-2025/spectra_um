@@ -136,6 +136,58 @@ export default {
       });
     }
 
+    // Route: POST /test-telegram (Direct verification of Cloudflare -> Telegram alert delivery)
+    if (path === "/test-telegram" && request.method === "POST") {
+      let botToken = env.TELEGRAM_BOT_TOKEN;
+      let chatId = env.TELEGRAM_CHAT_ID;
+
+      // Fallback: Read from synced KV record if not in environment variables
+      if ((!botToken || !chatId) && env.SPECTRA_KV) {
+        const raw = await env.SPECTRA_KV.get("moodle_session");
+        if (raw) {
+          try {
+            const s = JSON.parse(raw);
+            botToken = botToken || s.telegramToken;
+            chatId = chatId || s.telegramChatId;
+          } catch (_) { }
+        }
+      }
+
+      if (!botToken || !chatId) {
+        return new Response(JSON.stringify({
+          error: "Missing TELEGRAM_BOT_TOKEN or TELEGRAM_CHAT_ID. Please configure them in Cloudflare Worker secrets or sync from Spectra extension settings."
+        }), {
+          status: 400,
+          headers: { "Content-Type": "application/json", ...corsHeaders }
+        });
+      }
+
+      try {
+        await dispatchTelegram(
+          botToken,
+          chatId,
+          `🤖 <b>Spectra Cloud Relay: Test Alert</b>\n\n` +
+          `✅ <b>Connection Successful!</b>\n` +
+          `Your Cloudflare Worker is successfully connected to Telegram and ready to deliver 24/7 attendance & announcement alerts.`
+        );
+
+        return new Response(JSON.stringify({
+          success: true,
+          message: "Telegram test alert sent successfully from Cloudflare Worker!"
+        }), {
+          status: 200,
+          headers: { "Content-Type": "application/json", ...corsHeaders }
+        });
+      } catch (err) {
+        return new Response(JSON.stringify({
+          error: `Telegram dispatch failed: ${err.message}`
+        }), {
+          status: 502,
+          headers: { "Content-Type": "application/json", ...corsHeaders }
+        });
+      }
+    }
+
     return new Response(JSON.stringify({ error: "Endpoint not found", requestedPath: path }), {
       status: 404,
       headers: { "Content-Type": "application/json", ...corsHeaders }

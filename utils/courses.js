@@ -6,7 +6,7 @@
  */
 
 import { extractCourseCode, parseCoursePage, parseEnrolledCourses, parseForumDiscussions, pMap } from "./parser.js";
-import { InvalidSessionError, AuthRequiredError, injectCookieToBrowser, getSessionContext } from "./moodleApi.js";
+import { InvalidSessionError, AuthRequiredError, getSessionContext } from "./moodleApi.js";
 
 const SPECTRUM_BASE_URL = "https://spectrum.um.edu.my";
 

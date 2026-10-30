@@ -10,7 +10,7 @@ import {
   getLiveEnrolledCourses,
   fetchLiveAnnouncements,
   injectAndScrapeSpectrum,
-  setupDeclarativeCookieRule,
+  removeDeclarativeCookieRule,
   AuthExpiredError
 } from "./utils/moodleApi.js";
 
@@ -74,41 +74,46 @@ chrome.runtime.onInstalled.addListener(async (details) => {
   // Register background alarms
   await setupAlarms(stored.poll_interval_mins || 15);
 
+  // Clear any legacy declarative rules to ensure login and browsing are never intercepted
+  await removeDeclarativeCookieRule();
+
   // Check active session cookie
   const session = await checkActiveSession();
-  if (session.authenticated && session.session?.value) {
-    await setupDeclarativeCookieRule(session.session.value);
-  }
 
-  // Run initial auto-attendance check
-  await checkAutoAttendance();
+  // Run initial auto-attendance check only if authenticated
+  if (session.authenticated) {
+    await checkAutoAttendance();
+  }
 });
 
 // Browser Startup Listener
 chrome.runtime.onStartup.addListener(async () => {
   console.log("[Spectra] Browser started up: refreshing alarms & running attendance check.");
+  await removeDeclarativeCookieRule();
   const stored = await chrome.storage.local.get(["poll_interval_mins"]);
   await setupAlarms(stored.poll_interval_mins || 15);
   const session = await checkActiveSession();
-  if (session.authenticated && session.session?.value) {
-    await setupDeclarativeCookieRule(session.session.value);
+  if (session.authenticated) {
+    await checkAutoAttendance();
   }
-  await checkAutoAttendance();
 });
 
 // Tab Navigation Listener (Triggers attendance scan when student opens SPeCTRUM in active tab)
 let lastTabAttendanceScan = 0;
 chrome.tabs.onUpdated.addListener(async (tabId, changeInfo, tab) => {
   if (changeInfo.status === "complete" && tab.url && tab.url.includes("spectrum.um.edu.my")) {
+    // DO NOT run checks or touch anything if the user is on login or authentication pages!
+    if (tab.url.includes("/login/") || tab.url.includes("login.php") || tab.url.includes("/auth/")) {
+      console.log("[Spectra] SPeCTRUM login/auth page active. Ensuring no rules intercept login.");
+      await removeDeclarativeCookieRule();
+      return;
+    }
+
     const now = Date.now();
     // Throttle to at most once every 60 seconds
     if (now - lastTabAttendanceScan > 60000) {
       lastTabAttendanceScan = now;
       console.log("[Spectra] SPeCTRUM active tab navigation detected. Scheduling attendance check.");
-      const stored = await chrome.storage.local.get(["moodle_session"]);
-      if (stored.moodle_session?.value) {
-        await setupDeclarativeCookieRule(stored.moodle_session.value);
-      }
       await checkAutoAttendance();
     }
   }
@@ -201,6 +206,7 @@ chrome.cookies.onChanged.addListener(async (changeInfo) => {
   if (removed) {
     console.log("[Spectra] MoodleSession cookie cleared.");
     lastKnownCookieValue = null;
+    await removeDeclarativeCookieRule();
     await chrome.storage.local.set({
       moodle_session: null,
       moodle_session_valid: false,
@@ -231,11 +237,6 @@ chrome.cookies.onChanged.addListener(async (changeInfo) => {
     moodle_session_valid: true,
     moodle_session_updated: Date.now()
   });
-
-  // Attach DeclarativeNetRequest header rule with new cookie
-  if (sessionData.value) {
-    await setupDeclarativeCookieRule(sessionData.value);
-  }
 
   // Auto-sync updated session to Cloud Relay if configured
   try {
@@ -278,6 +279,7 @@ async function checkActiveSession() {
 
     return { authenticated: true, session: sessionData };
   } catch (err) {
+    await removeDeclarativeCookieRule();
     await chrome.storage.local.set({
       moodle_session: null,
       moodle_session_valid: false,
@@ -587,7 +589,6 @@ async function checkAutoAttendance() {
     if (!cookie || !cookie.value) {
       return;
     }
-    await setupDeclarativeCookieRule(cookie.value);
 
     const store = await chrome.storage.local.get([
       "notify_attendance_open",
