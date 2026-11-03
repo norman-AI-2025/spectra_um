@@ -293,7 +293,7 @@ export async function fetchCourseAttendance({ courseId, courseCode = "UM", sessk
     const isPast = isAttendanceSessionPastOrCurrent(s.date, s.time, s.status, referenceDate);
     s.isPastOrCurrent = isPast;
     s.isUpcoming = Boolean(s.status === "open" || s.isToday || s.status === "today" || !isPast);
-    s.isHistory = Boolean(isPast && s.status !== "open" && s.status !== "today");
+    s.isHistory = Boolean(isPast && s.status !== "open" && s.status !== "today" && !s.isToday);
   });
 
   // Calculate summary metrics strictly from past till current date sessions

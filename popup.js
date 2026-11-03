@@ -2078,11 +2078,11 @@ async function loadLiveAttendanceData(force = false) {
   try {
     let attendanceData = null;
 
-    // 1. Check cached_attendance if not forcing refresh and cache is fresh (< 5 mins)
+    // 1. Check cached_attendance if not forcing refresh and cache is fresh (< 25s)
     if (!force && typeof chrome !== "undefined" && chrome.storage?.local) {
       const stored = await chrome.storage.local.get(["cached_attendance", "last_attendance_sync"]);
       const age = Date.now() - (stored.last_attendance_sync || 0);
-      if (age < 300000 && stored.cached_attendance && stored.cached_attendance.courses?.length > 0) {
+      if (age < 25000 && stored.cached_attendance && stored.cached_attendance.courses?.length > 0) {
         attendanceData = stored.cached_attendance;
         state.attendance = attendanceData;
         populateAttendanceCourseDropdowns();
@@ -2436,7 +2436,7 @@ function renderAttendanceRecords() {
       }
       const isPast = isAttendanceSessionPastOrCurrent(s.date, s.time, s.status);
       const isUp = Boolean(s.status === "open" || s.isToday || s.status === "today" || !isPast);
-      const isHist = Boolean(isPast && s.status !== "open" && s.status !== "today");
+      const isHist = Boolean(isPast && s.status !== "open" && s.status !== "today" && !s.isToday);
 
       allMatchingSessions.push({
         ...s,

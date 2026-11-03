@@ -259,29 +259,60 @@ async function runSpectrumPollingJob(env) {
     // Auto-discover enrolled courses if not yet populated in sessionData
     if (!sessionData.courses || sessionData.courses.length === 0) {
       try {
-        const myRes = await fetch("https://spectrum.um.edu.my/my/", {
-          headers: { "Cookie": cookieHeader, "User-Agent": "Mozilla/5.0 Spectra-Relay/1.0" }
-        });
-        if (myRes.ok) {
-          const myHtml = await myRes.text();
-          const discoveredCourses = [];
-          const seenIds = new Set();
-          const cRegex = /href=["'][^"']*\/course\/view\.php\?id=(\d+)[^"']*["'][^>]*>([\s\S]*?)<\/a>/gi;
-          let cm;
-          while ((cm = cRegex.exec(myHtml)) !== null) {
-            const cid = cm[1];
-            if (cid === "1" || seenIds.has(cid)) continue;
-            seenIds.add(cid);
-            const rawText = cm[2].replace(/<[^>]+>/g, "").trim();
-            const codeM = rawText.match(/\b([A-Z]{3,4}\d{4})\b/i);
-            const code = codeM ? codeM[1].toUpperCase() : `C${cid}`;
-            discoveredCourses.push({ id: cid, code, name: rawText });
-          }
-          if (discoveredCourses.length > 0) {
-            sessionData.courses = discoveredCourses;
-            if (env.SPECTRA_KV) {
-              env.SPECTRA_KV.put("moodle_session", JSON.stringify(sessionData)).catch(() => {});
+        let discoveredCourses = [];
+        // Method 1: Moodle AJAX core_course_get_enrolled_courses_by_timeline_classification
+        if (sessionData.sesskey) {
+          try {
+            const coursePayload = [{
+              index: 0,
+              methodname: "core_course_get_enrolled_courses_by_timeline_classification",
+              args: { classification: "all", limit: 0, offset: 0, sort: "fullname" }
+            }];
+            const cRes = await fetch(`https://spectrum.um.edu.my/lib/ajax/service.php?sesskey=${encodeURIComponent(sessionData.sesskey)}&info=core_course_get_enrolled_courses_by_timeline_classification`, {
+              method: "POST",
+              headers: { "Cookie": cookieHeader, "Content-Type": "application/json", "User-Agent": "Mozilla/5.0 Spectra-Relay/1.0" },
+              body: JSON.stringify(coursePayload)
+            });
+            if (cRes.ok) {
+              const cJson = await cRes.json();
+              if (Array.isArray(cJson) && cJson[0]?.data?.courses) {
+                discoveredCourses = cJson[0].data.courses.map((c) => {
+                  const rawName = c.fullname || c.shortname || "";
+                  const codeM = rawName.match(/\b([A-Z]{3,4}\s*\d{4}[A-Z]?)\b/i);
+                  const code = codeM ? codeM[1].replace(/\s+/g, "").toUpperCase() : `C${c.id}`;
+                  return { id: String(c.id), code, name: rawName };
+                });
+              }
             }
+          } catch (_) { }
+        }
+
+        // Method 2: Inspect /my/ HTML
+        if (discoveredCourses.length === 0) {
+          const myRes = await fetch("https://spectrum.um.edu.my/my/", {
+            headers: { "Cookie": cookieHeader, "User-Agent": "Mozilla/5.0 Spectra-Relay/1.0" }
+          });
+          if (myRes.ok) {
+            const myHtml = await myRes.text();
+            const seenIds = new Set();
+            const cRegex = /href=["'][^"']*\/course\/view\.php\?id=(\d+)[^"']*["'][^>]*>([\s\S]*?)<\/a>/gi;
+            let cm;
+            while ((cm = cRegex.exec(myHtml)) !== null) {
+              const cid = cm[1];
+              if (cid === "1" || seenIds.has(cid)) continue;
+              seenIds.add(cid);
+              const rawText = cm[2].replace(/<[^>]+>/g, "").trim();
+              const codeM = rawText.match(/\b([A-Z]{3,4}\s*\d{4}[A-Z]?)\b/i);
+              const code = codeM ? codeM[1].replace(/\s+/g, "").toUpperCase() : `C${cid}`;
+              discoveredCourses.push({ id: cid, code, name: rawText });
+            }
+          }
+        }
+
+        if (discoveredCourses.length > 0) {
+          sessionData.courses = discoveredCourses;
+          if (env.SPECTRA_KV) {
+            env.SPECTRA_KV.put("moodle_session", JSON.stringify(sessionData)).catch(() => {});
           }
         }
       } catch (_) { }
@@ -310,6 +341,30 @@ async function runSpectrumPollingJob(env) {
     console.error("[Spectra Relay] Polling job failed:", err);
     return { status: "error", message: err.message };
   }
+}
+
+function resolveWorkerCourseOccurrence(course, occurrences = {}) {
+  if (!course || !occurrences) return "";
+  const cid = String(course.id || course.courseId || "");
+  const ccode = String(course.code || course.shortname || cid).toUpperCase();
+  if (occurrences[cid]) return occurrences[cid];
+  if (occurrences[ccode]) return occurrences[ccode];
+  if (course.code && occurrences[course.code]) return occurrences[course.code];
+
+  if (ccode.includes("/")) {
+    for (const p of ccode.split("/")) {
+      const cleanP = p.trim().toUpperCase();
+      if (occurrences[cleanP]) return occurrences[cleanP];
+    }
+  }
+
+  const allText = `${ccode} ${course.name || ""}`;
+  const codeMatches = allText.match(/\b[A-Z]{3,4}\s*\d{4}[A-Z]?\b/gi) || [];
+  for (const c of codeMatches) {
+    const clean = c.replace(/\s+/g, "").toUpperCase();
+    if (occurrences[clean]) return occurrences[clean];
+  }
+  return "";
 }
 
 /**
@@ -343,154 +398,225 @@ async function checkAndRecordCloudAttendance(env, sessionData) {
     const courseCode = typeof course === "object" ? (course.code || courseId) : course;
     if (!courseId) continue;
 
-    const studentOcc = occurrences[courseId] || occurrences[courseCode] || "";
+    const studentOcc = resolveWorkerCourseOccurrence(course, occurrences);
     const storedPwd = passwords[courseId] || passwords[courseCode] || "";
 
     try {
-      let viewMatches = [];
-      const indexRes = await fetch(`https://spectrum.um.edu.my/mod/attendance/index.php?id=${encodeURIComponent(courseId)}`, {
-        headers: { "Cookie": cookieHeader, "User-Agent": "Mozilla/5.0 Spectra-Relay/1.0" }
-      });
-      if (indexRes.ok) {
-        const indexHtml = await indexRes.text();
-        viewMatches = indexHtml.match(/href=["']([^"']*\/mod\/attendance\/view\.php\?[^"']*)["']/gi) || [];
+      const viewUrls = new Set();
+
+      // A. If sesskey is available, query Moodle AJAX core_course_get_contents
+      if (sessionData.sesskey) {
+        try {
+          const ajaxPayload = [{
+            index: 0,
+            methodname: "core_course_get_contents",
+            args: { courseid: parseInt(courseId, 10) }
+          }];
+          const ajaxRes = await fetch(`https://spectrum.um.edu.my/lib/ajax/service.php?sesskey=${encodeURIComponent(sessionData.sesskey)}&info=core_course_get_contents`, {
+            method: "POST",
+            headers: { "Cookie": cookieHeader, "Content-Type": "application/json", "User-Agent": "Mozilla/5.0 Spectra-Relay/1.0" },
+            body: JSON.stringify(ajaxPayload)
+          });
+          if (ajaxRes.ok) {
+            const sections = await ajaxRes.json();
+            if (Array.isArray(sections) && sections[0]?.data) {
+              for (const sec of sections[0].data) {
+                for (const mod of (sec.modules || [])) {
+                  if (mod.modname === "attendance") {
+                    viewUrls.add(mod.url || `https://spectrum.um.edu.my/mod/attendance/view.php?id=${mod.id}`);
+                  }
+                }
+              }
+            }
+          }
+        } catch (_) { }
       }
 
-      // Fallback: If index didn't yield attendance views, inspect course view page directly
-      if (viewMatches.length === 0) {
-        const courseRes = await fetch(`https://spectrum.um.edu.my/course/view.php?id=${encodeURIComponent(courseId)}`, {
+      // B. Fetch /mod/attendance/index.php?id={courseId}
+      try {
+        const indexRes = await fetch(`https://spectrum.um.edu.my/mod/attendance/index.php?id=${encodeURIComponent(courseId)}`, {
           headers: { "Cookie": cookieHeader, "User-Agent": "Mozilla/5.0 Spectra-Relay/1.0" }
         });
-        if (courseRes.ok) {
-          const courseHtml = await courseRes.text();
-          viewMatches = courseHtml.match(/href=["']([^"']*\/mod\/attendance\/view\.php\?[^"']*)["']/gi) || [];
+        if (indexRes.ok) {
+          const indexHtml = await indexRes.text();
+          const matches = indexHtml.match(/href=["']([^"']*(?:mod\/attendance\/view\.php\?[^"']*|view\.php\?id=\d+[^"']*))["']/gi) || [];
+          for (const m of matches) {
+            const uM = m.match(/href=["']([^"']+)["']/i);
+            if (uM) {
+              let u = uM[1];
+              if (!u.startsWith("http")) {
+                u = u.startsWith("/") ? `https://spectrum.um.edu.my${u}` : `https://spectrum.um.edu.my/mod/attendance/${u}`;
+              }
+              viewUrls.add(u);
+            }
+          }
         }
+      } catch (_) { }
+
+      // C. Fallback: If no viewUrls found yet, inspect course view page directly
+      if (viewUrls.size === 0) {
+        try {
+          const courseRes = await fetch(`https://spectrum.um.edu.my/course/view.php?id=${encodeURIComponent(courseId)}`, {
+            headers: { "Cookie": cookieHeader, "User-Agent": "Mozilla/5.0 Spectra-Relay/1.0" }
+          });
+          if (courseRes.ok) {
+            const courseHtml = await courseRes.text();
+            const matches = courseHtml.match(/href=["']([^"']*(?:mod\/attendance\/view\.php\?[^"']*|view\.php\?id=\d+[^"']*))["']/gi) || [];
+            for (const m of matches) {
+              const uM = m.match(/href=["']([^"']+)["']/i);
+              if (uM) {
+                let u = uM[1];
+                if (!u.startsWith("http")) {
+                  u = `https://spectrum.um.edu.my/${u.replace(/^\//, "")}`;
+                }
+                viewUrls.add(u);
+              }
+            }
+          }
+        } catch (_) { }
       }
 
-      if (viewMatches.length === 0) continue;
+      if (viewUrls.size === 0) continue;
 
       checkedCourses++;
 
-      for (const rawMatch of viewMatches) {
-        const urlMatch = rawMatch.match(/href=["']([^"']+)["']/i);
-        if (!urlMatch) continue;
-        let viewUrl = urlMatch[1];
+      for (const rawViewUrl of viewUrls) {
+        let viewUrl = rawViewUrl;
         if (!viewUrl.startsWith("http")) {
           viewUrl = `https://spectrum.um.edu.my/${viewUrl.replace(/^\//, "")}`;
         }
 
+        // Check BOTH default view (which displays active session today) AND &view=5 (all sessions)
+        const urlsToTry = [viewUrl];
         const allViewUrl = viewUrl.includes("view=") ? viewUrl.replace(/view=\d+/, "view=5") : `${viewUrl}&view=5`;
+        if (allViewUrl !== viewUrl) {
+          urlsToTry.push(allViewUrl);
+        }
 
-        const viewRes = await fetch(allViewUrl, {
-          headers: { "Cookie": cookieHeader, "User-Agent": "Mozilla/5.0 Spectra-Relay/1.0" }
-        });
-        if (!viewRes.ok) continue;
-        const viewHtml = await viewRes.text();
+        let foundOpenSession = false;
 
-        // Discover page-level heading or occurrence title if present (e.g. "Attendance for Occ - 3, 6, 9, 12")
-        const headingMatch = viewHtml.match(/<h[23][^>]*>([\s\S]*?)<\/h[23]>/i) ||
-          viewHtml.match(/class=["'][^"']*page-header-headings[^"']*["'][^>]*>([\s\S]*?)<\/div>/i);
-        const pageHeading = headingMatch ? headingMatch[1].replace(/<[^>]+>/g, "").trim() : "";
-        const linkTextMatch = rawMatch.match(/>([^<]+)<\/a>/i);
-        const activityTitle = (linkTextMatch ? linkTextMatch[1].trim() : "") || pageHeading;
-        const effectiveActivityName = [activityTitle, pageHeading].filter(Boolean).join(" ");
+        for (const currentUrl of urlsToTry) {
+          const viewRes = await fetch(currentUrl, {
+            headers: { "Cookie": cookieHeader, "User-Agent": "Mozilla/5.0 Spectra-Relay/1.0" }
+          });
+          if (!viewRes.ok) continue;
+          const viewHtml = await viewRes.text();
 
-        const rowRegex = /<tr[^>]*>([\s\S]*?)<\/tr>/gi;
-        let rowM;
-        while ((rowM = rowRegex.exec(viewHtml)) !== null) {
-          const rowHtml = rowM[1];
-          const submitM = rowHtml.match(/href=["']([^"']*attendance\.php\?sessid=(\d+)[^"']*)["'][^>]*>([\s\S]*?)<\/a>/i);
-          if (!submitM) continue;
+          // Discover page-level heading or occurrence title if present (e.g. "Attendance for Occ - 3, 6, 9, 12")
+          const headingMatch = viewHtml.match(/<h[23][^>]*>([\s\S]*?)<\/h[23]>/i) ||
+            viewHtml.match(/class=["'][^"']*page-header-headings[^"']*["'][^>]*>([\s\S]*?)<\/div>/i);
+          const pageHeading = headingMatch ? headingMatch[1].replace(/<[^>]+>/g, "").trim() : "";
+          const effectiveActivityName = pageHeading;
 
-          const submitUrl = submitM[1];
-          const sessid = submitM[2];
+          const rowRegex = /<tr[^>]*>([\s\S]*?)<\/tr>/gi;
+          let rowM;
+          while ((rowM = rowRegex.exec(viewHtml)) !== null) {
+            const rowHtml = rowM[1];
 
-          if (recordedSessids.has(sessid)) continue;
+            // Look for attendance submit link or sessid in row
+            const submitM = rowHtml.match(/href=["']([^"']*(?:attendance\.php|sessid=\d+)[^"']*)["'][^>]*>([\s\S]*?)<\/a>/i);
+            const statusIsOpenText = /submit|record|rekod|hantar|isi|catat|tanda|daftar|ambil/i.test(rowHtml);
+            if (!submitM && !statusIsOpenText) continue;
 
-          const cellRegex = /<td[^>]*>([\s\S]*?)<\/td>/gi;
-          const cells = [];
-          let cM;
-          while ((cM = cellRegex.exec(rowHtml)) !== null) {
-            cells.push(cM[1].replace(/<[^>]+>/g, "").trim());
-          }
+            let submitUrl = submitM ? submitM[1].replace(/&amp;/g, "&") : "";
+            const sessidMatch = (submitUrl || rowHtml).match(/[?&]sessid=(\d+)/) || (submitUrl || rowHtml).match(/sessid=(\d+)/);
+            if (!sessidMatch) continue;
+            const sessid = sessidMatch[1];
 
-          let dateText = cells[0] || "Today";
-          let timeText = "";
-          let groupText = "All students";
-          let descText = "Class Session";
+            if (recordedSessids.has(sessid)) continue;
 
-          if (cells.length >= 6) {
-            dateText = cells[0] || "Today";
-            timeText = cells[1] || "";
-            if (/group|occ|kump|all students|semua pelajar/i.test(cells[2])) {
-              groupText = cells[2];
-              descText = cells[3] || "Class Session";
-            } else {
-              descText = cells[2] || "Class Session";
+            const cellRegex = /<td[^>]*>([\s\S]*?)<\/td>/gi;
+            const cells = [];
+            let cM;
+            while ((cM = cellRegex.exec(rowHtml)) !== null) {
+              cells.push(cM[1].replace(/<[^>]+>/g, "").trim());
             }
-          } else if (cells.length === 5) {
-            const c2 = cells[2] || "";
-            const c3 = cells[3] || "";
-            if (/present|hadir|late|lewat|absent|tidak hadir|excused|dimaafkan|submit|record|\?/i.test(c2) || /\d+\s*\/\s*\d+/.test(c3)) {
-              // 5 cols: Date (+embedded Time) | Description | Status | Points | Remarks
-              dateText = cells[0] || "Today";
-              descText = cells[1] || "Class Session";
-              groupText = "All students";
-            } else {
-              // 5 cols: Date | Time | Group | Description | Status
+
+            let dateText = cells[0] || "Today";
+            let timeText = "";
+            let groupText = "All students";
+            let descText = "Class Session";
+
+            if (cells.length >= 6) {
               dateText = cells[0] || "Today";
               timeText = cells[1] || "";
-              groupText = cells[2] || "All students";
-              descText = cells[3] || "Class Session";
+              if (/group|occ|kump|all students|semua pelajar/i.test(cells[2])) {
+                groupText = cells[2];
+                descText = cells[3] || "Class Session";
+              } else {
+                descText = cells[2] || "Class Session";
+              }
+            } else if (cells.length === 5) {
+              const c2 = cells[2] || "";
+              const c3 = cells[3] || "";
+              if (/present|hadir|late|lewat|absent|tidak hadir|excused|dimaafkan|submit|record|\?/i.test(c2) || /\d+\s*\/\s*\d+/.test(c3)) {
+                // 5 cols: Date (+embedded Time) | Description | Status | Points | Remarks
+                dateText = cells[0] || "Today";
+                descText = cells[1] || "Class Session";
+                groupText = "All students";
+              } else {
+                // 5 cols: Date | Time | Group | Description | Status
+                dateText = cells[0] || "Today";
+                timeText = cells[1] || "";
+                groupText = cells[2] || "All students";
+                descText = cells[3] || "Class Session";
+              }
+            } else {
+              dateText = cells[0] || "Today";
+              descText = cells[1] || "Class Session";
             }
-          } else {
-            dateText = cells[0] || "Today";
-            descText = cells[1] || "Class Session";
-          }
 
-          if (studentOcc && !matchesOccurrence(groupText, studentOcc, descText, effectiveActivityName)) {
-            continue;
-          }
+            if (studentOcc && !matchesOccurrence(groupText, studentOcc, descText, effectiveActivityName)) {
+              continue;
+            }
 
-          const formTargetUrl = submitUrl.startsWith("http")
-            ? submitUrl
-            : `https://spectrum.um.edu.my/${submitUrl.replace(/^\//, "")}`;
+            let formTargetUrl = submitUrl;
+            if (!formTargetUrl) {
+              formTargetUrl = `https://spectrum.um.edu.my/mod/attendance/attendance.php?sessid=${sessid}`;
+            } else if (!formTargetUrl.startsWith("http")) {
+              formTargetUrl = formTargetUrl.startsWith("/")
+                ? `https://spectrum.um.edu.my${formTargetUrl}`
+                : `https://spectrum.um.edu.my/mod/attendance/${formTargetUrl}`;
+            }
 
-          // Inspect form to check whether attendance requires a password
-          let passwordText = "";
-          try {
-            const formRes = await fetch(formTargetUrl, {
-              headers: { "Cookie": cookieHeader, "User-Agent": "Mozilla/5.0 Spectra-Relay/1.0" }
-            });
-            if (formRes.ok) {
-              const formHtml = await formRes.text();
-              const requiresPassword = /<input[^>]+name=["'](studentpassword|password)["']/i.test(formHtml);
-              if (requiresPassword) {
-                if (storedPwd) {
-                  passwordText = `\n🔑 <b>Password:</b> <code>${storedPwd}</code>`;
-                } else {
-                  passwordText = `\n🔑 <b>Password:</b> Required (Check with your lecturer)`;
+            // Inspect form to check whether attendance requires a password
+            let passwordText = "";
+            try {
+              const formRes = await fetch(formTargetUrl, {
+                headers: { "Cookie": cookieHeader, "User-Agent": "Mozilla/5.0 Spectra-Relay/1.0" }
+              });
+              if (formRes.ok) {
+                const formHtml = await formRes.text();
+                const requiresPassword = /<input[^>]+name=["'](studentpassword|password)["']/i.test(formHtml);
+                if (requiresPassword) {
+                  if (storedPwd) {
+                    passwordText = `\n🔑 <b>Password:</b> <code>${storedPwd}</code>`;
+                  } else {
+                    passwordText = `\n🔑 <b>Password:</b> Required (Check with your lecturer)`;
+                  }
                 }
               }
-            }
-          } catch (_) { }
+            } catch (_) { }
 
-          // Dispatch alert to user with direct submission link instead of auto-submitting
-          if (botToken && chatId) {
-            await dispatchTelegram(
-              botToken,
-              chatId,
-              `📢 <b>Spectra Alert: Attendance Submission Open!</b>\n` +
-              `<b>Course:</b> ${courseCode}\n` +
-              `<b>Occurrence:</b> ${studentOcc || groupText || "All students"}\n` +
-              `<b>Session:</b> ${descText} (${dateText} ${timeText})${passwordText}\n\n` +
-              `👉 <b>Please submit your attendance here:</b>\n` +
-              `<a href="${formTargetUrl}">${formTargetUrl}</a>`
-            );
+            // Dispatch alert to user with direct submission link
+            if (botToken && chatId) {
+              await dispatchTelegram(
+                botToken,
+                chatId,
+                `📢 <b>Spectra Alert: Attendance Submission Open!</b>\n` +
+                `<b>Course:</b> ${courseCode}\n` +
+                `<b>Occurrence:</b> ${studentOcc || groupText || "All students"}\n` +
+                `<b>Session:</b> ${descText} (${dateText} ${timeText})${passwordText}\n\n` +
+                `👉 <b>Please submit your attendance here:</b>\n` +
+                `<a href="${formTargetUrl}">${formTargetUrl}</a>`
+              );
+              recordedSessids.add(sessid);
+              recordedCount++;
+              foundOpenSession = true;
+            }
           }
 
-          recordedSessids.add(sessid);
-          recordedCount++;
+          if (foundOpenSession) break;
         }
       }
     } catch (err) {

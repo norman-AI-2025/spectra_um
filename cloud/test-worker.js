@@ -441,6 +441,52 @@ async function runTestSuite() {
   assert(body13.success === true, "Reports success: true");
   assert(body13.message.includes("successfully"), "Returns success confirmation message");
 
+  // Test 14: Attendance Submission Open with sesskey-first URL & Malay language
+  print("\nTest 14: Attendance Submission Open with sesskey-first URL & Malay text");
+  await kv.delete("recorded_sessids");
+  // Temporarily configure mock view to return sesskey-first URL
+  const oldFetch = globalThis.fetch;
+  let sentTgAlertText = "";
+  globalThis.fetch = async function mockFetch14(url, options = {}) {
+    if (url.includes("api.telegram.org") && url.includes("sendMessage")) {
+      const b = JSON.parse(options.body || "{}");
+      sentTgAlertText = b.text || "";
+      return { status: 200, ok: true, json: async () => ({ ok: true, result: {} }) };
+    }
+    if (url.includes("spectrum.um.edu.my/mod/attendance/view.php")) {
+      return {
+        status: 200,
+        ok: true,
+        text: async () => `
+          <table>
+            <tr>
+              <td>Thu 22 Oct 2026</td>
+              <td>3PM - 4PM</td>
+              <td>Occ 1</td>
+              <td>Regular class session</td>
+              <td><a href="https://spectrum.um.edu.my/mod/attendance/attendance.php?sesskey=abc123xyz&amp;sessid=8801">Hantar kehadiran</a></td>
+            </tr>
+          </table>
+        `
+      };
+    }
+    return oldFetch(url, options);
+  };
+
+  const poll14 = await worker.fetch(new MockRequest("https://worker.spectra.dev/poll", {
+    method: "POST",
+    headers: { "Authorization": "Bearer test-auth-secret-123" }
+  }), env, new MockExecutionContext());
+  const body14 = await poll14.json();
+  assert(body14.attendanceRecorded >= 1, "Cloud Relay detects open attendance with sesskey-first URL and Malay text");
+  assert(sentTgAlertText.includes("sessid=8801"), "Telegram message contains direct attendance submission link with sessid 8801");
+  assert(sentTgAlertText.includes("Please submit your attendance here"), "Telegram alert instructs student to submit attendance");
+
+  const stored8801 = await kv.get("recorded_sessids");
+  assert(stored8801 !== null && stored8801.includes("8801"), "Sessid 8801 saved to recorded_sessids in KV");
+
+  globalThis.fetch = oldFetch;
+
   // Summary
   print("\n=================================================================");
   print(`  Test Results: ${passedTests} passed, ${failedTests} failed`);

@@ -2158,20 +2158,27 @@ export function parseAttendanceView(html, studentOccurrence = "", referenceDate 
           const remarksText = remarksCell?.textContent?.trim() || "";
 
           // Check for self-recording submit link
-          const submitLinkEl = tr.querySelector("a[href*='attendance.php?sessid='], a[href*='mod/attendance/attendance.php']");
-          const submitUrl = submitLinkEl ? (
-            submitLinkEl.getAttribute("href").startsWith("http")
-              ? submitLinkEl.getAttribute("href")
-              : `https://spectrum.um.edu.my/${submitLinkEl.getAttribute("href").replace(/^\//, "")}`
-          ) : null;
+          const submitLinkEl = tr.querySelector("a[href*='attendance.php'], a[href*='sessid=']");
+          let submitUrl = null;
+          if (submitLinkEl) {
+            const rawHref = submitLinkEl.getAttribute("href") || "";
+            submitUrl = rawHref.startsWith("http")
+              ? rawHref.replace(/&amp;/g, "&")
+              : `https://spectrum.um.edu.my/${rawHref.replace(/^\//, "").replace(/&amp;/g, "&")}`;
+          }
 
-          const sessidMatch = (submitUrl || tr.innerHTML).match(/sessid=(\d+)/);
+          const sessidMatch = (submitUrl || tr.innerHTML).match(/[?&]sessid=(\d+)/) || (submitUrl || tr.innerHTML).match(/sessid=(\d+)/);
           const sessid = sessidMatch ? sessidMatch[1] : `sess_${idx}`;
 
           let status = "unrecorded";
           let statusLabel = statusRaw || "Unrecorded";
 
-          if (submitUrl || /submit|record|daftar/i.test(statusRaw)) {
+          const linkText = submitLinkEl?.textContent?.trim() || "";
+          const isOpenText = /submit|daftar|hantar|isi|catat|tanda|ambil|check[\s-]?in|sign[\s-]?in/i.test(statusRaw) ||
+            /\b(?:record|rekod)\s*(?:attendance|kehadiran)?\b/i.test(statusRaw) && !/self-recorded|sudah direkod/i.test(statusRaw) ||
+            /\b(?:submit|record|rekod|hantar|isi|catat|tanda)\b/i.test(linkText);
+
+          if (submitUrl || isOpenText) {
             status = "open";
             statusLabel = "Open for Check-In";
           } else if (/present|hadir/i.test(statusRaw)) {
@@ -2197,9 +2204,10 @@ export function parseAttendanceView(html, studentOccurrence = "", referenceDate 
             String(dateText).toLowerCase().includes("today") ||
             String(dateText).toLowerCase().includes("hari ini") ||
             (sessionTs && (
-              new Date(sessionTs).getFullYear() === ref.getFullYear() &&
-              new Date(sessionTs).getMonth() === ref.getMonth() &&
-              new Date(sessionTs).getDate() === ref.getDate()
+              (new Date(sessionTs).getFullYear() === ref.getFullYear() &&
+               new Date(sessionTs).getMonth() === ref.getMonth() &&
+               new Date(sessionTs).getDate() === ref.getDate()) ||
+              Math.abs(sessionTs - ref.getTime()) < 16 * 3600 * 1000
             ))
           );
 
@@ -2345,20 +2353,24 @@ export function parseAttendanceView(html, studentOccurrence = "", referenceDate 
       }
 
       let submitUrl = null;
-      const submitMatch = rowContent.match(/href=["']([^"']*attendance\.php\?sessid=\d+[^"']*)["']/i);
+      const submitMatch = rowContent.match(/href=["']([^"']*(?:attendance\.php|sessid=\d+)[^"']*)["']/i);
       if (submitMatch) {
-        submitUrl = submitMatch[1].startsWith("http")
-          ? submitMatch[1]
-          : `https://spectrum.um.edu.my/${submitMatch[1].replace(/^\//, "")}`;
+        const rawMatch = submitMatch[1].replace(/&amp;/g, "&");
+        submitUrl = rawMatch.startsWith("http")
+          ? rawMatch
+          : `https://spectrum.um.edu.my/${rawMatch.replace(/^\//, "")}`;
       }
 
-      const sessidMatch = (submitUrl || rowContent).match(/sessid=(\d+)/);
+      const sessidMatch = (submitUrl || rowContent).match(/[?&]sessid=(\d+)/) || (submitUrl || rowContent).match(/sessid=(\d+)/);
       const sessid = sessidMatch ? sessidMatch[1] : `sess_${idx++}`;
 
       let status = "unrecorded";
       let statusLabel = statusRaw || "Unrecorded";
 
-      if (submitUrl || /submit|record|daftar/i.test(statusRaw)) {
+      const isOpenText = /submit|daftar|hantar|isi|catat|tanda|ambil|check[\s-]?in|sign[\s-]?in/i.test(statusRaw) ||
+        /\b(?:record|rekod)\s*(?:attendance|kehadiran)?\b/i.test(statusRaw) && !/self-recorded|sudah direkod/i.test(statusRaw);
+
+      if (submitUrl || isOpenText) {
         status = "open";
         statusLabel = "Open for Check-In";
       } else if (/present|hadir/i.test(statusRaw)) {
@@ -2384,9 +2396,10 @@ export function parseAttendanceView(html, studentOccurrence = "", referenceDate 
         String(dateText).toLowerCase().includes("today") ||
         String(dateText).toLowerCase().includes("hari ini") ||
         (sessionTs && (
-          new Date(sessionTs).getFullYear() === ref.getFullYear() &&
-          new Date(sessionTs).getMonth() === ref.getMonth() &&
-          new Date(sessionTs).getDate() === ref.getDate()
+          (new Date(sessionTs).getFullYear() === ref.getFullYear() &&
+           new Date(sessionTs).getMonth() === ref.getMonth() &&
+           new Date(sessionTs).getDate() === ref.getDate()) ||
+          Math.abs(sessionTs - ref.getTime()) < 16 * 3600 * 1000
         ))
       );
 

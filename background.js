@@ -329,7 +329,18 @@ async function syncSessionToCloudRelay(explicitUrl, explicitSecret) {
       }
     }
 
-    const courses = (store.cached_courses || []).map((c) => ({
+    let rawCourses = store.cached_courses || [];
+    if ((!rawCourses || rawCourses.length === 0) && (token || store.moodle_session?.sesskey)) {
+      try {
+        const sesskey = store.moodle_session?.sesskey || store.moodle_session_key || "";
+        rawCourses = await getLiveEnrolledCourses(sesskey);
+        if (rawCourses && rawCourses.length > 0) {
+          await chrome.storage.local.set({ cached_courses: rawCourses });
+        }
+      } catch (_) { }
+    }
+
+    const courses = (rawCourses || []).map((c) => ({
       id: String(c.id),
       code: c.code || String(c.id),
       name: c.name || ""
