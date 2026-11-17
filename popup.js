@@ -1621,6 +1621,21 @@ function updateUrgentCountBadge() {
   if (pendEl) {
     pendEl.textContent = `${pendingCount} Pending Submission${pendingCount === 1 ? "" : "s"}`;
   }
+
+  const insightEl = document.getElementById("submissionsInsightText");
+  if (insightEl) {
+    if (total === 0) {
+      insightEl.textContent = "No assignments detected on SPeCTRUM. You're completely up to date.";
+    } else if (pendingCount === 0) {
+      insightEl.textContent = `All ${total} assignment${total === 1 ? "" : "s"} submitted on time. 100% completion rate achieved!`;
+    } else if (countUrgent > 0) {
+      insightEl.textContent = `${countUrgent} urgent deadline${countUrgent === 1 ? "" : "s"} due within 24 hours. ${pendingCount} pending task${pendingCount === 1 ? "" : "s"} in total.`;
+    } else if (countWeek > 0) {
+      insightEl.textContent = `${countWeek} submission${countWeek === 1 ? "" : "s"} due this week. ${pendingCount} pending task${pendingCount === 1 ? "" : "s"} remaining.`;
+    } else {
+      insightEl.textContent = `${countDone} of ${total} assignments submitted. ${pendingCount} pending task${pendingCount === 1 ? "" : "s"} on track.`;
+    }
+  }
 }
 
 function renderDeadlines() {
@@ -2321,6 +2336,19 @@ function renderAttendanceSummaryMetrics() {
   if (presentEl) presentEl.textContent = summary.totalPresent ?? 0;
   if (lateEl) lateEl.textContent = summary.totalLate ?? 0;
   if (absentEl) absentEl.textContent = summary.totalAbsent ?? 0;
+
+  const attInsightEl = document.getElementById("attendanceInsightText");
+  if (attInsightEl) {
+    if (totalSessions === 0) {
+      attInsightEl.textContent = "Attendance synchronized. Monitoring for active check-in sessions.";
+    } else if (summary.totalAbsent > 0) {
+      attInsightEl.textContent = `${summary.totalAbsent} absence${summary.totalAbsent === 1 ? "" : "s"} recorded. Keep attendance above 80% to ensure exam eligibility.`;
+    } else if (numPct >= 90) {
+      attInsightEl.textContent = `${summary.totalPresent} of ${totalSessions} sessions attended with 0 absences. Excellent standing!`;
+    } else {
+      attInsightEl.textContent = `${summary.totalPresent} attended, ${summary.totalLate || 0} late. ${pct} attendance record across all courses.`;
+    }
+  }
 
   if (navBadge) {
     if (summary.openSessionsCount > 0) {

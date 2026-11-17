@@ -196,16 +196,24 @@
             </button>
           </div>
 
-          <!-- Sleek Summary Progress Bar & 2-Column Breakdown -->
-          <div class="summary-ribbon-card">
-            <div class="summary-progress-header">
-              <div class="summary-progress-title-row">
-                <span class="summary-progress-title">Completion Rate</span>
-                <span class="summary-progress-rate" id="submissionsProgressRate">--%</span>
+          <!-- Radar Hero Card: Rate + Insight + Striped Capsule -->
+          <div class="radar-hero-card">
+            <div class="radar-hero-top">
+              <div class="radar-hero-metric">
+                <span class="radar-hero-label">Completion</span>
+                <div class="radar-hero-number" id="submissionsProgressRate">--%</div>
               </div>
-              <div class="progress-bar-bg">
-                <div id="submissionsProgressBar" class="progress-bar-fill" style="width: 0%;"></div>
+              <div class="radar-hero-insight">
+                <span class="radar-hero-label">Insight</span>
+                <p id="submissionsInsightText" class="radar-insight-desc">
+                  Tracking active submissions and deadlines across all courses.
+                </p>
               </div>
+            </div>
+
+            <!-- Striped Pill Progress Gauge -->
+            <div class="striped-radar-capsule" role="progressbar" aria-label="Submission completion rate">
+              <div id="submissionsProgressBar" class="striped-radar-fill" style="width: 0%;"></div>
             </div>
 
             <div class="summary-stats-grid">
@@ -346,16 +354,24 @@
             </button>
           </div>
 
-          <!-- Sleek Summary Progress Bar & 2-Column Breakdown -->
-          <div class="summary-ribbon-card">
-            <div class="summary-progress-header">
-              <div class="summary-progress-title-row">
-                <span class="summary-progress-title">Overall Attendance</span>
-                <span class="summary-progress-rate" id="attendanceOverallScore">--%</span>
+          <!-- Radar Hero Card: Rate + Insight + Striped Capsule -->
+          <div class="radar-hero-card">
+            <div class="radar-hero-top">
+              <div class="radar-hero-metric">
+                <span class="radar-hero-label">Attendance</span>
+                <div class="radar-hero-number" id="attendanceOverallScore">--%</div>
               </div>
-              <div class="progress-bar-bg">
-                <div id="attendanceOverallProgressBar" class="progress-bar-fill" style="width: 100%;"></div>
+              <div class="radar-hero-insight">
+                <span class="radar-hero-label">Insight</span>
+                <p id="attendanceInsightText" class="radar-insight-desc">
+                  Tracking attendance check-ins and session occurrence records.
+                </p>
               </div>
+            </div>
+
+            <!-- Striped Pill Progress Gauge -->
+            <div class="striped-radar-capsule" role="progressbar" aria-label="Overall attendance rate">
+              <div id="attendanceOverallProgressBar" class="striped-radar-fill" style="width: 100%;"></div>
             </div>
 
             <div class="summary-stats-grid">
