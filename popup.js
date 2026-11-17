@@ -45,6 +45,9 @@ import {
   sanitizeTelegramChatId
 } from "./utils/telegram.js";
 
+const ICON_EYE_SVG = `<svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"></path><circle cx="12" cy="12" r="3"></circle></svg>`;
+const ICON_EYE_OFF_SVG = `<svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M17.94 17.94A10.07 10.07 0 0 1 12 20c-7 0-11-8-11-8a18.45 18.45 0 0 1 5.06-4.94M9.9 4.24A9.12 9.12 0 0 1 12 4c7 0 11 8 11 8a18.5 18.5 0 0 1-2.16 3.19m-6.72-1.07a3 3 0 1 1-4.24-4.24"></path><line x1="1" y1="1" x2="23" y2="23"></line></svg>`;
+
 // Global Application State
 const state = {
   currentTab: "deadlines",
@@ -397,10 +400,18 @@ function initDOMListeners() {
   const toggleOccBtn = document.getElementById("toggleOccurrenceSetupBtn");
   const occForm = document.getElementById("occurrenceConfigForm");
   if (toggleOccBtn && occForm) {
-    toggleOccBtn.addEventListener("click", () => {
+    const handleToggleOcc = () => {
       const isHidden = occForm.classList.toggle("hidden");
       const textEl = document.getElementById("occurrenceSetupToggleText");
-      if (textEl) textEl.textContent = isHidden ? "Show Setup ⚙️" : "Hide Setup ✕";
+      if (textEl) textEl.textContent = isHidden ? "Expand ▾" : "Minimize ▴";
+      toggleOccBtn.setAttribute("aria-expanded", String(!isHidden));
+    };
+    toggleOccBtn.addEventListener("click", handleToggleOcc);
+    toggleOccBtn.addEventListener("keydown", (e) => {
+      if (e.key === "Enter" || e.key === " ") {
+        e.preventDefault();
+        handleToggleOcc();
+      }
     });
   }
 
@@ -459,7 +470,7 @@ function initDOMListeners() {
     toggleOpenPwdVisBtn.addEventListener("click", () => {
       const isPwd = openPwdInput.type === "password";
       openPwdInput.type = isPwd ? "text" : "password";
-      toggleOpenPwdVisBtn.textContent = isPwd ? "🙈" : "👁️";
+      toggleOpenPwdVisBtn.innerHTML = isPwd ? ICON_EYE_OFF_SVG : ICON_EYE_SVG;
     });
   }
 
@@ -480,11 +491,11 @@ function initDOMListeners() {
       const url = firstOpen?.session?.submitUrl || firstOpen?.viewUrl || "https://spectrum.um.edu.my/my/";
       try {
         await navigator.clipboard.writeText(url);
-        const icon = document.getElementById("copyUrlBtnIcon");
-        if (icon) icon.textContent = "✓";
+        const origHtml = copyAttUrlBtn.innerHTML;
+        copyAttUrlBtn.innerHTML = "✓";
         showToast("Check-in link copied to clipboard!", "success");
         setTimeout(() => {
-          if (icon) icon.textContent = "📋";
+          copyAttUrlBtn.innerHTML = origHtml;
         }, 2200);
       } catch (e) {
         showToast("Could not copy link automatically.", "error");
@@ -613,10 +624,10 @@ function initDOMListeners() {
     toggleTokenBtn.addEventListener("click", () => {
       if (tokenInput.type === "password") {
         tokenInput.type = "text";
-        toggleTokenBtn.textContent = "🔒";
+        toggleTokenBtn.innerHTML = ICON_EYE_OFF_SVG;
       } else {
         tokenInput.type = "password";
-        toggleTokenBtn.textContent = "👁️";
+        toggleTokenBtn.innerHTML = ICON_EYE_SVG;
       }
     });
   }
@@ -642,10 +653,10 @@ function initDOMListeners() {
     toggleCloudSecretBtn.addEventListener("click", () => {
       if (cloudSecretInput.type === "password") {
         cloudSecretInput.type = "text";
-        toggleCloudSecretBtn.textContent = "🔒";
+        toggleCloudSecretBtn.innerHTML = ICON_EYE_OFF_SVG;
       } else {
         cloudSecretInput.type = "password";
-        toggleCloudSecretBtn.textContent = "👁️";
+        toggleCloudSecretBtn.innerHTML = ICON_EYE_SVG;
       }
     });
   }
@@ -691,7 +702,7 @@ function initDOMListeners() {
   if (typeof chrome !== "undefined" && chrome.runtime?.onMessage) {
     chrome.runtime.onMessage.addListener((message) => {
       if (message.action === "ATTENDANCE_SUBMITTED_SUCCESS" || message.action === "RECORD_ATTENDANCE_SUCCESS") {
-        showToast("Attendance submitted! Marked as Present ✅", "success");
+        showToast("Attendance submitted! Marked as Present", "success");
         const step3 = document.getElementById("stepperStep3");
         if (step3) {
           step3.className = "stepper-step step-done";
@@ -702,7 +713,7 @@ function initDOMListeners() {
           }
         }
         const btnLabel = document.getElementById("submitBtnLabel");
-        if (btnLabel) btnLabel.textContent = "Submitted as Present ✅";
+        if (btnLabel) btnLabel.textContent = "Submitted as Present";
         const btnIcon = document.getElementById("submitBtnIcon");
         if (btnIcon) btnIcon.textContent = "✓";
         setTimeout(() => {
@@ -809,13 +820,13 @@ function updateAuthStatusBadge(status) {
   badge.className = "session-status-badge";
   if (status === "connected") {
     badge.classList.add("status-connected");
-    badge.textContent = "🟢 Connected";
+    badge.textContent = "Connected";
   } else if (status === "invalid" || status === "expired") {
     badge.classList.add("status-invalid");
-    badge.textContent = "🔴 Invalid / Expired";
+    badge.textContent = "Invalid / Expired";
   } else {
     badge.classList.add("status-unset");
-    badge.textContent = "⚪ Unset";
+    badge.textContent = "Unset";
   }
 }
 
@@ -914,11 +925,11 @@ function handleToggleSessionVisibility() {
 
   if (input.type === "password") {
     input.type = "text";
-    btn.textContent = "🔒";
+    btn.innerHTML = ICON_EYE_OFF_SVG;
     btn.setAttribute("title", "Hide token");
   } else {
     input.type = "password";
-    btn.textContent = "👁️";
+    btn.innerHTML = ICON_EYE_SVG;
     btn.setAttribute("title", "Show token");
   }
 }
@@ -1588,14 +1599,20 @@ function updateUrgentCountBadge() {
   document.getElementById("countLater").textContent = countLater;
   document.getElementById("countDone").textContent = countDone;
 
-  // Update Submissions Overview Information Container (matching Attendance overview design)
-  const progressRate = total > 0 ? `${Math.round((countDone / total) * 100)}%` : "100%";
-  const pendingCount = total - countDone;
+  // Update Submissions Overview Information Container
+  const pctNum = total > 0 ? Math.round((countDone / total) * 100) : 100;
+  const progressRate = `${pctNum}%`;
+  const pendingCount = Math.max(0, total - countDone);
 
   const progEl = document.getElementById("submissionsProgressRate");
   if (progEl) progEl.textContent = progressRate;
+  const barEl = document.getElementById("submissionsProgressBar");
+  if (barEl) barEl.style.width = `${pctNum}%`;
+
   const doneEl = document.getElementById("submissionsDoneCount");
   if (doneEl) doneEl.textContent = countDone;
+  const pendNumEl = document.getElementById("submissionsPendingCount");
+  if (pendNumEl) pendNumEl.textContent = pendingCount;
   const wkEl = document.getElementById("submissionsWeekCount");
   if (wkEl) wkEl.textContent = countWeek;
   const urgEl = document.getElementById("submissionsUrgentCount");
@@ -1672,19 +1689,22 @@ function renderDeadlines() {
     if (isSubmitted) {
       cardStateClass = "card-state-submitted is-completed";
       badgeHtml = `<span class="urgency-badge badge-submitted"><span>✓</span> Submitted</span>`;
-      daysLeftBadge = `<span class="due-days-pill pill-completed">✔ Done</span>`;
+      daysLeftBadge = `<span class="due-days-pill pill-completed">Done</span>`;
+      const statusLabel = (item.submissionStatus && !/no submission|tiada/i.test(item.submissionStatus))
+        ? item.submissionStatus
+        : "Submitted";
       submissionChipHtml = `
-        <div class="submission-status-chip is-submitted" title="Submission recorded on SPeCTRUM">
+        <div class="submission-status-chip is-submitted" title="Submission recorded or marked complete">
           <span class="status-dot"></span>
-          <span>${escapeHtml(item.submissionStatus || "Submitted")}</span>
+          <span>${escapeHtml(statusLabel)}</span>
         </div>
       `;
     } else if (isUnder24Hr || (!isSubmitted && item.urgency === "urgent" && diffMs > 0)) {
       cardStateClass = "card-state-urgent";
-      badgeHtml = `<span class="urgency-badge badge-urgent"><span class="pulse-ring" style="width:10px;height:10px;position:static;"></span> &lt; 24h Left</span>`;
+      badgeHtml = `<span class="urgency-badge badge-urgent"><span class="badge-dot dot-rose"></span>&lt; 24h Left</span>`;
       const h = Math.floor(diffMs / 3600000);
       const m = Math.floor((diffMs % 3600000) / 60000);
-      daysLeftBadge = `<span class="due-days-pill pill-urgent countdown-pill" data-timestamp="${item.dueTimestamp}">⚡ ${h}h ${m}m left</span>`;
+      daysLeftBadge = `<span class="due-days-pill pill-urgent countdown-pill" data-timestamp="${item.dueTimestamp}">${h}h ${m}m left</span>`;
       submissionChipHtml = `
         <div class="submission-status-chip is-urgent" title="Due in less than 24 hours">
           <span class="status-dot"></span>
@@ -1696,8 +1716,8 @@ function renderDeadlines() {
       cardStateClass = "card-state-pending";
       if (diffMs !== null && diffMs <= 0) {
         const ovDays = Math.floor(Math.abs(diffMs) / 86400000);
-        badgeHtml = `<span class="urgency-badge badge-pending"><span>⏳</span> Overdue ${ovDays > 0 ? `${ovDays}d` : ""}</span>`;
-        daysLeftBadge = `<span class="due-days-pill pill-warning">⚠️ ${isClosingTerm ? "Closed" : "Overdue"} ${ovDays > 0 ? `${ovDays}d` : ""}</span>`;
+        badgeHtml = `<span class="urgency-badge badge-pending"><span class="badge-dot dot-rose"></span>Overdue ${ovDays > 0 ? `${ovDays}d` : ""}</span>`;
+        daysLeftBadge = `<span class="due-days-pill pill-warning">${isClosingTerm ? "Closed" : "Overdue"} ${ovDays > 0 ? `${ovDays}d` : ""}</span>`;
         submissionChipHtml = `
           <div class="submission-status-chip is-pending" title="Pending submission">
             <span class="status-dot"></span>
@@ -1705,9 +1725,9 @@ function renderDeadlines() {
           </div>
         `;
       } else if (item.urgency === "this_week") {
-        badgeHtml = `<span class="urgency-badge badge-week"><span>🟡</span> This Week</span>`;
+        badgeHtml = `<span class="urgency-badge badge-week"><span class="badge-dot dot-amber"></span>This Week</span>`;
         const diffDays = Math.floor((diffMs || 0) / 86400000);
-        daysLeftBadge = `<span class="due-days-pill pill-warning countdown-pill" data-timestamp="${item.dueTimestamp}">⏳ ${isClosingTerm ? "Closes" : "Due"} in ${diffDays}d</span>`;
+        daysLeftBadge = `<span class="due-days-pill pill-warning countdown-pill" data-timestamp="${item.dueTimestamp}">${isClosingTerm ? "Closes" : "Due"} in ${diffDays}d</span>`;
         submissionChipHtml = `
           <div class="submission-status-chip is-pending" title="Due this week">
             <span class="status-dot"></span>
@@ -1715,10 +1735,10 @@ function renderDeadlines() {
           </div>
         `;
       } else {
-        badgeHtml = `<span class="urgency-badge badge-upcoming"><span>⏳</span> Pending</span>`;
+        badgeHtml = `<span class="urgency-badge badge-upcoming"><span class="badge-dot dot-slate"></span>Pending</span>`;
         if (item.dueTimestamp) {
           const diffDays = Math.floor((diffMs || 0) / 86400000);
-          daysLeftBadge = `<span class="due-days-pill pill-warning countdown-pill" data-timestamp="${item.dueTimestamp}">⏳ ${isClosingTerm ? "Closes" : "Due"} in ${diffDays}d</span>`;
+          daysLeftBadge = `<span class="due-days-pill pill-warning countdown-pill" data-timestamp="${item.dueTimestamp}">${isClosingTerm ? "Closes" : "Due"} in ${diffDays}d</span>`;
         } else {
           daysLeftBadge = `<span class="due-days-pill pill-normal">Open</span>`;
         }
@@ -1735,7 +1755,7 @@ function renderDeadlines() {
 
     const formattedDueDate = formatDueCalendarDate(item.dueTimestamp, item.formattedTime);
     const isTgSent = state.telegramSentDeadlineIds.has(String(item.id)) || item.telegramSent;
-    const tgSentBadge = isTgSent ? `<span class="telegram-sent-tag" title="Alert flagged as sent to Telegram">✈️ Telegram Sent</span>` : "";
+    const tgSentBadge = isTgSent ? `<span class="telegram-sent-tag" title="Alert flagged as sent to Telegram">Telegram Sent</span>` : "";
 
     const typeLabel = item.type === "quiz" ? "Quiz" : (item.type === "turnitin" ? "Turnitin" : (item.type === "workshop" ? "Workshop" : "Assignment"));
     const typeBadge = `<span class="activity-type-tag type-${item.type || "assign"}">${typeLabel}</span>`;
@@ -1792,16 +1812,35 @@ function renderDeadlines() {
       const isChecked = e.target.checked;
       const targetId = e.target.dataset.id;
       const found = state.deadlines.find((d) => d.id === targetId || d.cmid === targetId);
+      const fp = found ? getTaskFingerprint(found.courseCode, found.title || found.name || "") : "";
 
       if (isChecked) {
         state.completedIds.add(targetId);
+        if (found?.id) state.completedIds.add(String(found.id));
         if (found?.cmid) state.completedIds.add(String(found.cmid));
+        if (fp) {
+          state.completedIds.add(fp);
+          state.completedIds.add(`fp:${fp}`);
+        }
+        if (found) {
+          found.isCompleted = true;
+          found.isSubmittedOnSpectrum = true;
+          found.submissionStatus = "Submitted";
+        }
       } else {
         state.completedIds.delete(targetId);
+        if (found?.id) state.completedIds.delete(String(found.id));
         if (found?.cmid) state.completedIds.delete(String(found.cmid));
+        if (fp) {
+          state.completedIds.delete(fp);
+          state.completedIds.delete(`fp:${fp}`);
+        }
+        if (found) {
+          found.isCompleted = false;
+          found.isSubmittedOnSpectrum = false;
+          found.submissionStatus = "No submission recorded";
+        }
       }
-
-      if (found) found.isCompleted = isChecked;
 
       state.deadlines = deduplicateDeadlinesList(state.deadlines, state.completedIds);
 
@@ -1814,7 +1853,7 @@ function renderDeadlines() {
 
       updateUrgentCountBadge();
       renderDeadlines();
-      showToast(isChecked ? "Marked as completed!" : "Marked as pending", "info");
+      showToast(isChecked ? "Marked as submitted!" : "Marked as pending", "info");
     });
 
     container.appendChild(card);
@@ -1933,7 +1972,7 @@ function populateAnnouncementSubjectDropdown() {
   if (!select) return;
 
   const currentVal = state.selectedAnnouncementSubject || "all";
-  select.innerHTML = `<option value="all">📚 All Enrolled Subjects</option>`;
+  select.innerHTML = `<option value="all">All Enrolled Subjects</option>`;
 
   const courseMap = new Map();
   if (Array.isArray(state.courses)) {
@@ -1956,7 +1995,7 @@ function populateAnnouncementSubjectDropdown() {
   courseMap.forEach((name, code) => {
     const opt = document.createElement("option");
     opt.value = code;
-    opt.textContent = `🎓 ${code} - ${name}`;
+    opt.textContent = `${code} - ${name}`;
     if (code === currentVal) {
       opt.selected = true;
     }
@@ -2034,19 +2073,23 @@ function renderAnnouncements() {
     card.className = "announcement-card";
 
     const isTgSent = state.telegramSentAnnouncementIds.has(String(item.id)) || item.telegramSent;
-    const tgSentBadge = isTgSent ? `<span class="telegram-sent-tag" title="Notice flagged as sent to Telegram">✈️ Telegram Sent</span>` : "";
+    const tgSentBadge = isTgSent ? `<span class="telegram-sent-tag" title="Notice flagged as sent to Telegram">Telegram Sent</span>` : "";
+
+    // Resolve course name if available, falling back to course matching or courseCode
+    const matchedCourse = state.courses.find((c) => String(c.id) === String(item.courseId) || (c.code && c.code === item.courseCode));
+    const displayName = item.courseName || matchedCourse?.name || item.courseCode || "UM Course";
 
     card.innerHTML = `
       <div class="announcement-card-header">
         <div class="flex-align-center" style="gap: 6px;">
-          <span class="announcement-course-pill">${item.courseCode || "UM"}</span>
+          <span class="announcement-course-pill" title="${item.courseCode || ""}">${escapeHtml(displayName)}</span>
           ${tgSentBadge}
         </div>
-        <span class="announcement-date-text">🕒 ${item.date || "Recent"}</span>
+        <span class="announcement-date-text">${item.date || "Recent"}</span>
       </div>
       <h4 class="announcement-subject-title">${item.subject}</h4>
       <div class="announcement-footer">
-        <span class="announcement-author-info">👤 ${item.author || "Course Instructor"}</span>
+        <span class="announcement-author-info">${item.author || "Course Instructor"}</span>
         <a href="${item.url || 'https://spectrum.um.edu.my/'}" target="_blank" rel="noopener noreferrer" class="announcement-link-btn">
           Open Notice &rarr;
         </a>
@@ -2146,7 +2189,7 @@ function populateAttendanceCourseDropdowns() {
       const code = c.code || c.shortname;
       const opt = document.createElement("option");
       opt.value = c.id;
-      opt.textContent = `🎓 ${code} - ${c.name}`;
+      opt.textContent = `${code} - ${c.name}`;
       if (c.id === prevVal) opt.selected = true;
       occSelect.appendChild(opt);
     });
@@ -2159,7 +2202,7 @@ function populateAttendanceCourseDropdowns() {
 
   if (viewSelect) {
     const prevSubject = state.selectedAttendanceSubject || "all";
-    viewSelect.innerHTML = `<option value="all">📚 All Enrolled Subjects</option>`;
+    viewSelect.innerHTML = `<option value="all">All Enrolled Subjects</option>`;
 
     if (Array.isArray(state.courses)) {
       state.courses.forEach((c) => {
@@ -2168,7 +2211,7 @@ function populateAttendanceCourseDropdowns() {
         const occTag = occ ? ` (${occ})` : " (Occ not set)";
         const opt = document.createElement("option");
         opt.value = c.id;
-        opt.textContent = `🎓 ${code}${occTag} - ${c.name}`;
+        opt.textContent = `${code}${occTag} - ${c.name}`;
         if (c.id === prevSubject) opt.selected = true;
         viewSelect.appendChild(opt);
       });
@@ -2218,7 +2261,7 @@ function renderActiveOccurrenceBadges() {
     chip.className = `occ-chip ${occ ? "occ-set" : ""}`;
     chip.innerHTML = `
       <span class="occ-chip-code">${code}</span>
-      <span>${occ ? `🏷️ ${occ}` : "⚠️ Set Occ"}</span>
+      <span>${occ ? occ : "Set Occ"}</span>
     `;
 
     chip.addEventListener("click", () => {
@@ -2238,9 +2281,9 @@ function renderActiveOccurrenceBadges() {
   if (deadlinesTag) {
     const configuredCount = state.courses.filter(c => state.courseOccurrences[c.id] || state.courseOccurrences[c.code || c.shortname]).length;
     if (configuredCount > 0) {
-      deadlinesTag.textContent = `🎯 ${configuredCount}/${state.courses.length} Courses Filtered`;
+      deadlinesTag.textContent = `${configuredCount}/${state.courses.length} Courses Filtered`;
     } else {
-      deadlinesTag.textContent = `⚠️ All Occurrences`;
+      deadlinesTag.textContent = `All Occurrences`;
     }
   }
 }
@@ -2265,8 +2308,16 @@ function renderAttendanceSummaryMetrics() {
   };
 
   const pct = summary.overallPercentage || "100.0%";
+  const numPct = parseFloat(pct) || 100;
   if (rateBadge) rateBadge.textContent = `${pct} Rate`;
   if (overallRateEl) overallRateEl.textContent = pct;
+  const attBar = document.getElementById("attendanceOverallProgressBar");
+  if (attBar) attBar.style.width = `${Math.min(100, Math.max(0, numPct))}%`;
+
+  const totalSessions = (summary.totalPresent || 0) + (summary.totalLate || 0) + (summary.totalAbsent || 0);
+  const totalCountEl = document.getElementById("attendanceTotalCount");
+  if (totalCountEl) totalCountEl.textContent = totalSessions;
+
   if (presentEl) presentEl.textContent = summary.totalPresent ?? 0;
   if (lateEl) lateEl.textContent = summary.totalLate ?? 0;
   if (absentEl) absentEl.textContent = summary.totalAbsent ?? 0;
@@ -2320,7 +2371,7 @@ function renderOpenAttendanceBanner() {
 
   // Reset interactive button state
   if (btnIcon && btnLabel) {
-    btnIcon.textContent = "⚡";
+    btnIcon.textContent = "✓";
     btnLabel.textContent = "Submit (Mark Present) →";
   }
 
@@ -2334,7 +2385,7 @@ function renderOpenAttendanceBanner() {
     s2Icon.classList.add("stepper-pulse");
     step3.className = "stepper-step step-pending";
     const s3Icon = step3.querySelector(".stepper-icon");
-    s3Icon.textContent = "🤖";
+    s3Icon.textContent = "3";
     s3Icon.classList.remove("stepper-pulse");
   }
 
@@ -2776,7 +2827,7 @@ async function handleSubmitOpenAttendance(overrideParams = {}) {
   const step3 = document.getElementById("stepperStep3");
 
   if (btnIcon && btnLabel) {
-    btnIcon.textContent = "⏳";
+    btnIcon.textContent = "✓";
     btnLabel.textContent = "Auto-filling Present...";
   }
 
@@ -2786,7 +2837,7 @@ async function handleSubmitOpenAttendance(overrideParams = {}) {
     step2.querySelector(".stepper-icon").classList.remove("stepper-pulse");
     step3.className = "stepper-step step-current";
     const s3Icon = step3.querySelector(".stepper-icon");
-    s3Icon.textContent = "🚀";
+    s3Icon.textContent = "3";
     s3Icon.classList.add("stepper-pulse");
   }
 
@@ -2927,9 +2978,9 @@ async function loadLiveWeekMaterials() {
     const totalLabs = state.weekMaterials.labs.length;
     const totalFiles = totalSlides + totalTut + totalLabs;
 
-    document.getElementById("packSlidesCount").textContent = `📖 ${totalSlides} Slide${totalSlides === 1 ? "" : "s"}`;
-    document.getElementById("packTutCount").textContent = `📝 ${totalTut} Tutorial${totalTut === 1 ? "" : "s"}`;
-    document.getElementById("packLabCount").textContent = `💻 ${totalLabs} Lab${totalLabs === 1 ? "" : "s"}`;
+    document.getElementById("packSlidesCount").textContent = `${totalSlides} Slide${totalSlides === 1 ? "" : "s"}`;
+    document.getElementById("packTutCount").textContent = `${totalTut} Tutorial${totalTut === 1 ? "" : "s"}`;
+    document.getElementById("packLabCount").textContent = `${totalLabs} Lab${totalLabs === 1 ? "" : "s"}`;
     const totalFilesEl = document.getElementById("packTotalFiles");
     if (totalFilesEl) totalFilesEl.textContent = totalFiles;
   } catch (err) {
@@ -3241,7 +3292,7 @@ async function handleManualCloudSync() {
         const badge = document.getElementById("cloudRelayStatusBadge");
         if (badge) {
           badge.className = "session-status-badge status-connected";
-          badge.textContent = "🟢 Synced";
+          badge.textContent = "Synced";
         }
         const lbl = document.getElementById("lastCloudSyncLabel");
         if (lbl) {
@@ -3253,7 +3304,7 @@ async function handleManualCloudSync() {
         const badge = document.getElementById("cloudRelayStatusBadge");
         if (badge) {
           badge.className = "session-status-badge status-invalid";
-          badge.textContent = "🔴 Sync Failed";
+          badge.textContent = "Sync Failed";
         }
         showToast(response?.error || response?.message || "Sync failed", "error");
       }
@@ -3293,7 +3344,7 @@ async function handleAutoDiscoverIcal(silent = false) {
     loadLiveDeadlines();
 
     if (!silent) {
-      showToast("iCal Calendar URL automatically detected & saved! ✅", "success");
+      showToast("iCal Calendar URL automatically detected & saved!", "success");
     }
     return icalUrl;
   } catch (err) {
@@ -3326,12 +3377,12 @@ function expandDonationQr(forceOpen = null) {
     qrContainer.classList.remove("hidden");
     qrContainer.style.display = "flex";
     if (chevron) chevron.style.transform = "rotate(180deg)";
-    if (btnText) btnText.textContent = "☕ Hide QR Code";
+    if (btnText) btnText.textContent = "Hide QR Code";
   } else {
     qrContainer.classList.add("hidden");
     qrContainer.style.display = "none";
     if (chevron) chevron.style.transform = "rotate(0deg)";
-    if (btnText) btnText.textContent = "☕ Donate (DuitNow QR)";
+    if (btnText) btnText.textContent = "Donate (DuitNow QR)";
   }
 }
 
@@ -3422,6 +3473,7 @@ function enableDemoPreview() {
     {
       id: "demo_ann_1",
       courseCode: "WIX2002",
+      courseName: "Software Engineering Project Management",
       subject: "Midterm Examination Date & Guidelines Announced",
       author: "Dr. Azman (Lecturer)",
       date: "Today, 10:30 AM",
@@ -3430,6 +3482,7 @@ function enableDemoPreview() {
     {
       id: "demo_ann_2",
       courseCode: "WIA1001",
+      courseName: "Information Systems & Digital Economy",
       subject: "Tutorial Group Registration Deadline Tomorrow",
       author: "Prof. Sarah",
       date: "Yesterday, 3:15 PM",
@@ -3438,6 +3491,7 @@ function enableDemoPreview() {
     {
       id: "demo_ann_3",
       courseCode: "WIX1002",
+      courseName: "Data Structures & Algorithms",
       subject: "Lab 3 Red-Black Trees Starter Code Released",
       author: "En. Faris",
       date: "Oct 17, 2:00 PM",
@@ -3559,11 +3613,11 @@ async function loadStoredPreferences() {
     }
     if (cloudBadge) {
       cloudBadge.className = "session-status-badge status-connected";
-      cloudBadge.textContent = "🟢 Synced";
+      cloudBadge.textContent = "Synced";
     }
   } else if (cloudBadge) {
     cloudBadge.className = "session-status-badge status-unset";
-    cloudBadge.textContent = "⚪ Not Synced";
+    cloudBadge.textContent = "Not Synced";
   }
 
   const pollInterval = document.getElementById("pollIntervalSelect");

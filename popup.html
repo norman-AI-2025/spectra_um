@@ -72,29 +72,7 @@
     </header>
 
     <!-- ============================================================== -->
-    <!-- TOP DARK BANNER: Inspired by pop_up_design_2 top-right banner   -->
-    <!-- ============================================================== -->
-    <div id="topDarkBanner" class="banner-dark-card">
-      <div class="banner-dark-left">
-        <div class="banner-dark-icon">
-          <svg viewBox="0 0 22 22" width="18" height="18" fill="none">
-            <rect x="2" y="5" width="13" height="13" rx="4" fill="#84CC16" fill-opacity="0.9"
-              transform="rotate(-8 8 11)" />
-            <rect x="6" y="3" width="14" height="14" rx="4" fill="#3B82F6" />
-          </svg>
-        </div>
-        <div class="banner-dark-content">
-          <span class="banner-dark-title">SPeCTRUM Live Radar</span>
-          <span id="bannerDarkSubtitle" class="banner-dark-sub">Synced 24/7 with zero cookie expiry</span>
-        </div>
-      </div>
-      <div class="banner-dark-right">
-        <span class="banner-pulse-dot"></span>
-      </div>
-    </div>
-
-    <!-- ============================================================== -->
-    <!-- PILL SEGMENTED TAB NAV: Exactly matching pop_up_design_2       -->
+    <!-- PILL SEGMENTED TAB NAV                                         -->
     <!-- ============================================================== -->
     <nav class="nav-segmented-pill" role="tablist">
       <button id="tabDeadlines" class="nav-tab-pill active" role="tab" aria-selected="true" data-tab="deadlines">
@@ -191,7 +169,7 @@
         </div>
 
         <div class="trust-notice-row">
-          <span>🔒 Everything is safe, encrypted, and stored locally</span>
+          <span>Encrypted and stored locally in your browser</span>
         </div>
       </div>
     </div>
@@ -205,13 +183,10 @@
       <!-- TAB 1: DEADLINES & SUBMISSIONS RADAR                          -->
       <!-- ============================================================ -->
       <main id="sectionDeadlines" class="tab-content active" role="tabpanel">
-        <!-- Submissions Overview Bento Card (Information Container like Attendance) -->
+        <!-- Submissions Overview Bento Card -->
         <div class="bento-card">
           <div class="card-header-clean">
-            <div>
-              <h3 class="card-main-title">Submissions Radar</h3>
-              <p class="card-main-sub">Live coursework, assignment dropboxes &amp; quizzes</p>
-            </div>
+            <h3 class="card-main-title">Submissions Radar</h3>
             <button type="button" id="refreshSubmissionsBtn" class="circle-btn-sm" title="Refresh Live Submissions">
               <svg viewBox="0 0 20 20" width="14" height="14" fill="currentColor">
                 <path fill-rule="evenodd"
@@ -221,27 +196,47 @@
             </button>
           </div>
 
-          <!-- 4 Metric Cards in Grid (Identical to Attendance) -->
-          <div class="attendance-metrics-grid">
-            <div class="metric-box metric-overall">
-              <span class="metric-val" id="submissionsProgressRate">--%</span>
-              <span class="metric-lbl">Completion Rate</span>
+          <!-- Sleek Summary Progress Bar & 2-Column Breakdown -->
+          <div class="summary-ribbon-card">
+            <div class="summary-progress-header">
+              <div class="summary-progress-title-row">
+                <span class="summary-progress-title">Completion Rate</span>
+                <span class="summary-progress-rate" id="submissionsProgressRate">--%</span>
+              </div>
+              <div class="progress-bar-bg">
+                <div id="submissionsProgressBar" class="progress-bar-fill" style="width: 0%;"></div>
+              </div>
             </div>
-            <div class="metric-box metric-present">
-              <span class="metric-val text-emerald" id="submissionsDoneCount">0</span>
-              <span class="metric-lbl">Submitted ✅</span>
-            </div>
-            <div class="metric-box metric-late">
-              <span class="metric-val text-amber" id="submissionsWeekCount">0</span>
-              <span class="metric-lbl">This Week 🟡</span>
-            </div>
-            <div class="metric-box metric-urgent">
-              <span class="metric-val text-rose" id="submissionsUrgentCount">0</span>
-              <span class="metric-lbl">Urgent (&lt;24h) 🔴</span>
+
+            <div class="summary-stats-grid">
+              <div class="summary-stat-col">
+                <div class="summary-stat-item">
+                  <span class="stat-indicator-dot dot-emerald"></span>
+                  <span class="stat-label">Submitted:</span>
+                  <span class="stat-value text-emerald font-mono" id="submissionsDoneCount">0</span>
+                </div>
+                <div class="summary-stat-item">
+                  <span class="stat-indicator-dot dot-slate"></span>
+                  <span class="stat-label">Pending:</span>
+                  <span class="stat-value text-slate font-mono" id="submissionsPendingCount">0</span>
+                </div>
+              </div>
+              <div class="summary-stat-col">
+                <div class="summary-stat-item">
+                  <span class="stat-indicator-dot dot-amber"></span>
+                  <span class="stat-label">This Week:</span>
+                  <span class="stat-value text-amber font-mono" id="submissionsWeekCount">0</span>
+                </div>
+                <div class="summary-stat-item">
+                  <span class="stat-indicator-dot dot-rose"></span>
+                  <span class="stat-label">Urgent (&lt;24h):</span>
+                  <span class="stat-value text-rose font-mono" id="submissionsUrgentCount">0</span>
+                </div>
+              </div>
             </div>
           </div>
 
-          <!-- Toggle & Action Row (Identical to Attendance) -->
+          <!-- Toggle & Action Row -->
           <div class="attendance-toggle-row">
             <div class="toggle-control-group">
               <span class="toggle-label-text" id="submissionsPendingLabel">0 Pending Submissions</span>
@@ -270,12 +265,12 @@
 
           <div class="filter-pills-row">
             <button class="pill-btn active" data-filter="all">All (<span id="countAll">0</span>)</button>
-            <button class="pill-btn filter-urgent" data-filter="urgent">🔴 &lt;24h (<span
+            <button class="pill-btn filter-urgent" data-filter="urgent"><span class="pill-dot dot-rose"></span>&lt;24h (<span
                 id="countUrgent">0</span>)</button>
-            <button class="pill-btn filter-week" data-filter="this_week">🟡 This Week (<span
+            <button class="pill-btn filter-week" data-filter="this_week"><span class="pill-dot dot-amber"></span>This Week (<span
                 id="countWeek">0</span>)</button>
-            <button class="pill-btn" data-filter="upcoming">🟢 Later (<span id="countLater">0</span>)</button>
-            <button class="pill-btn" data-filter="completed">✅ Done (<span id="countDone">0</span>)</button>
+            <button class="pill-btn" data-filter="upcoming"><span class="pill-dot dot-emerald"></span>Later (<span id="countLater">0</span>)</button>
+            <button class="pill-btn" data-filter="completed"><span class="pill-dot dot-slate"></span>Done (<span id="countDone">0</span>)</button>
           </div>
         </div>
 
@@ -341,10 +336,7 @@
         <!-- Attendance Overview Bento Card -->
         <div class="bento-card">
           <div class="card-header-clean">
-            <div>
-              <h3 class="card-main-title">Attendance Radar</h3>
-              <p class="card-main-sub">Auto-attendance scans active sessions every minute</p>
-            </div>
+            <h3 class="card-main-title">Attendance Radar</h3>
             <button id="scanAttendanceBtn" class="circle-btn-sm" title="Scan Attendance Now">
               <svg viewBox="0 0 20 20" width="14" height="14" fill="currentColor">
                 <path fill-rule="evenodd"
@@ -354,23 +346,43 @@
             </button>
           </div>
 
-          <!-- 4 Metric Cards in Grid -->
-          <div class="attendance-metrics-grid">
-            <div class="metric-box metric-overall">
-              <span class="metric-val" id="attendanceOverallScore">--%</span>
-              <span class="metric-lbl">Overall Attendance</span>
+          <!-- Sleek Summary Progress Bar & 2-Column Breakdown -->
+          <div class="summary-ribbon-card">
+            <div class="summary-progress-header">
+              <div class="summary-progress-title-row">
+                <span class="summary-progress-title">Overall Attendance</span>
+                <span class="summary-progress-rate" id="attendanceOverallScore">--%</span>
+              </div>
+              <div class="progress-bar-bg">
+                <div id="attendanceOverallProgressBar" class="progress-bar-fill" style="width: 100%;"></div>
+              </div>
             </div>
-            <div class="metric-box metric-present">
-              <span class="metric-val text-emerald" id="attendancePresentCount">0</span>
-              <span class="metric-lbl">Present ✅</span>
-            </div>
-            <div class="metric-box metric-late">
-              <span class="metric-val text-amber" id="attendanceLateCount">0</span>
-              <span class="metric-lbl">Late 🟡</span>
-            </div>
-            <div class="metric-box metric-absent">
-              <span class="metric-val text-rose" id="attendanceAbsentCount">0</span>
-              <span class="metric-lbl">Absent ❌</span>
+
+            <div class="summary-stats-grid">
+              <div class="summary-stat-col">
+                <div class="summary-stat-item">
+                  <span class="stat-indicator-dot dot-emerald"></span>
+                  <span class="stat-label">Present:</span>
+                  <span class="stat-value text-emerald font-mono" id="attendancePresentCount">0</span>
+                </div>
+                <div class="summary-stat-item">
+                  <span class="stat-indicator-dot dot-amber"></span>
+                  <span class="stat-label">Late:</span>
+                  <span class="stat-value text-amber font-mono" id="attendanceLateCount">0</span>
+                </div>
+              </div>
+              <div class="summary-stat-col">
+                <div class="summary-stat-item">
+                  <span class="stat-indicator-dot dot-rose"></span>
+                  <span class="stat-label">Absent:</span>
+                  <span class="stat-value text-rose font-mono" id="attendanceAbsentCount">0</span>
+                </div>
+                <div class="summary-stat-item">
+                  <span class="stat-indicator-dot dot-slate"></span>
+                  <span class="stat-label">Total Sessions:</span>
+                  <span class="stat-value text-slate font-mono" id="attendanceTotalCount">0</span>
+                </div>
+              </div>
             </div>
           </div>
 
@@ -385,10 +397,6 @@
               <span class="toggle-label-text" id="telegramAttendanceOpenLabel">Telegram Open Alert</span>
             </div>
             <div class="flex-align-center" style="gap: 6px;">
-              <button type="button" id="testSubmissionContainerBtn" class="btn-ghost-pill"
-                title="Preview interactive submission container">
-                ⚡ Preview Check-In
-              </button>
               <a id="openSpectrumHeaderBtn" href="https://spectrum.um.edu.my/my/" target="_blank"
                 rel="noopener noreferrer" class="link-btn-pill">
                 SPeCTRUM ↗
@@ -428,13 +436,13 @@
             </div>
             <div class="stepper-connector active"></div>
             <div class="stepper-step step-current" id="stepperStep2" title="Click Submit to initiate check-in">
-              <span class="stepper-icon stepper-pulse">2</span>
+              <span class="stepper-icon">2</span>
               <span class="stepper-label">Submit</span>
             </div>
             <div class="stepper-connector"></div>
             <div class="stepper-step step-pending" id="stepperStep3"
               title="Spectra will navigate and auto-fill Present">
-              <span class="stepper-icon">🤖</span>
+              <span class="stepper-icon">3</span>
               <span class="stepper-label">Auto-Fill</span>
             </div>
           </div>
@@ -442,8 +450,7 @@
           <!-- Interactive Password Accordion Drawer -->
           <div class="open-password-accordion">
             <button type="button" id="togglePasswordDrawerBtn" class="password-drawer-toggle">
-              <span class="toggle-icon">🔑</span>
-              <span class="toggle-text" id="togglePasswordText">Password required? (Optional)</span>
+              <span class="toggle-text" id="togglePasswordText">Session Password (Optional)</span>
               <span class="toggle-arrow" id="togglePasswordArrow">▾</span>
             </button>
             <div id="openAttendancePasswordWrap" class="open-password-wrap hidden">
@@ -451,7 +458,12 @@
                 <input type="password" id="openAttendancePasswordInput"
                   placeholder="Enter session password if required..." class="modern-input input-sm" autocomplete="off">
                 <button type="button" id="toggleOpenPwdVisBtn" class="pwd-vis-btn"
-                  title="Show or hide password">👁️</button>
+                  title="Toggle visibility" aria-label="Toggle password visibility">
+                  <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                    <path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"></path>
+                    <circle cx="12" cy="12" r="3"></circle>
+                  </svg>
+                </button>
               </div>
             </div>
           </div>
@@ -460,13 +472,14 @@
           <div class="open-banner-actions">
             <button type="button" id="submitOpenAttendanceBtn" class="btn-primary-action btn-submit-interactive"
               title="Bring to attendance page and fill Present automatically">
-              <span class="submit-btn-icon" id="submitBtnIcon">⚡</span>
               <span class="submit-btn-label" id="submitBtnLabel">Submit (Mark Present) &rarr;</span>
-              <span class="submit-btn-shine"></span>
             </button>
             <button type="button" id="copyAttendanceUrlBtn" class="btn-secondary-action btn-icon-only"
               title="Copy check-in link to clipboard">
-              <span id="copyUrlBtnIcon">📋</span>
+              <svg viewBox="0 0 20 20" width="13" height="13" fill="currentColor">
+                <path d="M8 3a1 1 0 011-1h2a1 1 0 110 2H9a1 1 0 01-1-1z" />
+                <path d="M6 3a2 2 0 00-2 2v11a2 2 0 002 2h8a2 2 0 002-2V5a2 2 0 00-2-2 3 3 0 01-3 3H9a3 3 0 01-3-3z" />
+              </svg>
             </button>
             <a id="openAttendancePageLink" href="https://spectrum.um.edu.my/mod/attendance/view.php" target="_blank"
               rel="noopener noreferrer" class="btn-secondary-action btn-pill-md"
@@ -476,19 +489,14 @@
           </div>
         </div>
 
-        <!-- Occurrence Configuration Card -->
+        <!-- Occurrence Configuration Card (Collapsible) -->
         <div class="bento-card">
-          <div class="flex-between">
-            <div>
-              <h4 class="card-section-title">Occurrence Setup</h4>
-              <p class="card-subtitle">Filter check-in sessions by your enrolled occurrence (e.g. Occ 1, Occ 2)</p>
-            </div>
-            <button id="toggleOccurrenceSetupBtn" class="btn-ghost-pill" aria-label="Toggle Occurrence Form">
-              <span id="occurrenceSetupToggleText">Edit ⚙️</span>
-            </button>
+          <div class="flex-between cursor-pointer" id="toggleOccurrenceSetupBtn" role="button" aria-expanded="false" tabindex="0">
+            <h4 class="card-section-title">Occurrence Setup</h4>
+            <span id="occurrenceSetupToggleText" class="link-btn-subtle" style="font-size: 11px;">Expand ▾</span>
           </div>
 
-          <div id="occurrenceConfigForm" class="occurrence-config-form margin-top-sm">
+          <div id="occurrenceConfigForm" class="occurrence-config-form margin-top-sm hidden">
             <div class="form-group">
               <label for="occurrenceCourseSelect" class="form-label">Course</label>
               <div class="select-wrapper">
@@ -558,7 +566,7 @@
             </label>
             <div class="select-wrapper">
               <select id="attendanceSubjectSelect" class="modern-select">
-                <option value="all">📚 All Enrolled Subjects</option>
+                <option value="all">All Enrolled Subjects</option>
               </select>
             </div>
           </div>
@@ -581,13 +589,13 @@
           <!-- Attendance View Filter Pills (Upcoming / History / All) -->
           <div class="filter-pills-row" style="margin-bottom: 12px;" role="tablist" aria-label="Attendance filter">
             <button type="button" class="pill-btn att-pill-btn active" data-att-filter="upcoming">
-              ⏰ Upcoming (<span id="countAttUpcoming">0</span>)
+              Upcoming (<span id="countAttUpcoming">0</span>)
             </button>
             <button type="button" class="pill-btn att-pill-btn" data-att-filter="history">
-              📜 History (<span id="countAttHistory">0</span>)
+              History (<span id="countAttHistory">0</span>)
             </button>
             <button type="button" class="pill-btn att-pill-btn" data-att-filter="all">
-              📚 All (<span id="countAttAll">0</span>)
+              All (<span id="countAttAll">0</span>)
             </button>
           </div>
 
@@ -622,10 +630,7 @@
         <!-- Announcements Filter Card -->
         <div class="bento-card">
           <div class="card-header-clean">
-            <div>
-              <h3 class="card-main-title">Course Notices</h3>
-              <p class="card-main-sub">Forum announcements sorted starting with the latest</p>
-            </div>
+            <h3 class="card-main-title">Course Notices</h3>
             <button id="refreshAnnouncementsBtn" class="circle-btn-sm" title="Refresh Notices">
               <svg viewBox="0 0 20 20" width="14" height="14" fill="currentColor">
                 <path fill-rule="evenodd"
@@ -643,7 +648,7 @@
             </label>
             <div class="select-wrapper">
               <select id="announcementSubjectSelect" class="modern-select">
-                <option value="all">📚 All Enrolled Subjects</option>
+                <option value="all">All Enrolled Subjects</option>
               </select>
             </div>
           </div>
@@ -699,31 +704,30 @@
         <!-- SPeCTRUM Session Authentication Card -->
         <div class="bento-card">
           <div class="card-header-clean">
-            <div>
-              <h3 class="card-main-title">SPeCTRUM Session</h3>
-              <p class="card-main-sub">Connect your MoodleSession token or auto-detect from browser cookies</p>
-            </div>
+            <h3 class="card-main-title">SPeCTRUM Session</h3>
             <span id="cookieStatusLabel" class="status-indicator-badge hidden">Unset</span>
           </div>
 
           <div class="form-group margin-top-xs">
             <label for="moodle-session-input" class="form-label">
               MoodleSession Cookie Token
-              <span class="field-hint">F12 &gt; Application &gt; Cookies</span>
             </label>
             <div class="password-input-wrapper">
               <input type="password" id="moodle-session-input" placeholder="e.g. uhe4fg1agh90g925grgtk22ob0"
                 class="modern-input font-mono" autocomplete="off" spellcheck="false">
               <button type="button" id="toggle-moodle-session-visibility" class="btn-input-icon"
-                title="Toggle visibility">
-                👁️
+                title="Toggle visibility" aria-label="Toggle token visibility">
+                <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                  <path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"></path>
+                  <circle cx="12" cy="12" r="3"></circle>
+                </svg>
               </button>
             </div>
           </div>
 
           <div class="session-status-row">
             <span class="status-indicator-label">Status:</span>
-            <span id="session-status-badge" class="session-status-badge status-unset">⚪ Unset</span>
+            <span id="session-status-badge" class="session-status-badge status-unset">Unset</span>
           </div>
 
           <!-- Action Buttons -->
@@ -766,16 +770,12 @@
         <!-- Moodle iCalendar (Permanent Sync) Bento Card -->
         <div class="bento-card">
           <div class="card-header-clean">
-            <div>
-              <h3 class="card-main-title">Permanent iCalendar Feed</h3>
-              <p class="card-main-sub">Sync submission deadlines 24/7 without session expiration</p>
-            </div>
+            <h3 class="card-main-title">Permanent iCalendar Feed</h3>
           </div>
 
           <div class="form-group margin-top-xs">
             <label for="calendarIcalUrl" class="form-label">
               Moodle iCal Export URL
-              <span class="field-hint">Auto-generated</span>
             </label>
             <input type="url" id="calendarIcalUrl"
               placeholder="https://spectrum.um.edu.my/calendar/export_execute.php?userid=...&amp;authtoken=..."
@@ -795,22 +795,21 @@
         <!-- Telegram Bot Pipeline Bento Card -->
         <div class="bento-card">
           <div class="card-header-clean">
-            <div>
-              <h3 class="card-main-title">Telegram Alerts</h3>
-              <p class="card-main-sub">Push notifications for notices &amp; &lt;24h impending deadlines</p>
-            </div>
+            <h3 class="card-main-title">Telegram Alerts</h3>
           </div>
 
           <div class="form-group margin-top-xs">
             <label for="telegramToken" class="form-label">
               Bot Token
-              <span class="field-hint">From @BotFather</span>
             </label>
             <div class="password-input-wrapper">
               <input type="password" id="telegramToken" placeholder="123456789:ABCdefGhIJKlmNoPQRsTUVwxyZ"
                 class="modern-input">
-              <button type="button" id="toggleTokenVisibility" class="btn-input-icon" title="Toggle visibility">
-                👁️
+              <button type="button" id="toggleTokenVisibility" class="btn-input-icon" title="Toggle visibility" aria-label="Toggle token visibility">
+                <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                  <path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"></path>
+                  <circle cx="12" cy="12" r="3"></circle>
+                </svg>
               </button>
             </div>
           </div>
@@ -818,7 +817,6 @@
           <div class="form-group">
             <label for="telegramChatId" class="form-label">
               Chat ID
-              <span class="field-hint">From @userinfobot</span>
             </label>
             <input type="text" id="telegramChatId" placeholder="e.g. 987654321" class="modern-input">
           </div>
@@ -836,18 +834,12 @@
         <!-- 24/7 Cloudflare Relay Worker Bento Card -->
         <div class="bento-card">
           <div class="card-header-clean">
-            <div>
-              <h3 class="card-main-title">24/7 Cloudflare Relay</h3>
-              <p class="card-main-sub">Scan deadlines &amp; attendance 24/7 in the cloud even when your laptop is closed</p>
-            </div>
-            <span id="cloudRelayStatusBadge" class="session-status-badge status-unset">⚪ Not Synced</span>
+            <h3 class="card-main-title">24/7 Cloudflare Relay</h3>
+            <span id="cloudRelayStatusBadge" class="session-status-badge status-unset">Not Synced</span>
           </div>
 
           <div class="attendance-toggle-row margin-top-xs">
-            <div>
-              <span style="font-weight: 600; font-size: 13px; color: var(--text-main);">Enable Cloud Relay</span>
-              <p class="card-main-sub" style="margin: 0; font-size: 11px;">Sync session &amp; iCal to Cloudflare Worker</p>
-            </div>
+            <span style="font-weight: 600; font-size: 13px; color: var(--text-main);">Enable Cloud Relay</span>
             <label class="switch">
               <input type="checkbox" id="cloudRelayToggle">
               <span class="slider round"></span>
@@ -870,8 +862,11 @@
               </label>
               <div class="password-input-wrapper">
                 <input type="password" id="cloudRelaySecret" placeholder="worker-auth-secret-key" class="modern-input font-mono" autocomplete="off">
-                <button type="button" id="toggleCloudSecretVisibility" class="btn-input-icon" title="Toggle visibility">
-                  👁️
+                <button type="button" id="toggleCloudSecretVisibility" class="btn-input-icon" title="Toggle visibility" aria-label="Toggle secret visibility">
+                  <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                    <path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"></path>
+                    <circle cx="12" cy="12" r="3"></circle>
+                  </svg>
                 </button>
               </div>
             </div>
@@ -934,16 +929,12 @@
 
         <!-- Support & Donations Bento Card -->
         <div class="bento-card" id="donationCard"
-          style="text-align: center; border-color: #FECDD3; background: linear-gradient(145deg, #FFFFFF 0%, #FFF5F5 100%); margin-top: 12px;">
-          <div style="font-size: 24px; margin-bottom: 2px;">☕</div>
-          <h3 class="card-main-title" style="color: #9F1239; margin-bottom: 4px;">Support Spectra</h3>
-          <p class="card-main-sub" style="margin-bottom: 12px; font-size: 11.5px; line-height: 1.4;">
-            Spectra is an independent open-source project made with ❤️ for Universiti Malaya students.
-          </p>
+          style="text-align: center; margin-top: 12px;">
+          <h3 class="card-main-title" style="margin-bottom: 8px;">Support Spectra</h3>
           <div style="display: flex; justify-content: center; margin-bottom: 2px;">
             <button type="button" id="settingDonateBtn" class="btn-primary-action btn-pill-md"
-              style="background: linear-gradient(135deg, #E11D48 0%, #BE123C 100%); color: #FFFFFF; font-weight: 700; gap: 6px; box-shadow: 0 4px 12px rgba(225, 29, 72, 0.25);">
-              <span id="settingDonateBtnText">☕ Donate (DuitNow QR)</span>
+              style="gap: 6px;">
+              <span id="settingDonateBtnText">Donate (DuitNow QR)</span>
               <svg id="settingDonateChevron" viewBox="0 0 20 20" width="14" height="14" fill="currentColor"
                 style="transition: transform 0.25s ease;">
                 <path fill-rule="evenodd"
@@ -955,11 +946,9 @@
           <div id="donateQrContainer" class="hidden"
             style="display: none; flex-direction: column; align-items: center; justify-content: center; margin-top: 12px;">
             <img src="assets/duitnow-qr.png" alt="DuitNow QR"
-              style="width: 170px; max-width: 100%; border-radius: 12px; border: 1.5px solid #FDA4AF; box-shadow: 0 4px 14px rgba(244, 63, 94, 0.15); padding: 4px; background: #FFFFFF;" />
-            <span style="font-size: 11.5px; font-weight: 700; color: #BE123C; margin-top: 8px;">Scan via DuitNow
-              QR</span>
-            <span style="font-size: 10px; color: var(--text-muted); margin-top: 2px;">Touch 'n Go • Maybank MAE •
-              GrabPay • ShopeePay • Bank Apps</span>
+              style="width: 170px; max-width: 100%; border-radius: 10px; border: 1px solid #E2E8F0; box-shadow: var(--shadow-card); padding: 4px; background: #FFFFFF;" />
+            <span style="font-size: 11.5px; font-weight: 600; color: var(--text-primary); margin-top: 8px;">Scan via DuitNow QR</span>
+            <span style="font-size: 10px; color: var(--text-muted); margin-top: 2px;">Touch 'n Go • Maybank MAE • GrabPay • ShopeePay • Bank Apps</span>
           </div>
         </div>
 
@@ -996,8 +985,7 @@
       <div class="footer-utility-row">
         <a href="https://spectrum.um.edu.my/" target="_blank" class="footer-chip-btn">SPeCTRUM ↗</a>
         <a href="https://t.me/" target="_blank" class="footer-chip-btn">Telegram Bot</a>
-        <button type="button" id="footerDonateBtn" class="footer-chip-btn" style="color: #BE123C; font-weight: 700;">☕
-          Donate</button>
+        <button type="button" id="footerDonateBtn" class="footer-chip-btn">Donate</button>
         <button type="button" id="footerDemoBtn" class="footer-chip-btn">Demo Mode</button>
       </div>
     </footer>
