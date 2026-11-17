@@ -1,50 +1,77 @@
 /* ===================================================================
    Spectra - Universiti Malaya SPeCTRUM Companion
-   Modern Figma / Apple-inspired Aesthetic (pop_up_design_2)
+   Apple Liquid Glass Design System (macOS / iOS HIG)
    =================================================================== */
 
 :root {
-  --bg-app: #F8FAFC;
-  --surface-card: #FFFFFF;
-  --surface-card-hover: #F1F5F9;
-  --surface-subtle: #F1F5F9;
-  --border-card: #E2E8F0;
-  --border-hairline: rgba(15, 23, 42, 0.08);
-  --border-focus: #2563EB;
+  --bg-app: #F5F7FB;
+  --bg-canvas: radial-gradient(at 8% 6%, rgba(191, 219, 254, 0.5) 0px, transparent 45%),
+               radial-gradient(at 92% 10%, rgba(224, 231, 255, 0.6) 0px, transparent 48%),
+               radial-gradient(at 88% 88%, rgba(219, 234, 254, 0.5) 0px, transparent 52%),
+               radial-gradient(at 10% 92%, rgba(243, 232, 255, 0.4) 0px, transparent 48%),
+               #F4F6FB;
 
+  /* Liquid Glass Surfaces */
+  --surface-glass: rgba(255, 255, 255, 0.72);
+  --surface-glass-hover: rgba(255, 255, 255, 0.88);
+  --surface-glass-active: rgba(255, 255, 255, 0.96);
+  --surface-glass-subtle: rgba(255, 255, 255, 0.45);
+
+  --surface-card: var(--surface-glass);
+  --surface-card-hover: var(--surface-glass-hover);
+  --surface-subtle: rgba(241, 245, 249, 0.65);
+
+  /* Glass Borders & Specular Edges */
+  --border-glass: rgba(255, 255, 255, 0.85);
+  --border-glass-subtle: rgba(226, 232, 240, 0.7);
+  --border-card: var(--border-glass);
+  --border-hairline: rgba(15, 23, 42, 0.06);
+  --border-focus: #007AFF;
+
+  /* Typography */
   --text-primary: #0F172A;
   --text-secondary: #475569;
   --text-muted: #64748B;
 
-  --brand-blue: #2563EB;
-  --brand-blue-hover: #1D4ED8;
-  --brand-blue-subtle: #EFF6FF;
+  /* Apple System Colors */
+  --brand-blue: #007AFF;
+  --brand-blue-hover: #0066EB;
+  --brand-blue-subtle: rgba(0, 122, 255, 0.08);
 
-  --accent-rose: #DC2626;
-  --accent-rose-subtle: #FEF2F2;
-  --accent-rose-border: #FECACA;
+  --accent-rose: #FF3B30;
+  --accent-rose-subtle: rgba(255, 59, 48, 0.08);
+  --accent-rose-border: rgba(255, 59, 48, 0.25);
 
-  --accent-amber: #D97706;
-  --accent-amber-subtle: #FFFBEB;
-  --accent-amber-border: #FDE68A;
+  --accent-amber: #FF9500;
+  --accent-amber-subtle: rgba(255, 149, 0, 0.08);
+  --accent-amber-border: rgba(255, 149, 0, 0.25);
 
-  --accent-emerald: #16A34A;
-  --accent-emerald-subtle: #F0FDF4;
-  --accent-emerald-border: #BBF7D0;
+  --accent-emerald: #34C759;
+  --accent-emerald-subtle: rgba(52, 199, 89, 0.09);
+  --accent-emerald-border: rgba(52, 199, 89, 0.25);
 
-  --shadow-subtle: 0 1px 2px rgba(0, 0, 0, 0.04);
-  --shadow-card: 0 1px 3px rgba(15, 23, 42, 0.05), 0 1px 2px rgba(15, 23, 42, 0.03);
-  --shadow-float: 0 4px 12px rgba(15, 23, 42, 0.08);
-  --shadow-btn-primary: 0 1px 3px rgba(37, 99, 235, 0.2);
+  /* Liquid Glass Blur & Specular Shadows */
+  --glass-blur: blur(20px) saturate(190%);
+  --glass-blur-deep: blur(28px) saturate(200%);
+  --glass-specular: inset 0 1px 0.5px rgba(255, 255, 255, 0.95), inset 0 -0.5px 0.5px rgba(0, 0, 0, 0.02);
 
-  --radius-sm: 6px;
-  --radius-md: 10px;
-  --radius-lg: 14px;
+  --shadow-subtle: 0 1px 3px rgba(15, 23, 42, 0.03), inset 0 1px 0 rgba(255, 255, 255, 0.8);
+  --shadow-card: 0 4px 18px -2px rgba(15, 23, 42, 0.04), 0 1px 3px rgba(15, 23, 42, 0.02), var(--glass-specular);
+  --shadow-card-hover: 0 8px 24px -2px rgba(15, 23, 42, 0.07), 0 2px 6px rgba(15, 23, 42, 0.03), inset 0 1px 1px #FFFFFF;
+  --shadow-float: 0 12px 36px -4px rgba(15, 23, 42, 0.1), 0 4px 12px rgba(15, 23, 42, 0.04), var(--glass-specular);
+  --shadow-btn-primary: 0 2px 8px rgba(0, 122, 255, 0.28), inset 0 1px 0.5px rgba(255, 255, 255, 0.35);
+
+  /* Apple Radii */
+  --radius-xs: 4px;
+  --radius-sm: 8px;
+  --radius-md: 12px;
+  --radius-lg: 16px;
   --radius-card: 16px;
   --radius-pill: 9999px;
 
-  --font-sans: "Plus Jakarta Sans", "Inter", -apple-system, BlinkMacSystemFont, sans-serif;
-  --font-mono: "JetBrains Mono", ui-monospace, Menlo, Consolas, monospace;
+  /* Apple Font Stack */
+  --font-sans: -apple-system, BlinkMacSystemFont, "SF Pro Text", "SF Pro Display", "Plus Jakarta Sans", system-ui, sans-serif;
+  --font-mono: "SF Mono", "JetBrains Mono", ui-monospace, Menlo, Consolas, monospace;
 }
 
 /* Reset & Box Sizing */
@@ -77,7 +104,7 @@ body.spectra-body {
   flex-direction: column;
   width: 440px;
   height: 600px;
-  background: var(--bg-app);
+  background: var(--bg-canvas);
   position: relative;
   overflow: hidden;
 }
@@ -93,24 +120,29 @@ body.spectra-body {
 }
 
 ::-webkit-scrollbar-thumb {
-  background: #CBD5E1;
+  background: rgba(148, 163, 184, 0.45);
   border-radius: var(--radius-pill);
 }
 
 ::-webkit-scrollbar-thumb:hover {
-  background: #94A3B8;
+  background: rgba(100, 116, 139, 0.65);
 }
 
 /* ===================================================================
-   TOP BAR: Clean Header matching pop_up_design_2
+   TOP BAR: Apple Frosted Liquid Glass Header
    =================================================================== */
 .top-bar {
   display: flex;
   align-items: center;
   justify-content: space-between;
-  padding: 14px 18px 10px;
-  background: var(--bg-app);
+  padding: 13px 18px 10px;
+  background: rgba(245, 247, 251, 0.75);
+  backdrop-filter: var(--glass-blur);
+  -webkit-backdrop-filter: var(--glass-blur);
+  border-bottom: 1px solid rgba(255, 255, 255, 0.75);
+  box-shadow: 0 1px 3px rgba(15, 23, 42, 0.02);
   flex-shrink: 0;
+  z-index: 10;
 }
 
 .brand-group {
@@ -190,17 +222,19 @@ body.spectra-body {
   gap: 7px;
 }
 
-/* Session Status Pill */
+/* Session Status Pill (Apple Liquid Glass Capsule) */
 .session-pill {
   display: flex;
   align-items: center;
   gap: 6px;
-  padding: 5px 10px;
+  padding: 5px 11px;
   border-radius: var(--radius-pill);
   font-size: 11.5px;
   font-weight: 600;
-  background: var(--surface-card);
-  border: 1px solid var(--border-card);
+  background: rgba(255, 255, 255, 0.65);
+  backdrop-filter: blur(16px);
+  -webkit-backdrop-filter: blur(16px);
+  border: 1px solid rgba(255, 255, 255, 0.85);
   box-shadow: var(--shadow-subtle);
   transition: all 0.2s ease;
 }
@@ -214,21 +248,22 @@ body.spectra-body {
 
 .session-pill.session-connected,
 .session-pill.session-active {
-  background: var(--accent-emerald-subtle);
-  border-color: var(--accent-emerald-border);
+  background: rgba(236, 253, 245, 0.75);
+  border-color: rgba(187, 247, 208, 0.8);
   color: #065F46;
+  box-shadow: 0 2px 8px rgba(52, 199, 89, 0.12), inset 0 1px 0.5px rgba(255, 255, 255, 0.9);
 }
 
 .session-pill.session-connected .session-dot,
 .session-pill.session-active .session-dot {
   background-color: var(--accent-emerald);
-  box-shadow: 0 0 0 2px rgba(16, 185, 129, 0.2);
+  box-shadow: 0 0 0 2px rgba(52, 199, 89, 0.25);
 }
 
 .session-pill.session-disconnected,
 .session-pill.session-offline {
-  background: var(--accent-rose-subtle);
-  border-color: var(--accent-rose-border);
+  background: rgba(254, 242, 242, 0.75);
+  border-color: rgba(254, 202, 202, 0.8);
   color: #9F1239;
 }
 
@@ -252,7 +287,7 @@ body.spectra-body {
   }
 }
 
-/* Circular Header Action Buttons */
+/* Circular Header Action Buttons (Apple Frosted Glass) */
 .circle-btn {
   display: flex;
   align-items: center;
@@ -260,18 +295,21 @@ body.spectra-body {
   width: 36px;
   height: 36px;
   border-radius: 50%;
-  background: var(--surface-card);
-  border: 1.5px solid #E2E8F0;
+  background: rgba(255, 255, 255, 0.7);
+  backdrop-filter: blur(16px);
+  -webkit-backdrop-filter: blur(16px);
+  border: 1px solid rgba(255, 255, 255, 0.9);
   color: var(--text-secondary);
-  box-shadow: var(--shadow-subtle);
+  box-shadow: 0 2px 8px rgba(15, 23, 42, 0.04), inset 0 1px 0 rgba(255, 255, 255, 0.95);
   cursor: pointer;
   transition: all 0.2s cubic-bezier(0.16, 1, 0.3, 1);
 }
 
 .circle-btn:hover {
-  background: #F8FAFC;
-  border-color: #CBD5E1;
+  background: rgba(255, 255, 255, 0.96);
+  border-color: #FFFFFF;
   color: var(--text-primary);
+  box-shadow: 0 4px 14px rgba(15, 23, 42, 0.07), inset 0 1px 0.5px #FFFFFF;
   transform: translateY(-1px);
 }
 
@@ -297,32 +335,37 @@ body.spectra-body {
   width: 30px;
   height: 30px;
   border-radius: 50%;
-  background: var(--surface-card);
-  border: 1.5px solid #E2E8F0;
+  background: rgba(255, 255, 255, 0.7);
+  backdrop-filter: blur(16px);
+  -webkit-backdrop-filter: blur(16px);
+  border: 1px solid rgba(255, 255, 255, 0.9);
   color: var(--text-secondary);
-  box-shadow: var(--shadow-subtle);
+  box-shadow: 0 1px 4px rgba(15, 23, 42, 0.03), inset 0 1px 0 rgba(255, 255, 255, 0.9);
   cursor: pointer;
   transition: all 0.2s ease;
 }
 
 .circle-btn-sm:hover {
-  background: #F8FAFC;
+  background: rgba(255, 255, 255, 0.95);
   color: var(--brand-blue);
-  border-color: #BFDBFE;
+  border-color: #FFFFFF;
 }
 
 /* ===================================================================
-   PILL SEGMENTED TAB NAVIGATION: Clean Inspo Style
+   PILL SEGMENTED TAB NAVIGATION: Apple macOS / iOS Liquid Glass
    =================================================================== */
 .nav-segmented-pill {
   display: flex;
   align-items: center;
-  background: #F1F5F9;
-  border: 1px solid #E2E8F0;
+  background: rgba(226, 232, 240, 0.55);
+  backdrop-filter: blur(24px) saturate(190%);
+  -webkit-backdrop-filter: blur(24px) saturate(190%);
+  border: 1px solid rgba(255, 255, 255, 0.75);
   border-radius: var(--radius-pill);
   padding: 3px;
   margin: 0 16px 12px;
-  gap: 2px;
+  gap: 3px;
+  box-shadow: inset 0 1px 2px rgba(15, 23, 42, 0.04), 0 2px 8px rgba(15, 23, 42, 0.02);
   flex-shrink: 0;
 }
 
@@ -340,18 +383,18 @@ body.spectra-body {
   border: none;
   background: transparent;
   cursor: pointer;
-  transition: all 0.15s ease;
+  transition: all 0.2s cubic-bezier(0.16, 1, 0.3, 1);
 }
 
 .nav-tab-pill:hover {
   color: var(--text-primary);
-  background: rgba(255, 255, 255, 0.6);
+  background: rgba(255, 255, 255, 0.45);
 }
 
 .nav-tab-pill.active {
-  background: var(--brand-blue);
+  background: linear-gradient(180deg, #3B82F6 0%, #007AFF 100%);
   color: #FFFFFF;
-  box-shadow: 0 1px 3px rgba(37, 99, 235, 0.25);
+  box-shadow: 0 2px 8px rgba(0, 122, 255, 0.35), inset 0 1px 0.5px rgba(255, 255, 255, 0.4);
 }
 
 .tab-pill-badge {
@@ -364,8 +407,8 @@ body.spectra-body {
 }
 
 .nav-tab-pill:not(.active) .tab-pill-badge {
-  background: #FEE2E2;
-  color: #DC2626;
+  background: rgba(255, 59, 48, 0.12);
+  color: var(--accent-rose);
 }
 
 /* ===================================================================
@@ -388,21 +431,24 @@ body.spectra-body {
 }
 
 /* ===================================================================
-   BENTO CARDS: Clean white surfaces with 20px corners
+   BENTO CARDS: Apple Liquid Glass Surfaces
    =================================================================== */
 .bento-card {
-  background: var(--surface-card);
-  border: 1px solid var(--border-card);
+  background: rgba(255, 255, 255, 0.72);
+  backdrop-filter: var(--glass-blur);
+  -webkit-backdrop-filter: var(--glass-blur);
+  border: 1px solid rgba(255, 255, 255, 0.85);
   border-radius: var(--radius-card);
   box-shadow: var(--shadow-card);
   padding: 16px 18px;
   margin: 0 16px 12px;
-  transition: box-shadow 0.2s ease, border-color 0.2s ease;
+  transition: all 0.2s cubic-bezier(0.16, 1, 0.3, 1);
 }
 
 .bento-card:hover {
-  border-color: #E2E8F0;
-  box-shadow: 0 6px 24px -2px rgba(15, 23, 42, 0.05);
+  background: rgba(255, 255, 255, 0.88);
+  border-color: rgba(255, 255, 255, 1);
+  box-shadow: var(--shadow-card-hover);
 }
 
 .card-header-clean {
@@ -462,28 +508,28 @@ body.spectra-body {
 }
 
 /* ===================================================================
-   BUTTONS: Large Pill Shapes (pop_up_design_2)
+   BUTTONS: Apple Liquid Glass Pill Shapes
    =================================================================== */
 .btn-primary-action {
   display: inline-flex;
   align-items: center;
   justify-content: center;
   gap: 8px;
-  background: var(--brand-blue);
+  background: linear-gradient(180deg, #3B82F6 0%, #007AFF 100%);
   color: #FFFFFF;
   border-radius: var(--radius-pill);
   font-weight: 600;
   font-size: 13.5px;
-  border: none;
+  border: 1px solid rgba(255, 255, 255, 0.3);
   cursor: pointer;
-  box-shadow: var(--shadow-btn-primary);
+  box-shadow: 0 2px 10px rgba(0, 122, 255, 0.3), inset 0 1px 0.5px rgba(255, 255, 255, 0.4);
   transition: all 0.2s cubic-bezier(0.16, 1, 0.3, 1);
 }
 
 .btn-primary-action:hover {
-  background: var(--brand-blue-hover);
+  background: linear-gradient(180deg, #007AFF 0%, #0066EB 100%);
   transform: translateY(-1px);
-  box-shadow: 0 3px 10px rgba(37, 99, 235, 0.2);
+  box-shadow: 0 5px 16px rgba(0, 122, 255, 0.38), inset 0 1px 0.5px rgba(255, 255, 255, 0.45);
 }
 
 .btn-primary-action:active {
@@ -495,20 +541,23 @@ body.spectra-body {
   align-items: center;
   justify-content: center;
   gap: 6px;
-  background: var(--surface-card);
-  border: 1.5px solid #E2E8F0;
+  background: rgba(255, 255, 255, 0.7);
+  backdrop-filter: blur(16px);
+  -webkit-backdrop-filter: blur(16px);
+  border: 1px solid rgba(255, 255, 255, 0.9);
   border-radius: var(--radius-pill);
   color: var(--text-primary);
   font-weight: 600;
   font-size: 13px;
-  box-shadow: var(--shadow-subtle);
+  box-shadow: 0 2px 8px rgba(15, 23, 42, 0.03), inset 0 1px 0 rgba(255, 255, 255, 0.95);
   cursor: pointer;
   transition: all 0.2s cubic-bezier(0.16, 1, 0.3, 1);
 }
 
 .btn-secondary-action:hover {
-  background: #F8FAFC;
-  border-color: #CBD5E1;
+  background: rgba(255, 255, 255, 0.95);
+  border-color: #FFFFFF;
+  box-shadow: 0 4px 14px rgba(15, 23, 42, 0.06), inset 0 1px 0 #FFFFFF;
   transform: translateY(-1px);
 }
 
@@ -538,8 +587,9 @@ body.spectra-body {
 }
 
 .btn-ghost-pill {
-  background: transparent;
-  border: 1px solid var(--border-card);
+  background: rgba(255, 255, 255, 0.5);
+  backdrop-filter: blur(10px);
+  border: 1px solid rgba(255, 255, 255, 0.8);
   border-radius: var(--radius-pill);
   padding: 4px 10px;
   font-size: 11.5px;
@@ -550,7 +600,7 @@ body.spectra-body {
 }
 
 .btn-ghost-pill:hover {
-  background: #F1F5F9;
+  background: rgba(255, 255, 255, 0.85);
   color: var(--text-primary);
 }
 
@@ -561,10 +611,11 @@ body.spectra-body {
   font-size: 12px;
   font-weight: 600;
   color: var(--brand-blue);
-  background: #EFF6FF;
+  background: rgba(0, 122, 255, 0.08);
+  backdrop-filter: blur(8px);
   padding: 6px 12px;
   border-radius: var(--radius-pill);
-  border: 1px solid #DBEAFE;
+  border: 1px solid rgba(0, 122, 255, 0.18);
   text-decoration: none;
   transition: all 0.15s ease;
 }
@@ -604,19 +655,23 @@ body.spectra-body {
   width: 100%;
   height: 40px;
   padding: 0 14px;
-  border-radius: 12px;
-  border: 1.5px solid #E2E8F0;
-  background: #FFFFFF;
+  border-radius: 10px;
+  border: 1px solid rgba(226, 232, 240, 0.85);
+  background: rgba(255, 255, 255, 0.65);
+  backdrop-filter: blur(12px);
+  -webkit-backdrop-filter: blur(12px);
   color: var(--text-primary);
   font-family: var(--font-sans);
   font-size: 13px;
-  transition: all 0.2s ease;
+  box-shadow: inset 0 1px 2px rgba(15, 23, 42, 0.03), 0 1px 0 rgba(255, 255, 255, 0.9);
+  transition: all 0.2s cubic-bezier(0.16, 1, 0.3, 1);
 }
 
 .modern-input:focus {
   outline: none;
-  border-color: var(--brand-blue);
-  box-shadow: 0 0 0 3px rgba(37, 99, 235, 0.12);
+  background: rgba(255, 255, 255, 0.95);
+  border-color: #007AFF;
+  box-shadow: 0 0 0 3px rgba(0, 122, 255, 0.22), inset 0 1px 2px rgba(15, 23, 42, 0.02);
 }
 
 .modern-input.input-sm {
@@ -659,9 +714,11 @@ body.spectra-body {
   width: 100%;
   height: 40px;
   padding: 0 14px;
-  border-radius: 12px;
-  border: 1.5px solid #E2E8F0;
-  background: #FFFFFF;
+  border-radius: 10px;
+  border: 1px solid rgba(226, 232, 240, 0.85);
+  background: rgba(255, 255, 255, 0.65);
+  backdrop-filter: blur(12px);
+  -webkit-backdrop-filter: blur(12px);
   color: var(--text-primary);
   font-family: var(--font-sans);
   font-size: 13px;
@@ -672,16 +729,18 @@ body.spectra-body {
   background-repeat: no-repeat;
   background-position: right 12px center;
   background-size: 16px;
-  transition: all 0.2s ease;
+  box-shadow: inset 0 1px 2px rgba(15, 23, 42, 0.03), 0 1px 0 rgba(255, 255, 255, 0.9);
+  transition: all 0.2s cubic-bezier(0.16, 1, 0.3, 1);
 }
 
 .modern-select:focus {
   outline: none;
-  border-color: var(--brand-blue);
-  box-shadow: 0 0 0 3px rgba(37, 99, 235, 0.12);
+  background: rgba(255, 255, 255, 0.95);
+  border-color: #007AFF;
+  box-shadow: 0 0 0 3px rgba(0, 122, 255, 0.22), inset 0 1px 2px rgba(15, 23, 42, 0.02);
 }
 
-/* Switches */
+/* Switches (Apple iOS System Switch) */
 .switch {
   position: relative;
   display: inline-block;
@@ -702,9 +761,10 @@ body.spectra-body {
   left: 0;
   right: 0;
   bottom: 0;
-  background-color: #CBD5E1;
+  background-color: rgba(203, 213, 225, 0.8);
   transition: .3s cubic-bezier(0.16, 1, 0.3, 1);
   border-radius: var(--radius-pill);
+  box-shadow: inset 0 1px 2px rgba(0, 0, 0, 0.1);
 }
 
 .slider:before {
@@ -717,11 +777,11 @@ body.spectra-body {
   background-color: white;
   transition: .3s cubic-bezier(0.16, 1, 0.3, 1);
   border-radius: 50%;
-  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.15);
+  box-shadow: 0 2px 4px rgba(0, 0, 0, 0.2);
 }
 
 input:checked+.slider {
-  background-color: var(--brand-blue);
+  background-color: var(--accent-emerald);
 }
 
 input:checked+.slider:before {
@@ -753,18 +813,22 @@ input:checked+.slider:before {
   height: 38px;
   padding: 0 34px 0 36px;
   border-radius: var(--radius-pill);
-  border: 1.5px solid #E2E8F0;
-  background: #FFFFFF;
+  border: 1px solid rgba(226, 232, 240, 0.85);
+  background: rgba(255, 255, 255, 0.65);
+  backdrop-filter: blur(14px);
+  -webkit-backdrop-filter: blur(14px);
   color: var(--text-primary);
   font-family: var(--font-sans);
   font-size: 12.5px;
-  transition: all 0.2s ease;
+  box-shadow: inset 0 1px 2px rgba(15, 23, 42, 0.03), 0 1px 0 rgba(255, 255, 255, 0.9);
+  transition: all 0.2s cubic-bezier(0.16, 1, 0.3, 1);
 }
 
 .search-input-wrapper input:focus {
   outline: none;
-  border-color: var(--brand-blue);
-  box-shadow: 0 0 0 3px rgba(37, 99, 235, 0.12);
+  background: rgba(255, 255, 255, 0.95);
+  border-color: #007AFF;
+  box-shadow: 0 0 0 3px rgba(0, 122, 255, 0.22), inset 0 1px 2px rgba(15, 23, 42, 0.02);
 }
 
 .clear-search {
@@ -792,39 +856,47 @@ input:checked+.slider:before {
 
 .pill-btn {
   white-space: nowrap;
-  padding: 5px 10px;
+  padding: 5px 11px;
   border-radius: var(--radius-pill);
   font-size: 11.5px;
   font-weight: 600;
-  border: 1px solid #E2E8F0;
-  background: #FFFFFF;
+  border: 1px solid rgba(226, 232, 240, 0.7);
+  background: rgba(255, 255, 255, 0.65);
+  backdrop-filter: blur(12px);
+  -webkit-backdrop-filter: blur(12px);
   color: var(--text-secondary);
+  box-shadow: 0 1px 3px rgba(15, 23, 42, 0.02), inset 0 1px 0 rgba(255, 255, 255, 0.9);
   cursor: pointer;
   transition: all 0.15s ease;
 }
 
 .pill-btn:hover {
-  background: #F1F5F9;
+  background: rgba(255, 255, 255, 0.92);
   color: var(--text-primary);
+  border-color: rgba(255, 255, 255, 1);
 }
 
 .pill-btn.active {
-  background: var(--brand-blue);
+  background: linear-gradient(180deg, #3B82F6 0%, #007AFF 100%);
   color: #FFFFFF;
-  border-color: var(--brand-blue);
+  border-color: #007AFF;
+  box-shadow: 0 2px 8px rgba(0, 122, 255, 0.32), inset 0 1px 0.5px rgba(255, 255, 255, 0.4);
 }
 
-/* Urgent Banner (Unslopped Inspo Style) */
+/* Urgent Banner (Apple Liquid Glass Warning Pill) */
 .urgent-banner {
   display: flex;
   align-items: center;
   gap: 10px;
-  background: #FEF2F2;
-  border: 1px solid #FECACA;
-  border-left: 3.5px solid #DC2626;
-  border-radius: 10px;
-  padding: 9px 12px;
+  background: rgba(254, 242, 242, 0.78);
+  backdrop-filter: blur(16px);
+  -webkit-backdrop-filter: blur(16px);
+  border: 1px solid rgba(254, 202, 202, 0.85);
+  border-left: 3.5px solid var(--accent-rose);
+  border-radius: var(--radius-md);
+  padding: 9px 13px;
   margin: 0 16px 10px;
+  box-shadow: 0 2px 10px rgba(255, 59, 48, 0.06), inset 0 1px 0 rgba(255, 255, 255, 0.9);
 }
 
 .urgent-banner-icon {
@@ -858,7 +930,7 @@ input:checked+.slider:before {
 }
 
 /* ===================================================================
-   DEADLINE & SUBMISSION CARDS (Unslopped Crisp Layout)
+   DEADLINE & SUBMISSION CARDS (Apple Liquid Glass Layout)
    =================================================================== */
 .deadlines-container {
   display: flex;
@@ -869,12 +941,14 @@ input:checked+.slider:before {
 
 .deadline-card {
   position: relative;
-  background: var(--surface-card, #FFFFFF);
-  border: 1px solid var(--border-card, #E2E8F0);
-  border-radius: var(--radius-md, 10px);
+  background: rgba(255, 255, 255, 0.72);
+  backdrop-filter: var(--glass-blur);
+  -webkit-backdrop-filter: var(--glass-blur);
+  border: 1px solid rgba(255, 255, 255, 0.85);
+  border-radius: var(--radius-md);
   padding: 12px 14px;
-  box-shadow: var(--shadow-subtle, 0 1px 2px rgba(0, 0, 0, 0.04));
-  transition: border-color 0.15s ease, background-color 0.15s ease;
+  box-shadow: var(--shadow-card);
+  transition: all 0.2s cubic-bezier(0.16, 1, 0.3, 1);
   display: flex;
   flex-direction: column;
   gap: 6px;
@@ -882,44 +956,49 @@ input:checked+.slider:before {
 }
 
 .deadline-card:hover {
-  border-color: #CBD5E1;
-  background: #FAFCFF;
+  background: rgba(255, 255, 255, 0.92);
+  border-color: rgba(255, 255, 255, 1);
+  box-shadow: var(--shadow-card-hover);
+  transform: translateY(-1px);
 }
 
 /* 1. GREEN: SUBMITTED STATE */
 .deadline-card.card-state-submitted {
-  background: #FFFFFF;
-  border-color: #BBF7D0;
-  border-left: 3px solid #16A34A;
+  background: rgba(255, 255, 255, 0.76);
+  border-color: rgba(187, 247, 208, 0.85);
+  border-left: 3.5px solid var(--accent-emerald);
 }
 
 .deadline-card.card-state-submitted:hover {
-  border-color: #86EFAC;
-  border-left-color: #15803D;
+  background: rgba(255, 255, 255, 0.92);
+  border-color: rgba(134, 239, 172, 0.9);
+  border-left-color: #28CD41;
 }
 
 /* 2. YELLOW / AMBER: PENDING STATE */
 .deadline-card.card-state-pending {
-  background: #FFFFFF;
-  border-color: var(--border-card, #E2E8F0);
-  border-left: 3px solid #D97706;
+  background: rgba(255, 255, 255, 0.76);
+  border-color: rgba(253, 230, 138, 0.85);
+  border-left: 3.5px solid var(--accent-amber);
 }
 
 .deadline-card.card-state-pending:hover {
-  border-color: #FDE68A;
-  border-left-color: #B45309;
+  background: rgba(255, 255, 255, 0.92);
+  border-color: rgba(252, 211, 77, 0.9);
+  border-left-color: #D97706;
 }
 
 /* 3. RED: UNDER 24 HR STATE */
 .deadline-card.card-state-urgent {
-  background: #FFFFFF;
-  border-color: #FECACA;
-  border-left: 3px solid #DC2626;
+  background: rgba(255, 255, 255, 0.76);
+  border-color: rgba(254, 202, 202, 0.85);
+  border-left: 3.5px solid var(--accent-rose);
 }
 
 .deadline-card.card-state-urgent:hover {
-  border-color: #FCA5A5;
-  border-left-color: #B91C1C;
+  background: rgba(255, 255, 255, 0.92);
+  border-color: rgba(252, 165, 165, 0.9);
+  border-left-color: #DC2626;
 }
 
 /* Header Row */
@@ -937,57 +1016,62 @@ input:checked+.slider:before {
   flex-wrap: wrap;
 }
 
-/* Course tag & Badges */
+/* Course tag & Badges (Apple Liquid Glass Tags) */
 .course-tag {
   font-size: 11px;
   font-weight: 600;
-  background: var(--surface-subtle, #F1F5F9);
-  color: var(--brand-blue, #2563EB);
-  border: 1px solid var(--border-card, #E2E8F0);
+  background: rgba(0, 122, 255, 0.08);
+  backdrop-filter: blur(8px);
+  color: var(--brand-blue);
+  border: 1px solid rgba(0, 122, 255, 0.18);
   padding: 1.5px 7px;
-  border-radius: var(--radius-sm, 6px);
+  border-radius: var(--radius-sm);
   letter-spacing: -0.01em;
 }
 
 .activity-type-tag {
   font-size: 10px;
   font-weight: 500;
-  background: var(--surface-subtle, #F1F5F9);
-  color: var(--text-secondary, #475569);
+  background: rgba(241, 245, 249, 0.65);
+  backdrop-filter: blur(8px);
+  color: var(--text-secondary);
   padding: 1.5px 6px;
-  border-radius: var(--radius-sm, 6px);
-  border: 1px solid var(--border-card, #E2E8F0);
+  border-radius: var(--radius-sm);
+  border: 1px solid rgba(226, 232, 240, 0.75);
   text-transform: capitalize;
 }
 
 .activity-type-tag.type-quiz {
-  background: #FAF5FF;
-  color: #7E22CE;
-  border-color: #F3E8FF;
+  background: rgba(175, 82, 222, 0.08);
+  color: #8936B2;
+  border-color: rgba(175, 82, 222, 0.2);
 }
 
 .activity-type-tag.type-turnitin {
-  background: #FFF7ED;
+  background: rgba(255, 149, 0, 0.08);
   color: #C2410C;
-  border-color: #FFEDD5;
+  border-color: rgba(255, 149, 0, 0.2);
 }
 
 .occ-target-tag {
   font-size: 10px;
   font-weight: 500;
-  background: var(--surface-subtle, #F1F5F9);
-  color: var(--text-muted, #64748B);
+  background: rgba(241, 245, 249, 0.65);
+  color: var(--text-muted);
   padding: 1.5px 6px;
-  border-radius: var(--radius-sm, 6px);
-  border: 1px solid var(--border-card, #E2E8F0);
+  border-radius: var(--radius-sm);
+  border: 1px solid rgba(226, 232, 240, 0.75);
 }
 
 .weight-tag {
   font-size: 10px;
   font-weight: 600;
-  background: #FEF3C7;
-  color: #92400E;
+  background: rgba(255, 149, 0, 0.1);
+  color: #B45309;
   padding: 1.5px 6px;
+  border-radius: var(--radius-sm);
+  border: 1px solid rgba(255, 149, 0, 0.2);
+}
   border-radius: var(--radius-sm, 6px);
 }
 
@@ -1079,43 +1163,45 @@ input:checked+.slider:before {
   color: var(--text-secondary, #475569);
 }
 
-/* Days Left Pill */
+/* Days Left Pill (Apple Liquid Glass Pill) */
 .due-days-pill {
   font-size: 11px;
   font-weight: 600;
-  padding: 2px 7px;
-  border-radius: var(--radius-sm, 6px);
+  padding: 2.5px 8px;
+  border-radius: var(--radius-pill);
   white-space: nowrap;
   display: inline-flex;
   align-items: center;
   gap: 4px;
   font-variant-numeric: tabular-nums;
   font-family: var(--font-mono);
+  backdrop-filter: blur(8px);
+  -webkit-backdrop-filter: blur(8px);
 }
 
 .due-days-pill.pill-completed {
-  background: #F0FDF4;
+  background: rgba(52, 199, 89, 0.12);
   color: #15803D;
-  border: 1px solid #DCFCE7;
+  border: 1px solid rgba(52, 199, 89, 0.25);
 }
 
 .due-days-pill.pill-urgent {
-  background: #FEF2F2;
+  background: rgba(255, 59, 48, 0.12);
   color: #B91C1C;
-  border: 1px solid #FEE2E2;
+  border: 1px solid rgba(255, 59, 48, 0.25);
 }
 
 .due-days-pill.pill-warning {
-  background: #FFFBEB;
+  background: rgba(255, 149, 0, 0.12);
   color: #B45309;
-  border: 1px solid #FEF3C7;
+  border: 1px solid rgba(255, 149, 0, 0.25);
 }
 
 .due-days-pill.pill-normal,
 .due-days-pill.pill-open {
-  background: var(--surface-subtle, #F1F5F9);
-  color: var(--text-secondary, #475569);
-  border: 1px solid var(--border-card, #E2E8F0);
+  background: rgba(241, 245, 249, 0.7);
+  color: var(--text-secondary);
+  border: 1px solid rgba(226, 232, 240, 0.8);
 }
 
 /* Footer Row */
@@ -1123,9 +1209,9 @@ input:checked+.slider:before {
   display: flex;
   align-items: center;
   justify-content: space-between;
-  padding-top: 6px;
+  padding-top: 8px;
   margin-top: 2px;
-  border-top: 1px solid var(--border-card, #E2E8F0);
+  border-top: 1px solid rgba(226, 232, 240, 0.6);
   gap: 8px;
 }
 
@@ -1135,8 +1221,10 @@ input:checked+.slider:before {
   gap: 5px;
   font-size: 11px;
   font-weight: 500;
-  padding: 2px 7px;
-  border-radius: var(--radius-sm, 6px);
+  padding: 2.5px 8px;
+  border-radius: var(--radius-pill);
+  backdrop-filter: blur(8px);
+  -webkit-backdrop-filter: blur(8px);
   transition: all 0.15s ease;
 }
 
@@ -1149,35 +1237,38 @@ input:checked+.slider:before {
 
 /* Chip 1: Submitted (Green) */
 .submission-status-chip.is-submitted {
-  background: #F0FDF4;
+  background: rgba(52, 199, 89, 0.1);
   color: #15803D;
-  border: 1px solid #DCFCE7;
+  border: 1px solid rgba(52, 199, 89, 0.22);
 }
 
 .submission-status-chip.is-submitted .status-dot {
-  background: #16A34A;
+  background: var(--accent-emerald);
+  box-shadow: 0 0 0 2px rgba(52, 199, 89, 0.2);
 }
 
 /* Chip 2: Pending (Yellow) */
 .submission-status-chip.is-pending {
-  background: #FFFBEB;
+  background: rgba(255, 149, 0, 0.1);
   color: #B45309;
-  border: 1px solid #FEF3C7;
+  border: 1px solid rgba(255, 149, 0, 0.22);
 }
 
 .submission-status-chip.is-pending .status-dot {
-  background: #D97706;
+  background: var(--accent-amber);
+  box-shadow: 0 0 0 2px rgba(255, 149, 0, 0.2);
 }
 
 /* Chip 3: Urgent <24h (Red) */
 .submission-status-chip.is-urgent {
-  background: #FEF2F2;
+  background: rgba(255, 59, 48, 0.1);
   color: #B91C1C;
-  border: 1px solid #FEE2E2;
+  border: 1px solid rgba(255, 59, 48, 0.22);
 }
 
 .submission-status-chip.is-urgent .status-dot {
-  background: #DC2626;
+  background: var(--accent-rose);
+  box-shadow: 0 0 0 2px rgba(255, 59, 48, 0.2);
 }
 
 /* Card Actions (Dropbox + Checkbox) */
@@ -1439,26 +1530,30 @@ input:checked+.slider:before {
   color: var(--text-primary);
 }
 
-/* Interactive Attendance Submission Container (Unslopped Inspo Style) */
+/* Interactive Attendance Submission Container (Apple Liquid Glass) */
 .open-attendance-banner.interactive-submission-card {
   position: relative;
   display: flex;
   flex-direction: column;
   gap: 10px;
-  background: #FFFFFF;
-  border: 1px solid #BFDBFE;
-  border-left: 3.5px solid #2563EB;
-  border-radius: 12px;
+  background: rgba(240, 247, 255, 0.82);
+  backdrop-filter: var(--glass-blur-deep);
+  -webkit-backdrop-filter: var(--glass-blur-deep);
+  border: 1px solid rgba(191, 219, 254, 0.85);
+  border-left: 3.5px solid var(--brand-blue);
+  border-radius: var(--radius-md);
   padding: 14px 16px;
   margin: 0 16px 12px;
-  box-shadow: 0 1px 3px rgba(15, 23, 42, 0.05), 0 1px 2px rgba(15, 23, 42, 0.03);
-  transition: border-color 0.15s ease, box-shadow 0.15s ease;
+  box-shadow: 0 6px 24px -2px rgba(0, 122, 255, 0.1), inset 0 1px 0.5px rgba(255, 255, 255, 0.95);
+  transition: all 0.2s cubic-bezier(0.16, 1, 0.3, 1);
   overflow: hidden;
 }
 
 .open-attendance-banner.interactive-submission-card:hover {
-  border-color: #93C5FD;
-  box-shadow: 0 4px 12px -2px rgba(37, 99, 235, 0.08);
+  background: rgba(240, 247, 255, 0.94);
+  border-color: rgba(147, 197, 253, 1);
+  box-shadow: 0 8px 30px -2px rgba(0, 122, 255, 0.16), inset 0 1px 0.5px #FFFFFF;
+  transform: translateY(-1px);
 }
 
 /* Submission Card Live Radar & Indicators */
@@ -1484,14 +1579,14 @@ input:checked+.slider:before {
   width: 8px;
   height: 8px;
   border-radius: 50%;
-  background: #16A34A;
-  box-shadow: 0 0 0 2px rgba(22, 163, 74, 0.2);
+  background: var(--accent-emerald);
+  box-shadow: 0 0 0 2px rgba(52, 199, 89, 0.25);
 }
 
 .live-status-text {
   font-size: 11px;
   font-weight: 700;
-  color: #16A34A;
+  color: #15803D;
   letter-spacing: 0.02em;
   text-transform: uppercase;
 }
@@ -1506,30 +1601,33 @@ input:checked+.slider:before {
   font-size: 11px;
   font-weight: 600;
   color: var(--brand-blue);
-  background: #EFF6FF;
+  background: rgba(0, 122, 255, 0.1);
+  backdrop-filter: blur(8px);
   padding: 2px 7px;
   border-radius: var(--radius-pill);
-  border: 1px solid #DBEAFE;
+  border: 1px solid rgba(0, 122, 255, 0.2);
 }
 
 .open-occ-tag {
   font-size: 10.5px;
   font-weight: 600;
-  color: #475569;
-  background: #F1F5F9;
+  color: var(--text-secondary);
+  background: rgba(241, 245, 249, 0.7);
+  backdrop-filter: blur(8px);
   padding: 2px 7px;
   border-radius: var(--radius-pill);
-  border: 1px solid #E2E8F0;
+  border: 1px solid rgba(226, 232, 240, 0.8);
 }
 
 .open-banner-time {
   font-size: 10.5px;
   font-weight: 600;
   color: #15803D;
-  background: #F0FDF4;
+  background: rgba(52, 199, 89, 0.12);
+  backdrop-filter: blur(8px);
   padding: 2px 7px;
   border-radius: var(--radius-pill);
-  border: 1px solid #DCFCE7;
+  border: 1px solid rgba(52, 199, 89, 0.25);
 }
 
 .open-banner-title {
@@ -1547,16 +1645,19 @@ input:checked+.slider:before {
   line-height: 1.4;
 }
 
-/* 3-Step Interactive Visual Stepper */
+/* 3-Step Interactive Visual Stepper (Apple Frosted Track) */
 .submission-flow-stepper {
   display: flex;
   align-items: center;
   justify-content: space-between;
-  background: #F8FAFC;
-  border: 1px solid #E2E8F0;
-  border-radius: 8px;
+  background: rgba(255, 255, 255, 0.65);
+  backdrop-filter: blur(12px);
+  -webkit-backdrop-filter: blur(12px);
+  border: 1px solid rgba(226, 232, 240, 0.85);
+  border-radius: 10px;
   padding: 6px 12px;
   margin-top: 2px;
+  box-shadow: inset 0 1px 2px rgba(15, 23, 42, 0.02);
 }
 
 .stepper-step {
@@ -1581,12 +1682,12 @@ input:checked+.slider:before {
 }
 
 .stepper-step.step-done {
-  color: #16A34A;
+  color: #15803D;
 }
 
 .stepper-step.step-done .stepper-icon {
-  background: #DCFCE7;
-  color: #16A34A;
+  background: rgba(52, 199, 89, 0.15);
+  color: #15803D;
   font-weight: 700;
 }
 
@@ -1602,13 +1703,13 @@ input:checked+.slider:before {
 }
 
 .stepper-pulse {
-  box-shadow: 0 0 0 2px rgba(37, 99, 235, 0.25);
+  box-shadow: 0 0 0 2px rgba(0, 122, 255, 0.3);
 }
 
 .stepper-connector {
   flex: 1;
   height: 1.5px;
-  background: #E2E8F0;
+  background: rgba(226, 232, 240, 0.8);
   margin: 0 8px;
   border-radius: 2px;
 }
@@ -1692,24 +1793,26 @@ input:checked+.slider:before {
   align-items: center;
   justify-content: center;
   gap: 8px;
-  background: var(--brand-blue);
+  background: linear-gradient(180deg, #3B82F6 0%, #007AFF 100%);
   color: #FFFFFF;
   font-size: 13px;
   font-weight: 600;
   padding: 9px 16px;
-  border-radius: 8px;
-  border: none;
+  border-radius: var(--radius-pill);
+  border: 1px solid rgba(255, 255, 255, 0.3);
   cursor: pointer;
-  box-shadow: 0 1px 2px rgba(37, 99, 235, 0.2);
-  transition: background-color 0.15s ease;
+  box-shadow: 0 2px 10px rgba(0, 122, 255, 0.3), inset 0 1px 0.5px rgba(255, 255, 255, 0.4);
+  transition: all 0.2s cubic-bezier(0.16, 1, 0.3, 1);
 }
 
 .btn-submit-interactive:hover {
-  background: var(--brand-blue-hover);
+  background: linear-gradient(180deg, #007AFF 0%, #0066EB 100%);
+  box-shadow: 0 5px 16px rgba(0, 122, 255, 0.38), inset 0 1px 0.5px rgba(255, 255, 255, 0.45);
+  transform: translateY(-1px);
 }
 
 .btn-submit-interactive:active {
-  background: #1E40AF;
+  transform: translateY(0);
 }
 
 .submit-btn-shine {
@@ -1722,25 +1825,29 @@ input:checked+.slider:before {
   justify-content: center;
   width: 36px;
   height: 36px;
-  border-radius: 10px;
+  border-radius: 50%;
   padding: 0;
-  border: 1px solid #CBD5E1;
-  background: #FFFFFF;
+  border: 1px solid rgba(255, 255, 255, 0.9);
+  background: rgba(255, 255, 255, 0.7);
+  backdrop-filter: blur(14px);
+  -webkit-backdrop-filter: blur(14px);
   color: var(--text-secondary);
+  box-shadow: 0 2px 6px rgba(15, 23, 42, 0.03), inset 0 1px 0 rgba(255, 255, 255, 0.95);
   cursor: pointer;
   font-size: 13px;
-  transition: all 0.15s ease;
+  transition: all 0.2s cubic-bezier(0.16, 1, 0.3, 1);
 }
 
 .btn-icon-only:hover {
-  background: #F1F5F9;
+  background: rgba(255, 255, 255, 0.95);
+  border-color: #FFFFFF;
   color: var(--text-primary);
-  border-color: #94A3B8;
+  box-shadow: 0 4px 12px rgba(15, 23, 42, 0.06), inset 0 1px 0 #FFFFFF;
   transform: translateY(-1px);
 }
 
 .btn-icon-only:active {
-  transform: scale(0.95);
+  transform: translateY(0);
 }
 
 .occurrence-pills-row {
@@ -1793,39 +1900,43 @@ input:checked+.slider:before {
   font-weight: 700;
 }
 
-/* Attendance Session Cards & Badges */
+/* Attendance Session Cards (Apple Liquid Glass) */
 .attendance-session-card {
-  background: var(--surface-card, #FFFFFF);
-  border: 1px solid var(--border-card, #E2E8F0);
-  border-radius: var(--radius-md, 10px);
+  background: rgba(255, 255, 255, 0.72);
+  backdrop-filter: var(--glass-blur);
+  -webkit-backdrop-filter: var(--glass-blur);
+  border: 1px solid rgba(255, 255, 255, 0.85);
+  border-radius: var(--radius-md);
   padding: 10px 12px;
-  box-shadow: var(--shadow-subtle, 0 1px 2px rgba(0, 0, 0, 0.04));
-  transition: border-color 0.15s ease, background-color 0.15s ease;
+  box-shadow: var(--shadow-card);
+  transition: all 0.2s cubic-bezier(0.16, 1, 0.3, 1);
   display: flex;
   flex-direction: column;
   gap: 5px;
 }
 
 .attendance-session-card:hover {
-  border-color: #CBD5E1;
-  background: #FAFCFF;
+  background: rgba(255, 255, 255, 0.92);
+  border-color: rgba(255, 255, 255, 1);
+  box-shadow: var(--shadow-card-hover);
+  transform: translateY(-1px);
 }
 
 .attendance-session-card.session-open {
-  border-color: #BBF7D0;
-  border-left: 3px solid #16A34A;
-  background: #FFFFFF;
+  border-color: rgba(187, 247, 208, 0.85);
+  border-left: 3.5px solid var(--accent-emerald);
+  background: rgba(255, 255, 255, 0.78);
 }
 
 .attendance-session-card.session-today {
-  border-color: #BFDBFE;
-  border-left: 3px solid #2563EB;
-  background: #FFFFFF;
+  border-color: rgba(191, 219, 254, 0.85);
+  border-left: 3.5px solid var(--brand-blue);
+  background: rgba(255, 255, 255, 0.78);
 }
 
 .attendance-session-card.session-scheduled {
-  border-color: var(--border-card, #E2E8F0);
-  background: #FFFFFF;
+  border-color: rgba(226, 232, 240, 0.85);
+  background: rgba(255, 255, 255, 0.72);
 }
 
 .attendance-session-header {
@@ -1942,20 +2053,24 @@ input:checked+.slider:before {
 }
 
 .announcement-card {
-  background: var(--surface-card, #FFFFFF);
-  border: 1px solid var(--border-card, #E2E8F0);
-  border-radius: var(--radius-md, 10px);
+  background: rgba(255, 255, 255, 0.72);
+  backdrop-filter: var(--glass-blur);
+  -webkit-backdrop-filter: var(--glass-blur);
+  border: 1px solid rgba(255, 255, 255, 0.85);
+  border-radius: var(--radius-md);
   padding: 12px 14px;
-  box-shadow: var(--shadow-subtle, 0 1px 2px rgba(0, 0, 0, 0.04));
-  transition: border-color 0.15s ease, background-color 0.15s ease;
+  box-shadow: var(--shadow-card);
+  transition: all 0.2s cubic-bezier(0.16, 1, 0.3, 1);
   display: flex;
   flex-direction: column;
   gap: 6px;
 }
 
 .announcement-card:hover {
-  border-color: #CBD5E1;
-  background: #FAFCFF;
+  background: rgba(255, 255, 255, 0.92);
+  border-color: rgba(255, 255, 255, 1);
+  box-shadow: var(--shadow-card-hover);
+  transform: translateY(-1px);
 }
 
 .announcement-card-header {
@@ -2121,11 +2236,14 @@ input:checked+.slider:before {
 }
 
 /* ===================================================================
-   FOOTER: Directly matching pop_up_design_2 bottom-left
+   FOOTER: Apple Liquid Glass Footer
    =================================================================== */
 .popup-footer {
-  background: var(--surface-card);
-  border-top: 1px solid var(--border-card);
+  background: rgba(245, 247, 251, 0.78);
+  backdrop-filter: var(--glass-blur);
+  -webkit-backdrop-filter: var(--glass-blur);
+  border-top: 1px solid rgba(255, 255, 255, 0.75);
+  box-shadow: 0 -2px 10px rgba(15, 23, 42, 0.02);
   padding: 10px 16px 12px;
   flex-shrink: 0;
   display: flex;
@@ -2149,7 +2267,7 @@ input:checked+.slider:before {
   width: 28px;
   height: 28px;
   border-radius: 50%;
-  background: #EFF6FF;
+  background: rgba(0, 122, 255, 0.1);
   color: var(--brand-blue);
   display: flex;
   align-items: center;
@@ -2180,16 +2298,20 @@ input:checked+.slider:before {
   width: 28px;
   height: 28px;
   border-radius: 50%;
-  background: #F8FAFC;
-  border: 1px solid #E2E8F0;
+  background: rgba(255, 255, 255, 0.65);
+  backdrop-filter: blur(12px);
+  -webkit-backdrop-filter: blur(12px);
+  border: 1px solid rgba(255, 255, 255, 0.85);
+  box-shadow: 0 1px 3px rgba(15, 23, 42, 0.02), inset 0 1px 0 rgba(255, 255, 255, 0.9);
   color: var(--text-secondary);
   transition: all 0.15s ease;
 }
 
 .footer-portal-link:hover {
-  background: var(--brand-blue-subtle);
+  background: rgba(255, 255, 255, 0.95);
   color: var(--brand-blue);
-  border-color: #BFDBFE;
+  border-color: #FFFFFF;
+  transform: translateY(-0.5px);
 }
 
 .footer-utility-row {
@@ -2199,8 +2321,11 @@ input:checked+.slider:before {
 }
 
 .footer-chip-btn {
-  background: #F1F5F9;
-  border: 1px solid #E2E8F0;
+  background: rgba(255, 255, 255, 0.65);
+  backdrop-filter: blur(12px);
+  -webkit-backdrop-filter: blur(12px);
+  border: 1px solid rgba(255, 255, 255, 0.85);
+  box-shadow: 0 1px 3px rgba(15, 23, 42, 0.02), inset 0 1px 0 rgba(255, 255, 255, 0.9);
   border-radius: var(--radius-pill);
   padding: 3px 10px;
   font-size: 11px;
@@ -2212,12 +2337,14 @@ input:checked+.slider:before {
 }
 
 .footer-chip-btn:hover {
-  background: #E2E8F0;
+  background: rgba(255, 255, 255, 0.95);
+  border-color: #FFFFFF;
   color: var(--text-primary);
+  transform: translateY(-0.5px);
 }
 
 /* ===================================================================
-   FLOATING FEEDBACK TOAST
+   FLOATING FEEDBACK TOAST (Apple Dynamic Floating HUD)
    =================================================================== */
 .feedback-toast {
   position: absolute;
@@ -2227,11 +2354,14 @@ input:checked+.slider:before {
   display: flex;
   align-items: center;
   gap: 8px;
-  background: #0F172A;
+  background: rgba(15, 23, 42, 0.88);
+  backdrop-filter: blur(28px) saturate(190%);
+  -webkit-backdrop-filter: blur(28px) saturate(190%);
+  border: 1px solid rgba(255, 255, 255, 0.18);
   color: #FFFFFF;
   padding: 9px 16px;
   border-radius: var(--radius-pill);
-  box-shadow: var(--shadow-float);
+  box-shadow: 0 12px 32px rgba(0, 0, 0, 0.22), inset 0 1px 0 rgba(255, 255, 255, 0.25);
   font-size: 12px;
   font-weight: 600;
   z-index: 999;
@@ -2257,7 +2387,7 @@ input:checked+.slider:before {
 }
 
 /* ===================================================================
-   DISCONNECTED OVERLAY MODAL
+   DISCONNECTED OVERLAY MODAL (Apple Frosted Glass Sheet)
    =================================================================== */
 .disconnected-view {
   position: absolute;
@@ -2265,8 +2395,9 @@ input:checked+.slider:before {
   left: 0;
   right: 0;
   bottom: 0;
-  background: rgba(15, 23, 42, 0.4);
-  backdrop-filter: blur(4px);
+  background: rgba(244, 246, 251, 0.75);
+  backdrop-filter: blur(28px) saturate(190%);
+  -webkit-backdrop-filter: blur(28px) saturate(190%);
   z-index: 100;
   display: flex;
   align-items: center;
@@ -2277,10 +2408,13 @@ input:checked+.slider:before {
 .disconnected-card {
   width: 100%;
   max-width: 390px;
-  background: #FFFFFF;
-  border-radius: 24px;
+  background: rgba(255, 255, 255, 0.92);
+  backdrop-filter: blur(32px);
+  -webkit-backdrop-filter: blur(32px);
+  border: 1px solid rgba(255, 255, 255, 0.95);
+  border-radius: 20px;
   padding: 24px 20px;
-  box-shadow: var(--shadow-float);
+  box-shadow: 0 20px 48px -8px rgba(15, 23, 42, 0.12), inset 0 1px 0 #FFFFFF;
   text-align: center;
   animation: modalScale 0.25s cubic-bezier(0.16, 1, 0.3, 1);
 }
@@ -2301,7 +2435,7 @@ input:checked+.slider:before {
   width: 56px;
   height: 56px;
   border-radius: 18px;
-  background: #EFF6FF;
+  background: rgba(0, 122, 255, 0.1);
   display: flex;
   align-items: center;
   justify-content: center;
