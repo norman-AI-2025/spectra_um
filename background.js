@@ -15,7 +15,7 @@ import {
 } from "./utils/moodleApi.js";
 
 import { fetchLiveDeadlines } from "./utils/calendar.js";
-import { parseForumDiscussions, calculateUrgency, isAttendanceActivity, isOverdueMoreThan40Days, isOverdueMoreThan100Days } from "./utils/parser.js";
+import { parseForumDiscussions, calculateUrgency, isAttendanceActivity, isOverdueMoreThan40Days, isOverdueMoreThan100Days, extractNoticeSummaryFromHtml } from "./utils/parser.js";
 import {
   sendTelegramMessage,
   sendTelegramTestMessage,
@@ -449,6 +449,27 @@ async function pollAnnouncements() {
     // STRICT REQUIREMENT: Only send announcements that have NOT been flagged as sent to Telegram
     if (hasTelegram && !telegramSentIds.has(itemIdStr)) {
       try {
+        // Fetch notice content to provide summarized version if not already present
+        if (!item.message && !item.summary && item.url) {
+          try {
+            const ctrl = typeof AbortController !== "undefined" ? new AbortController() : null;
+            const tid = ctrl ? setTimeout(() => ctrl.abort(), 6000) : null;
+            let dRes;
+            try {
+              dRes = await fetch(item.url, { credentials: "include", signal: ctrl?.signal });
+            } finally {
+              if (tid) clearTimeout(tid);
+            }
+            if (dRes && dRes.ok) {
+              const dHtml = await dRes.text();
+              const extractedSummary = extractNoticeSummaryFromHtml(dHtml);
+              if (extractedSummary) {
+                item.summary = extractedSummary;
+              }
+            }
+          } catch (_) { }
+        }
+
         const telegramHtml = formatAnnouncementTelegram(item);
         const res = await sendTelegramMessage(store.telegram_bot_token, store.telegram_chat_id, telegramHtml);
         if (res && (res.success || res.ok || res.messageId || res.message_id)) {

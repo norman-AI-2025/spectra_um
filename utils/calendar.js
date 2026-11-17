@@ -45,6 +45,22 @@ export function getTaskFingerprint(courseCode, title) {
 }
 
 /**
+ * Helper to determine if an assignment or deadline has been marked completed by the user
+ * or submitted on SPeCTRUM, checking id, cmid, and course/title task fingerprint.
+ */
+export function isItemMarkedCompleted(item, completedSet) {
+  if (!item || !completedSet) return false;
+  const rawId = item.id ? String(item.id) : "";
+  const rawCmid = item.cmid ? String(item.cmid) : "";
+  const fp = getTaskFingerprint(item.courseCode, item.title || item.name || "");
+  return completedSet.has(rawId) ||
+    (rawCmid && completedSet.has(rawCmid)) ||
+    (fp && (completedSet.has(fp) || completedSet.has(`fp:${fp}`))) ||
+    Boolean(item.isCompleted) ||
+    Boolean(item.isSubmittedOnSpectrum);
+}
+
+/**
  * Merges a course-level scraped item and an iCal feed item:
  * Preserves the real cmid, direct URL, and verified submission status from the course scrape,
  * while keeping the high-precision timestamp from the iCal event.
@@ -87,7 +103,7 @@ export function mergeDeadlineItems(existing, incoming, completedSet = new Set())
   const formattedTime = (icalItem.dueTimestamp && icalItem.formattedTime) ? icalItem.formattedTime : (courseItem.formattedTime || icalItem.formattedTime || "");
 
   // Submission status from course scrape
-  const isSubmittedOnSpectrum = Boolean(courseItem.isSubmittedOnSpectrum || icalItem.isSubmittedOnSpectrum);
+  const rawSubmitted = Boolean(courseItem.isSubmittedOnSpectrum || icalItem.isSubmittedOnSpectrum);
   const statusText = courseItem.submissionStatus && courseItem.submissionStatus !== "No submission recorded"
     ? courseItem.submissionStatus
     : (icalItem.submissionStatus || courseItem.submissionStatus || "No submission recorded");
@@ -95,14 +111,18 @@ export function mergeDeadlineItems(existing, incoming, completedSet = new Set())
   // Determine id: prefer real cmid, then courseItem id, then icalItem id
   const id = realCmid || courseItem.id || icalItem.id;
 
-  // Local completion check
-  const isCompleted = isSubmittedOnSpectrum ||
+  // Completion check (user local checkbox + spectrum scrape + task fingerprint)
+  const isCompleted = isItemMarkedCompleted(courseItem, completedSet) ||
+    isItemMarkedCompleted(icalItem, completedSet) ||
+    rawSubmitted ||
     Boolean(courseItem.isCompleted) ||
-    Boolean(icalItem.isCompleted) ||
-    completedSet.has(String(id)) ||
-    (realCmid && completedSet.has(String(realCmid))) ||
-    completedSet.has(String(courseItem.id)) ||
-    completedSet.has(String(icalItem.id));
+    Boolean(icalItem.isCompleted);
+
+  // If marked completed by user or submitted on SPeCTRUM, overwrite as submitted
+  const finalSubmitted = isCompleted || rawSubmitted;
+  const finalStatusText = finalSubmitted
+    ? (rawSubmitted && statusText && !/no submission|tiada/i.test(statusText) ? statusText : "Submitted")
+    : statusText;
 
   return {
     ...icalItem,
@@ -118,9 +138,9 @@ export function mergeDeadlineItems(existing, incoming, completedSet = new Set())
     url: directUrl,
     type: courseItem.type || icalItem.type || "assign",
     urgency: dueTimestamp ? calculateUrgency(dueTimestamp) : (courseItem.urgency || icalItem.urgency || "upcoming"),
-    isSubmittedOnSpectrum,
+    isSubmittedOnSpectrum: finalSubmitted,
     isCompleted,
-    submissionStatus: isSubmittedOnSpectrum && statusText === "No submission recorded" ? "Submitted" : statusText,
+    submissionStatus: finalStatusText,
     weight: courseItem.weight || icalItem.weight || "",
     matchesOccurrence: true,
     source: courseItem.source || icalItem.source || "merged"
@@ -165,6 +185,14 @@ export function deduplicateDeadlinesList(items = [], completedSet = new Set()) {
       if (merged.cmid) seenIds.set(`cmid_${merged.cmid}`, matchIdx);
       if (fp) seenFingerprints.set(fp, matchIdx);
     } else {
+      const isMarked = isItemMarkedCompleted(item, completed);
+      if (isMarked) {
+        item.isCompleted = true;
+        item.isSubmittedOnSpectrum = true;
+        if (!item.submissionStatus || /no submission|tiada/i.test(item.submissionStatus)) {
+          item.submissionStatus = "Submitted";
+        }
+      }
       const idx = deduped.length;
       deduped.push(item);
       if (fp) seenFingerprints.set(fp, idx);
@@ -306,9 +334,18 @@ export async function fetchLiveDeadlines(sesskey, courses = [], occurrencesMap =
       const merged = mergeDeadlineItems(existing, incoming, completedSet);
 
       if (sourceLevel === "authoritative") {
-        merged.isSubmittedOnSpectrum = incoming.isSubmittedOnSpectrum;
-        merged.isCompleted = incoming.isSubmittedOnSpectrum || merged.isCompleted;
-        merged.submissionStatus = incoming.submissionStatus || merged.submissionStatus;
+        const isMarked = isItemMarkedCompleted(merged, completedSet);
+        if (isMarked) {
+          merged.isSubmittedOnSpectrum = true;
+          merged.isCompleted = true;
+          merged.submissionStatus = (incoming.isSubmittedOnSpectrum && incoming.submissionStatus && !/no submission|tiada/i.test(incoming.submissionStatus))
+            ? incoming.submissionStatus
+            : "Submitted";
+        } else {
+          merged.isSubmittedOnSpectrum = incoming.isSubmittedOnSpectrum;
+          merged.isCompleted = incoming.isSubmittedOnSpectrum || merged.isCompleted;
+          merged.submissionStatus = incoming.submissionStatus || merged.submissionStatus;
+        }
       }
 
       const newKey = getActivityKey(merged);
@@ -318,8 +355,13 @@ export async function fetchLiveDeadlines(sesskey, courses = [], occurrencesMap =
       deadlinesMap.set(newKey, merged);
       if (fp) fingerprintMap.set(fp, newKey);
     } else {
-      if (completedSet.has(String(incoming.id)) || (incoming.cmid && completedSet.has(String(incoming.cmid)))) {
+      const isMarked = isItemMarkedCompleted(incoming, completedSet);
+      if (isMarked) {
         incoming.isCompleted = true;
+        incoming.isSubmittedOnSpectrum = true;
+        if (!incoming.submissionStatus || /no submission|tiada/i.test(incoming.submissionStatus)) {
+          incoming.submissionStatus = "Submitted";
+        }
       }
       deadlinesMap.set(key, incoming);
       if (fp) fingerprintMap.set(fp, key);
@@ -589,7 +631,9 @@ export function normalizeHydratedDeadlines(events = [], rawCalendarEvents = [], 
       const eventId = String(item.id);
       const cmid = item.instance ? String(item.instance) : "";
       const isActionDone = item.action ? !item.action.actionable : false;
-      const isCompleted = isActionDone || completedSet.has(eventId) || (cmid && completedSet.has(cmid));
+      const isMarked = isItemMarkedCompleted({ id: eventId, cmid, courseCode, title }, completedSet);
+      const isCompleted = isActionDone || isMarked;
+      const finalSubmitted = isCompleted || isActionDone;
 
       normalized.push({
         id: eventId,
@@ -608,9 +652,9 @@ export function normalizeHydratedDeadlines(events = [], rawCalendarEvents = [], 
         url: eventUrl,
         type: item.modulename || "assign",
         urgency: calculateUrgency(timestamp),
-        isSubmittedOnSpectrum: isActionDone,
+        isSubmittedOnSpectrum: finalSubmitted,
         isCompleted,
-        submissionStatus: isActionDone ? "Submitted" : "No submission",
+        submissionStatus: finalSubmitted ? "Submitted" : "No submission",
         weight: "",
         matchesOccurrence: true
       });
@@ -649,8 +693,13 @@ export function normalizeHydratedDeadlines(events = [], rawCalendarEvents = [], 
         // Preserve verified submission statuses
         const statusText = item.submissionStatus || "";
         const isStatusSubmitted = /\b(?:submitted|submission|graded|grading|selesai|dihantar|dinilai|diserahkan)\b/i.test(statusText) && !/\b(?:no submission|not submitted|belum|tiada|tidak|draft|draf)\b/i.test(statusText);
-        const isSubmittedOnSpectrum = Boolean(item.isSubmittedOnSpectrum) || isStatusSubmitted;
-        const isCompleted = isSubmittedOnSpectrum || Boolean(item.isCompleted) || completedSet.has(eventId) || (cmid && completedSet.has(cmid));
+        const rawSubmitted = Boolean(item.isSubmittedOnSpectrum) || isStatusSubmitted;
+        const isMarked = isItemMarkedCompleted({ id: eventId, cmid, courseCode, title }, completedSet) || Boolean(item.isCompleted);
+        const isCompleted = rawSubmitted || isMarked;
+        const finalSubmitted = isCompleted || rawSubmitted;
+        const finalStatus = finalSubmitted
+          ? (rawSubmitted && statusText && !/no submission|tiada/i.test(statusText) ? statusText : "Submitted")
+          : (statusText || "No submission");
 
         normalized.push({
           ...item,
@@ -670,9 +719,9 @@ export function normalizeHydratedDeadlines(events = [], rawCalendarEvents = [], 
           url: item.url || (item.courseId ? `${SPECTRUM_BASE_URL}/course/view.php?id=${item.courseId}` : `${SPECTRUM_BASE_URL}/my/`),
           type: item.type || "assign",
           urgency: timestamp ? calculateUrgency(timestamp) : "upcoming",
-          isSubmittedOnSpectrum,
+          isSubmittedOnSpectrum: finalSubmitted,
           isCompleted,
-          submissionStatus: isSubmittedOnSpectrum ? (statusText || "Submitted") : (statusText || "No submission"),
+          submissionStatus: finalStatus,
           weight: item.weight || "",
           matchesOccurrence: true
         });

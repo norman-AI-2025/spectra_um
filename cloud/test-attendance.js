@@ -681,19 +681,29 @@ const tableWith2pmToday = `
       <td>Mon 21 Oct 2024</td><td>2:00PM - 4:00PM</td><td>Occ 1</td><td>Today 2pm Lecture</td><td>?</td><td>?</td>
     </tr>
     <tr>
+      <td>Tue 22 Oct 2024</td><td>9:00AM - 11:00AM</td><td>Occ 1</td><td>Tomorrow Morning Lecture</td><td>?</td><td>?</td>
+    </tr>
+    <tr>
       <td>Mon 28 Oct 2024</td><td>2:00PM - 4:00PM</td><td>Occ 1</td><td>Next Week Lecture</td><td>?</td><td>?</td>
     </tr>
   </table>
 `;
 
 const parsedAt12pm = parseAttendanceView(tableWith2pmToday, "Occ 1", ref12pm);
-assert(parsedAt12pm.sessions.length === 2, "At 12pm: Shows past session and today's 2pm session (next week excluded)");
+assert(parsedAt12pm.sessions.length === 2, "At 12pm: Shows past session and today's 2pm session (tomorrow and next week excluded from past/current)");
 const today2pmSess = parsedAt12pm.sessions.find(s => s.description === "Today 2pm Lecture");
 assert(Boolean(today2pmSess), "Today's 2pm session is present in sessions list at 12pm");
 assert(today2pmSess.isToday === true, "Today's 2pm session has isToday: true");
 assert(today2pmSess.status === "today", "Today's 2pm unrecorded session has status: 'today'");
 assert(today2pmSess.statusLabel.includes("Scheduled Today"), "Today's 2pm unrecorded session has statusLabel 'Scheduled Today'");
 assert(parsedAt12pm.hasOpenSession === false, "At 12pm before check-in opens, hasOpenSession is false");
+
+// Verify tomorrow's session is strictly NOT marked isToday or status 'today'
+const tomorrowSess = parsedAt12pm.allSessions.find(s => s.description === "Tomorrow Morning Lecture");
+assert(Boolean(tomorrowSess), "Tomorrow morning session is present in allSessions");
+assert(tomorrowSess.isToday === false, "Tomorrow morning session is strictly NOT isToday");
+assert(tomorrowSess.status !== "today", "Tomorrow morning session status is NOT 'today'");
+assert(!tomorrowSess.statusLabel.includes("Scheduled Today"), "Tomorrow morning session statusLabel does NOT contain 'Scheduled Today'");
 
 // 11.5: At 2:00 PM: Check-in opens on SPeCTRUM with submit link -> auto-fills
 const tableWith2pmOpen = `
@@ -932,6 +942,60 @@ assert(parsed5Col.summary.unrecordedCount === 0, "0 unrecorded sessions");
 assert(parsed5Col.summary.takenSessions === 3, "Summary taken sessions is 3");
 assert(parsed5Col.summary.points === "6 / 6", "Summary points is 6 / 6");
 assert(parsed5Col.summary.percentage === "100.0%", "Summary percentage is 100.0%");
+
+// -------------------------------------------------------------
+// 12. Dynamic Section Container Discovery & User Occurrence Filtering
+// -------------------------------------------------------------
+console.log("\n=== Testing Dynamic Container Discovery & User Occurrence Filtering ===");
+const multiContainerCourseHtml = `
+  <div id="section-1" class="section main">
+    <div class="content">
+      <h3 class="sectionname"><span>Dr. Sarah Al-Shareeda [OCC 1, 2]</span></h3>
+      <div class="activity attendance modtype_attendance">
+        <a href="https://spectrum.um.edu.my/mod/attendance/view.php?id=1101">Attendance Lecture</a>
+      </div>
+    </div>
+  </div>
+  <div id="section-2" class="section main">
+    <div class="content">
+      <h3 class="sectionname"><span>Announcements by Dr. Tarak Nandy</span></h3>
+      <div class="activity attendance modtype_attendance">
+        <a href="https://spectrum.um.edu.my/mod/attendance/view.php?id=1201">Attendance for Lecture (OCC 3, 4, 5, 6, and 7)</a>
+      </div>
+      <div class="activity attendance modtype_attendance">
+        <a href="https://spectrum.um.edu.my/mod/attendance/view.php?id=1202">Attendance for Tutorial (OCC 3)</a>
+      </div>
+      <div class="activity attendance modtype_attendance">
+        <a href="https://spectrum.um.edu.my/mod/attendance/view.php?id=1203">Attendance for Tutorial (OCC 4)</a>
+      </div>
+    </div>
+  </div>
+`;
+
+const discoveredInstances = parseAttendanceIndex(multiContainerCourseHtml);
+assert(discoveredInstances.length === 4, "Discovered all 4 attendance modules across sections");
+
+// Verify that container sectionName was dynamically associated with each instance
+const tarakLectureInst = discoveredInstances.find(i => i.cmid === "1201");
+const tarakTut3Inst = discoveredInstances.find(i => i.cmid === "1202");
+const tarakTut4Inst = discoveredInstances.find(i => i.cmid === "1203");
+const sarahInst = discoveredInstances.find(i => i.cmid === "1101");
+
+assert(Boolean(tarakLectureInst) && tarakLectureInst.sectionName.includes("Dr. Tarak"), "Tarak Lecture preserves container sectionName");
+assert(Boolean(tarakTut3Inst) && tarakTut3Inst.sectionName.includes("Dr. Tarak"), "Tarak Tutorial 3 preserves container sectionName");
+assert(Boolean(sarahInst) && sarahInst.sectionName.includes("Dr. Sarah"), "Sarah Attendance preserves container sectionName");
+
+// Filter dynamically for a student whose entered occurrence is Occ 3
+const userOcc3 = "Occ 3";
+const matchingOcc3 = discoveredInstances.filter((inst) => {
+  const fullContext = inst.sectionName ? `${inst.name} (${inst.sectionName})` : inst.name;
+  return matchesOccurrence("", userOcc3, "", fullContext);
+});
+
+assert(matchingOcc3.some(i => i.cmid === "1201"), "Occ 3 student dynamically captures Dr. Tarak Lecture (OCC 3, 4, 5, 6, and 7)");
+assert(matchingOcc3.some(i => i.cmid === "1202"), "Occ 3 student dynamically captures Dr. Tarak Tutorial (OCC 3)");
+assert(!matchingOcc3.some(i => i.cmid === "1203"), "Occ 3 student dynamically excludes Dr. Tarak Tutorial (OCC 4)");
+assert(!matchingOcc3.some(i => i.cmid === "1101"), "Occ 3 student dynamically excludes Dr. Sarah container [OCC 1, 2]");
 
 console.log(`\n=== All Attendance Tests Finished: ${passed} passed, ${failed} failed ===`);
 if (failed > 0) {

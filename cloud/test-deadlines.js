@@ -786,6 +786,60 @@ assert(mockNotices[0].courseCode === "WIX2002", "First notice is the latest acro
 assert(mockNotices[1].courseCode === "WIX3001", "Second notice is WIX3001 on 24 Oct");
 assert(mockNotices[2].courseCode === "WIX1001", "Third notice is oldest on 20 Oct");
 
+// 9. User completed / submitted overwrite test
+console.log("\n--- Sub-test 9: User Completion Overwrite on Refresh ---");
+import { deduplicateDeadlinesList, mergeDeadlineItems } from "../utils/calendar.js";
+
+const unsubmittedScrapedItem = {
+  id: "55001",
+  cmid: "55001",
+  title: "Assignment 1 (Project Proposal)",
+  courseCode: "WIX2002",
+  dueTimestamp: Date.now() + 86400000,
+  url: "https://spectrum.um.edu.my/mod/assign/view.php?id=55001",
+  submissionStatus: "No submission recorded",
+  isSubmittedOnSpectrum: false,
+  isCompleted: false
+};
+
+const completedUserIds = new Set(["55001"]);
+const dedupedCompleted = deduplicateDeadlinesList([unsubmittedScrapedItem], completedUserIds);
+assert(dedupedCompleted[0].isCompleted === true, "User-completed item is marked isCompleted: true");
+assert(dedupedCompleted[0].isSubmittedOnSpectrum === true, "User-completed item is marked isSubmittedOnSpectrum: true");
+assert(dedupedCompleted[0].submissionStatus === "Submitted", "User-completed item overrides 'No submission recorded' with 'Submitted'");
+
+// Test when scraped via normalizeHydratedDeadlines
+const normalizedCompleted = normalizeHydratedDeadlines([unsubmittedScrapedItem], [], {
+  completedIds: completedUserIds
+});
+assert(normalizedCompleted[0].isCompleted === true, "normalizeHydratedDeadlines marks completed item true");
+assert(normalizedCompleted[0].isSubmittedOnSpectrum === true, "normalizeHydratedDeadlines marks isSubmittedOnSpectrum: true");
+assert(normalizedCompleted[0].submissionStatus === "Submitted", "normalizeHydratedDeadlines sets submissionStatus: 'Submitted'");
+
+// Test mergeDeadlineItems when authoritative scrape returns unsubmitted
+const icalItem = {
+  id: "event-999",
+  title: "Assignment 1 (Project Proposal)",
+  courseCode: "WIX2002",
+  dueTimestamp: Date.now() + 86400000,
+  url: "https://spectrum.um.edu.my/calendar/view.php?view=event&id=999",
+  isCompleted: true
+};
+const mergedAuthoritative = mergeDeadlineItems(icalItem, unsubmittedScrapedItem, completedUserIds);
+assert(mergedAuthoritative.isCompleted === true, "Merged item preserves completion");
+assert(mergedAuthoritative.isSubmittedOnSpectrum === true, "Merged item preserves submitted status");
+assert(mergedAuthoritative.submissionStatus === "Submitted", "Merged item status is 'Submitted'");
+
+// 10. Tutorial & Lab Weekly Submission Links Filtering Test
+console.log("\n--- Sub-test 10: Tutorial & Lab Weekly Submission Links Filtering ---");
+assert(isRespectiveOccurrence("", "Occ 3", "Tutorial 4 Submission Link"), "Tutorial 4 Submission Link is universal for Occ 3 student");
+assert(isRespectiveOccurrence("", "Occ 3", "Tutorial 1 Submission Link"), "Tutorial 1 Submission Link is universal for Occ 3 student");
+assert(isRespectiveOccurrence("", "Occ 3", "Tutorial 3 Submission Link"), "Tutorial 3 Submission Link matches Occ 3 student");
+assert(isRespectiveOccurrence("", "Occ 1", "Lab 4 Task Submission"), "Lab 4 Task Submission is universal for Occ 1 student");
+assert(isRespectiveOccurrence("", "Occ 1", "Assignment 2 Drop-box"), "Assignment 2 Drop-box is universal for Occ 1 student");
+assert(!isRespectiveOccurrence("", "Occ 1", "Tutorial 4 (Occ 2)"), "Tutorial 4 with explicit (Occ 2) is strictly rejected for Occ 1");
+assert(isRespectiveOccurrence("", "Occ 1", "Tutorial 4 (Occ 1)"), "Tutorial 4 with explicit (Occ 1) is accepted for Occ 1");
+
 console.log(`\n=== All Deadlines Tests Finished: ${passed} passed, ${failed} failed ===`);
 if (failed > 0) {
   throw new Error(`${failed} tests failed!`);

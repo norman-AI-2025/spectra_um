@@ -121,6 +121,7 @@ class MockExecutionContext {
 const networkCalls = [];
 let attendanceGroup = "Occ 1";
 let attendancePostCount = 0;
+let lastSentTelegramText = "";
 globalThis.fetch = async function mockFetch(url, options = {}) {
   networkCalls.push({ url, method: options.method || "GET", headers: options.headers, body: options.body });
 
@@ -213,8 +214,27 @@ globalThis.fetch = async function mockFetch(url, options = {}) {
     };
   }
 
+  // Mock SPeCTRUM forum discussion view
+  if (url.includes("spectrum.um.edu.my/mod/forum/discuss.php")) {
+    return {
+      status: 200,
+      ok: true,
+      text: async () => `
+        <div class="forumpost">
+          <div class="post-content-container">
+            Dear students, please note that our replacement class will be held this Friday at 3:00 PM via Zoom. Attendance is compulsory.
+          </div>
+        </div>
+      `
+    };
+  }
+
   // Mock Telegram sendMessage endpoint
   if (url.includes("api.telegram.org/bot")) {
+    try {
+      const parsedBody = JSON.parse(options.body || "{}");
+      lastSentTelegramText = parsedBody.text || "";
+    } catch (_) { }
     return {
       status: 200,
       ok: true,
@@ -428,6 +448,9 @@ async function runTestSuite() {
 
   const storedAnnouncements = await kv.get("sent_announcement_ids");
   assert(storedAnnouncements !== null && storedAnnouncements.includes("5501"), "Announcement 5501 persisted in sent_announcement_ids in KV");
+  assert(lastSentTelegramText.includes("<b>Course:</b>"), "Telegram notice contains Course code and name header");
+  assert(lastSentTelegramText.includes("<b>Summary:</b>"), "Telegram notice contains summarized version of notice");
+  assert(lastSentTelegramText.includes("replacement class will be held this Friday"), "Telegram notice extracts actual forum post summary");
 
   // Test 13: Cloudflare -> Telegram Test Alert Route (POST /test-telegram)
   print("\nTest 13: Cloudflare -> Telegram Test Alert Route");

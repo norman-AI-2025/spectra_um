@@ -194,18 +194,37 @@ export async function sendTelegramTestMessage(botToken, chatId) {
  * Format course announcement for Telegram push alert
  */
 export function formatAnnouncementTelegram(announcement) {
-  const code = escapeHtml(announcement.courseCode || "Course");
-  const title = escapeHtml(announcement.subject || "New Announcement");
+  const code = escapeHtml(announcement.courseCode || "UM");
+  const name = escapeHtml(announcement.courseName || "");
+  const courseHeader = name && name !== code
+    ? (name.toUpperCase().includes(code.toUpperCase()) ? name : `${code} - ${name}`)
+    : (name || code);
+
+  const title = escapeHtml(announcement.subject || "New Notice");
   const author = escapeHtml(announcement.author || "Instructor");
   const url = announcement.url || "https://spectrum.um.edu.my/";
 
-  return [
-    `📢 <b>Spectra Alert: ${code}</b>`,
+  const lines = [
+    `📢 <b>Spectra Notice: ${courseHeader}</b>`,
+    `<b>Course:</b> ${courseHeader}`,
     `<b>Title:</b> ${title}`,
-    `<b>By:</b> ${author}`,
-    ``,
-    `<a href="${url}">👉 Open Announcement on SPeCTRUM</a>`
-  ].join("\n");
+    `<b>By:</b> ${author}`
+  ];
+
+  if (announcement.message || announcement.summary) {
+    const rawSummary = stripHtml(announcement.message || announcement.summary).trim();
+    if (rawSummary) {
+      const trimmedSummary = rawSummary.length > 280
+        ? rawSummary.slice(0, 277).trim() + "..."
+        : rawSummary;
+      lines.push(`<b>Summary:</b> ${escapeHtml(trimmedSummary)}`);
+    }
+  }
+
+  lines.push(``);
+  lines.push(`<a href="${url}">👉 Open Notice on SPeCTRUM</a>`);
+
+  return lines.join("\n");
 }
 
 /**

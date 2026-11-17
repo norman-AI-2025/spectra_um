@@ -131,10 +131,10 @@ export async function fetchCourseAttendance({ courseId, courseCode = "UM", sessk
     }
   }
 
-  // A & B: If AJAX didn't find instances, discover via index and course view concurrently
-  if (discoveredInstances.length === 0) {
-    await Promise.allSettled([fetchIndex(), fetchView()]);
-  }
+  // Always run course view discovery so that all course sections and containers
+  // (including collapsible containers, e.g. "Announcements by Dr. Tarak Nandy")
+  // are thoroughly scanned, even if AJAX or index only reported a subset.
+  await Promise.allSettled([fetchIndex(), fetchView()]);
 
   if (discoveredInstances.length === 0) {
     // Course does not have an active mod_attendance module on SPeCTRUM
@@ -159,11 +159,14 @@ export async function fetchCourseAttendance({ courseId, courseCode = "UM", sessk
     };
   }
 
-  // 2. Filter attendance instances by occurrence if instance name explicitly specifies one
+  // 2. Filter attendance instances across all discovered sections/containers by user occurrence
   const isOccSpecified = Boolean(occurrence && occurrence.trim().toLowerCase() !== "all");
   let relevantInstances = discoveredInstances;
   if (isOccSpecified) {
-    const matching = discoveredInstances.filter((inst) => matchesOccurrence("", occurrence, "", inst.name));
+    const matching = discoveredInstances.filter((inst) => {
+      const fullContext = inst.sectionName ? `${inst.name} (${inst.sectionName})` : inst.name;
+      return matchesOccurrence("", occurrence, "", fullContext);
+    });
     if (matching.length > 0) {
       relevantInstances = matching;
     }

@@ -22,6 +22,7 @@ import {
   formatAnnouncementTelegram,
   formatDeadlineTelegram
 } from "../utils/telegram.js";
+import { extractNoticeSummaryFromHtml } from "../utils/parser.js";
 
 let passed = 0;
 let failed = 0;
@@ -56,14 +57,40 @@ async function runTelegramTests() {
   assert(stripHtml("<b>Hello</b> <i>World</i>") === "Hello World", "Strips HTML tags");
 
   // 3. Formatters
-  const annMsg = formatAnnouncementTelegram({
+  const annMsgWithCode = formatAnnouncementTelegram({
     courseCode: "WIX2002",
     subject: "Lab 3 & Midterm Guidelines",
     author: "Dr. Azman",
     url: "https://spectrum.um.edu.my/mod/forum/discuss.php?d=101"
   });
-  assert(annMsg.includes("<b>Spectra Alert: WIX2002</b>"), "Announcement formats bold header");
-  assert(annMsg.includes("Lab 3 &amp; Midterm Guidelines"), "Announcement escapes subject ampersand");
+  assert(annMsgWithCode.includes("<b>Spectra Notice: WIX2002</b>") || annMsgWithCode.includes("<b>Spectra Alert: WIX2002</b>"), "Announcement formats bold header with courseCode fallback");
+  assert(annMsgWithCode.includes("<b>Course:</b> WIX2002"), "Announcement includes course code line");
+  assert(annMsgWithCode.includes("Lab 3 &amp; Midterm Guidelines"), "Announcement escapes subject ampersand");
+
+  const annMsgWithName = formatAnnouncementTelegram({
+    courseCode: "WIX2002",
+    courseName: "Software Engineering Project Management",
+    subject: "Lab 3 & Midterm Guidelines",
+    author: "Dr. Azman",
+    url: "https://spectrum.um.edu.my/mod/forum/discuss.php?d=101",
+    message: "Please submit your design documents by Friday 5 PM."
+  });
+  assert(annMsgWithName.includes("<b>Spectra Notice: WIX2002 - Software Engineering Project Management</b>") || annMsgWithName.includes("<b>Spectra Alert: WIX2002 - Software Engineering Project Management</b>"), "Announcement formats bold header with courseCode and courseName");
+  assert(annMsgWithName.includes("<b>Course:</b> WIX2002 - Software Engineering Project Management"), "Announcement formats courseCode and courseName line");
+  assert(annMsgWithName.includes("<b>Summary:</b> Please submit your design documents by Friday 5 PM."), "Announcement includes summarized message body");
+
+  // Test extractNoticeSummaryFromHtml
+  const mockNoticeHtml = `
+    <div class="forumpost">
+      <div class="post-content-container">
+        Dear students, please take note that the midterm exam will be held next Tuesday.
+        Bring your student ID and 2B pencils. Good luck!
+      </div>
+    </div>
+  `;
+  const extracted = extractNoticeSummaryFromHtml(mockNoticeHtml);
+  assert(extracted.includes("Dear students, please take note that the midterm exam"), "extractNoticeSummaryFromHtml extracts post body");
+  assert(!extracted.includes("<div>"), "extractNoticeSummaryFromHtml strips HTML");
 
   const deadMsg = formatDeadlineTelegram({
     courseCode: "WIX2002",

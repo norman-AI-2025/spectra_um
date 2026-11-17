@@ -1617,9 +1617,20 @@ export function isRespectiveOccurrence(sessionGroup, studentOccurrence, sessionD
   const studentNumbers = extractAllOccurrenceNumbers(occ);
   const hasStudentOcc = studentNumbers.length > 0 || Boolean(occ && occ !== "all");
 
+  // Helper: Strip routine weekly task numbering e.g. "Tutorial 4", "Tutorial 4 Submission Link", "Lab 2 Task"
+  // so that "Tutorial 4 Submission Link" isn't misinterpreted as an occurrence 4 group restriction
+  // while preserving parenthesized occurrence indicators like "(Tut 2)", "(Tutorial 3)", or "(Occ 1)"
+  function cleanTaskOccurrenceContext(text) {
+    if (!text) return "";
+    const isAttendance = isAttendanceActivity({ title: text, name: text });
+    if (isAttendance) return text;
+    return String(text).replace(/(?<!\()\b(?:tutorial|tut|lab|assignment|tugasan)\s*#?\s*\d+\s*(?:submission\s+link|submission|link|dropbox|box|handin|hantar|due|task|exercise|sheet)?\b(?!\s*[\)\/])/gi, "");
+  }
+
   // Step 1: Check Activity Name
   // If activityName explicitly declares one or more occurrences / groups:
-  const actNumbers = extractAllOccurrenceNumbers(actName);
+  const cleanedActName = cleanTaskOccurrenceContext(actName);
+  const actNumbers = extractAllOccurrenceNumbers(cleanedActName);
   if (actNumbers.length > 0) {
     if (!hasStudentOcc) {
       // Activity is group-specific, but student has no occurrence configured
@@ -1640,7 +1651,8 @@ export function isRespectiveOccurrence(sessionGroup, studentOccurrence, sessionD
   const groupNumbers = !groupIsUniversal ? extractAllOccurrenceNumbers(group) : [];
 
   // Check description numbers
-  const descNumbers = extractAllOccurrenceNumbers(desc);
+  const cleanedDesc = cleanTaskOccurrenceContext(desc);
+  const descNumbers = extractAllOccurrenceNumbers(cleanedDesc);
 
   const sessionNumbers = groupNumbers.length > 0 ? groupNumbers : descNumbers;
 
@@ -1677,14 +1689,17 @@ export function parseAttendanceIndex(html) {
   const links = [];
   const seenCmids = new Set();
 
-  function addInstance(cmid, name, rawUrl) {
+  function addInstance(cmid, name, rawUrl, sectionName = "") {
     if (!cmid || seenCmids.has(cmid)) return;
     seenCmids.add(cmid);
     const fullUrl = rawUrl.startsWith("http") ? rawUrl : `https://spectrum.um.edu.my/${rawUrl.replace(/^\//, "")}`;
+    const cleanName = (name || "Attendance").trim().replace(/^(Activity|Aktiviti)\s+/i, "");
     links.push({
       cmid: String(cmid),
-      name: (name || "Attendance").trim().replace(/^(Activity|Aktiviti)\s+/i, ""),
-      url: fullUrl
+      name: cleanName,
+      title: cleanName,
+      url: fullUrl,
+      sectionName: (sectionName || "").trim()
     });
   }
 
@@ -1692,28 +1707,34 @@ export function parseAttendanceIndex(html) {
     try {
       const doc = safeParseHtml(html);
       if (doc) {
-        // 1. Look for view.php links anywhere on the page
+        // 1. Look for modtype_attendance containers or activities across all sections (top to bottom)
+        const actContainers = doc.querySelectorAll(".modtype_attendance, li.activity.attendance, div.activityinstance, [data-region='activity-information']");
+        actContainers.forEach((el) => {
+          const a = el.querySelector("a[href*='mod/attendance/view.php'], a[href*='mod/attendance/']");
+          if (a) {
+            const href = a.getAttribute("href") || "";
+            const idMatch = href.match(/id=(\d+)/);
+            if (idMatch) {
+              const secEl = el.closest(".section, .course-section, section, li[id*='section']");
+              const secHeader = secEl?.querySelector(".sectionname, .section-title, h3, h4");
+              const secName = secHeader ? secHeader.textContent.trim() : "";
+              const text = el.querySelector(".instancename")?.textContent?.trim() || a.textContent.trim() || a.getAttribute("title") || "Attendance";
+              addInstance(idMatch[1], text, href, secName);
+            }
+          }
+        });
+
+        // 2. Look for any remaining view.php links anywhere on the page (including inside accordion/subsections)
         const aEls = doc.querySelectorAll("a[href*='mod/attendance/view.php']");
         aEls.forEach((a) => {
           const href = a.getAttribute("href") || "";
           const idMatch = href.match(/id=(\d+)/);
           if (idMatch) {
+            const secEl = a.closest(".section, .course-section, section, li[id*='section']");
+            const secHeader = secEl?.querySelector(".sectionname, .section-title, h3, h4");
+            const secName = secHeader ? secHeader.textContent.trim() : "";
             const text = a.textContent.trim() || a.getAttribute("title") || "Attendance";
-            addInstance(idMatch[1], text, href);
-          }
-        });
-
-        // 2. Look for modtype_attendance containers across all sections (top to bottom)
-        const actContainers = doc.querySelectorAll(".modtype_attendance, li.activity.attendance, div.activityinstance");
-        actContainers.forEach((el) => {
-          const a = el.querySelector("a[href*='mod/attendance/']");
-          if (a) {
-            const href = a.getAttribute("href") || "";
-            const idMatch = href.match(/id=(\d+)/);
-            if (idMatch) {
-              const text = a.textContent.trim() || el.querySelector(".instancename")?.textContent?.trim() || "Attendance";
-              addInstance(idMatch[1], text, href);
-            }
+            addInstance(idMatch[1], text, href, secName);
           }
         });
 
@@ -1722,14 +1743,30 @@ export function parseAttendanceIndex(html) {
     } catch (e) { }
   }
 
-  // Regex fallback
-  const regex = /<a[^>]+href=["']([^"']*mod\/attendance\/view\.php\?id=(\d+)[^"']*)["'][^>]*>([\s\S]*?)<\/a>/gi;
-  let match;
-  while ((match = regex.exec(html)) !== null) {
-    const rawUrl = match[1];
-    const cmid = match[2];
-    const name = match[3].replace(/<[^>]+>/g, "").trim() || "Attendance";
-    addInstance(cmid, name, rawUrl);
+  // Regex fallback: scan across section containers or general HTML
+  const sectionChunks = html.split(/(?=(?:<li[^>]*id=["']section-\d+|<div[^>]*class=["'][^"']*section|<div[^>]*id=["']section-\d+|<section[^>]*class=["'][^"']*section))/i);
+  if (sectionChunks.length > 1) {
+    for (const chunk of sectionChunks) {
+      const headerM = chunk.match(/<(?:h[234]|span)[^>]*class=["'][^"']*(?:sectionname|section-title)[^"']*["'][^>]*>([\s\S]*?)<\/(?:h[234]|span)>/i) ||
+                      chunk.match(/<h[234][^>]*>([\s\S]*?)<\/h[234]>/i);
+      const secName = headerM ? headerM[1].replace(/<[^>]+>/g, "").trim() : "";
+      const regex = /<a[^>]+href=["']([^"']*mod\/attendance\/view\.php\?id=(\d+)[^"']*)["'][^>]*>([\s\S]*?)<\/a>/gi;
+      let m;
+      while ((m = regex.exec(chunk)) !== null) {
+        addInstance(m[2], m[3].replace(/<[^>]+>/g, "").trim(), m[1], secName);
+      }
+    }
+  }
+
+  if (links.length === 0) {
+    const regex = /<a[^>]+href=["']([^"']*mod\/attendance\/view\.php\?id=(\d+)[^"']*)["'][^>]*>([\s\S]*?)<\/a>/gi;
+    let match;
+    while ((match = regex.exec(html)) !== null) {
+      const rawUrl = match[1];
+      const cmid = match[2];
+      const name = match[3].replace(/<[^>]+>/g, "").trim() || "Attendance";
+      addInstance(cmid, name, rawUrl);
+    }
   }
 
   return links;
@@ -2204,10 +2241,9 @@ export function parseAttendanceView(html, studentOccurrence = "", referenceDate 
             String(dateText).toLowerCase().includes("today") ||
             String(dateText).toLowerCase().includes("hari ini") ||
             (sessionTs && (
-              (new Date(sessionTs).getFullYear() === ref.getFullYear() &&
-               new Date(sessionTs).getMonth() === ref.getMonth() &&
-               new Date(sessionTs).getDate() === ref.getDate()) ||
-              Math.abs(sessionTs - ref.getTime()) < 16 * 3600 * 1000
+              new Date(sessionTs).getFullYear() === ref.getFullYear() &&
+              new Date(sessionTs).getMonth() === ref.getMonth() &&
+              new Date(sessionTs).getDate() === ref.getDate()
             ))
           );
 
@@ -2396,10 +2432,9 @@ export function parseAttendanceView(html, studentOccurrence = "", referenceDate 
         String(dateText).toLowerCase().includes("today") ||
         String(dateText).toLowerCase().includes("hari ini") ||
         (sessionTs && (
-          (new Date(sessionTs).getFullYear() === ref.getFullYear() &&
-           new Date(sessionTs).getMonth() === ref.getMonth() &&
-           new Date(sessionTs).getDate() === ref.getDate()) ||
-          Math.abs(sessionTs - ref.getTime()) < 16 * 3600 * 1000
+          new Date(sessionTs).getFullYear() === ref.getFullYear() &&
+          new Date(sessionTs).getMonth() === ref.getMonth() &&
+          new Date(sessionTs).getDate() === ref.getDate()
         ))
       );
 
@@ -3016,4 +3051,61 @@ export async function pMap(items, fn, concurrency = 2) {
     }
   }
   return Promise.allSettled(results);
+}
+
+/**
+ * Extracts a concise summary from SPeCTRUM forum discussion / notice HTML.
+ * Strips HTML tags, decodes entities, and limits to ~280 characters with ellipsis.
+ */
+export function extractNoticeSummaryFromHtml(html) {
+  if (!html) return "";
+  let rawContent = "";
+
+  // 1. DOMParser if available (Browser / Extension page context)
+  if (typeof DOMParser !== "undefined") {
+    try {
+      const doc = safeParseHtml(html);
+      if (doc) {
+        const contentEl = doc.querySelector(
+          ".post-content-container, .posting, .forumpost .content, .post-content, .text_to_html, .entry-content"
+        );
+        if (contentEl) {
+          rawContent = contentEl.textContent || "";
+        }
+      }
+    } catch (_) { }
+  }
+
+  // 2. Regex fallback (Service worker / Node / Cloudflare Worker)
+  if (!rawContent) {
+    const patterns = [
+      /<div[^>]*class=["'][^"']*(?:post-content-container|posting|text_to_html|post-content)[^"']*["'][^>]*>([\s\S]*?)<\/div>/i,
+      /<div[^>]*class=["'][^"']*forumpost[^"']*["'][\s\S]*?<div[^>]*class=["'][^"']*content[^"']*["'][^>]*>([\s\S]*?)<\/div>/i,
+      /<div[^>]*class=["'][^"']*entry-content[^"']*["'][^>]*>([\s\S]*?)<\/div>/i,
+      /<div[^>]*class=["'][^"']*content[^"']*["'][^>]*>([\s\S]*?)<\/div>/i
+    ];
+    for (const pat of patterns) {
+      const m = html.match(pat);
+      if (m && m[1]) {
+        rawContent = m[1].replace(/<[^>]+>/g, " ");
+        break;
+      }
+    }
+  }
+
+  if (!rawContent) return "";
+
+  const cleaned = rawContent
+    .replace(/&amp;/g, "&")
+    .replace(/&lt;/g, "<")
+    .replace(/&gt;/g, ">")
+    .replace(/&quot;/g, "\"")
+    .replace(/&#039;/g, "'")
+    .replace(/&nbsp;/g, " ")
+    .replace(/\s+/g, " ")
+    .trim();
+
+  if (!cleaned) return "";
+
+  return cleaned.length > 280 ? cleaned.slice(0, 277).trim() + "..." : cleaned;
 }

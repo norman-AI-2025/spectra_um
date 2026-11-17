@@ -237,16 +237,6 @@ async function runSpectrumPollingJob(env) {
         icsDeadlinesResult = await checkCloudDeadlinesViaIcs(env, sessionData);
       }
 
-      if (botToken && chatId) {
-        const extraNote = sessionData.calendarIcalUrl
-          ? "\n\n<i>Note: 24/7 deadline tracking remains active via your permanent iCal feed.</i>"
-          : "";
-        await dispatchTelegram(
-          botToken,
-          chatId,
-          `⚠️ <b>Spectra Relay Warning</b>\nYour UM SPeCTRUM session has expired. Please open SPeCTRUM in your browser to renew your login.${extraNote}`
-        );
-      }
       return {
         status: "expired",
         deadlinesChecked: icsDeadlinesResult.checked,
@@ -396,6 +386,7 @@ async function checkAndRecordCloudAttendance(env, sessionData) {
   for (const course of courses) {
     const courseId = typeof course === "object" ? (course.id || course.courseId) : course;
     const courseCode = typeof course === "object" ? (course.code || courseId) : course;
+    const courseName = typeof course === "object" ? (course.name || course.fullname || courseCode) : courseCode;
     if (!courseId) continue;
 
     const studentOcc = resolveWorkerCourseOccurrence(course, occurrences);
@@ -453,28 +444,26 @@ async function checkAndRecordCloudAttendance(env, sessionData) {
         }
       } catch (_) { }
 
-      // C. Fallback: If no viewUrls found yet, inspect course view page directly
-      if (viewUrls.size === 0) {
-        try {
-          const courseRes = await fetch(`https://spectrum.um.edu.my/course/view.php?id=${encodeURIComponent(courseId)}`, {
-            headers: { "Cookie": cookieHeader, "User-Agent": "Mozilla/5.0 Spectra-Relay/1.0" }
-          });
-          if (courseRes.ok) {
-            const courseHtml = await courseRes.text();
-            const matches = courseHtml.match(/href=["']([^"']*(?:mod\/attendance\/view\.php\?[^"']*|view\.php\?id=\d+[^"']*))["']/gi) || [];
-            for (const m of matches) {
-              const uM = m.match(/href=["']([^"']+)["']/i);
-              if (uM) {
-                let u = uM[1];
-                if (!u.startsWith("http")) {
-                  u = `https://spectrum.um.edu.my/${u.replace(/^\//, "")}`;
-                }
-                viewUrls.add(u);
+      // C. Inspect course view page directly to capture attendance inside all sections and containers
+      try {
+        const courseRes = await fetch(`https://spectrum.um.edu.my/course/view.php?id=${encodeURIComponent(courseId)}`, {
+          headers: { "Cookie": cookieHeader, "User-Agent": "Mozilla/5.0 Spectra-Relay/1.0" }
+        });
+        if (courseRes.ok) {
+          const courseHtml = await courseRes.text();
+          const matches = courseHtml.match(/href=["']([^"']*(?:mod\/attendance\/view\.php\?[^"']*))["']/gi) || [];
+          for (const m of matches) {
+            const uM = m.match(/href=["']([^"']+)["']/i);
+            if (uM) {
+              let u = uM[1];
+              if (!u.startsWith("http")) {
+                u = `https://spectrum.um.edu.my/${u.replace(/^\//, "")}`;
               }
+              viewUrls.add(u);
             }
           }
-        } catch (_) { }
-      }
+        }
+      } catch (_) { }
 
       if (viewUrls.size === 0) continue;
 
@@ -688,13 +677,20 @@ function matchesOccurrence(groupStr, studentOcc, descStr = "", activityName = ""
   if (!targetOcc || targetOcc === "all") return true;
   const g = String(groupStr || "").trim().toLowerCase();
   let d = String(descStr || "").trim().toLowerCase();
-  const act = String(activityName || "").trim().toLowerCase();
+  let act = String(activityName || "").trim().toLowerCase();
 
   const studentNumbers = extractAllOccurrenceNumbersWorker(targetOcc);
   if (studentNumbers.length === 0) return true;
 
+  function cleanTaskOccurrenceWorker(text) {
+    if (!text) return "";
+    if (isAttendanceWorkerActivity(text)) return text;
+    return String(text).replace(/(?<!\()\b(?:tutorial|tut|lab|assignment|tugasan)\s*#?\s*\d+\s*(?:submission\s+link|submission|link|dropbox|box|handin|hantar|due|task|exercise|sheet)?\b(?!\s*[\)\/])/gi, "");
+  }
+
   // 1. If activity / page heading specifies occurrence numbers
-  const actNumbers = extractAllOccurrenceNumbersWorker(act);
+  const cleanedAct = cleanTaskOccurrenceWorker(act);
+  const actNumbers = extractAllOccurrenceNumbersWorker(cleanedAct);
   if (actNumbers.length > 0) {
     if (!studentNumbers.some((n) => actNumbers.includes(n))) {
       return false;
@@ -702,10 +698,10 @@ function matchesOccurrence(groupStr, studentOcc, descStr = "", activityName = ""
   }
 
   // 2. Check group and description
-  d = d.replace(/\b(?:tutorial|tut|lab|assignment|tugasan)\s+\d+\s+(?:submission|link|dropbox|box|handin|hantar|due)\b/gi, "");
+  const cleanedDesc = cleanTaskOccurrenceWorker(d);
   const universalGroup = !g || g === "all" || g.includes("all students") || g.includes("semua pelajar");
 
-  const targetNumbers = !universalGroup ? extractAllOccurrenceNumbersWorker(g) : extractAllOccurrenceNumbersWorker(d);
+  const targetNumbers = !universalGroup ? extractAllOccurrenceNumbersWorker(g) : extractAllOccurrenceNumbersWorker(cleanedDesc);
 
   if (targetNumbers.length > 0) {
     return studentNumbers.some((n) => targetNumbers.includes(n));
@@ -740,6 +736,47 @@ function isAttendanceWorkerActivity(title, url = "") {
   ];
 
   return patterns.some(p => p.test(t));
+}
+
+function escapeWorkerHtml(text) {
+  if (!text) return "";
+  return String(text)
+    .replace(/&/g, "&amp;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;")
+    .replace(/"/g, "&quot;")
+    .replace(/'/g, "&#039;");
+}
+
+function extractWorkerNoticeSummary(html) {
+  if (!html) return "";
+  const patterns = [
+    /<div[^>]*class=["'][^"']*(?:post-content-container|posting|text_to_html|post-content)[^"']*["'][^>]*>([\s\S]*?)<\/div>/i,
+    /<div[^>]*class=["'][^"']*forumpost[^"']*["'][\s\S]*?<div[^>]*class=["'][^"']*content[^"']*["'][^>]*>([\s\S]*?)<\/div>/i,
+    /<div[^>]*class=["'][^"']*entry-content[^"']*["'][^>]*>([\s\S]*?)<\/div>/i,
+    /<div[^>]*class=["'][^"']*content[^"']*["'][^>]*>([\s\S]*?)<\/div>/i
+  ];
+  let raw = "";
+  for (const pat of patterns) {
+    const m = html.match(pat);
+    if (m && m[1]) {
+      raw = m[1].replace(/<[^>]+>/g, " ");
+      break;
+    }
+  }
+
+  const cleaned = raw
+    .replace(/&amp;/g, "&")
+    .replace(/&lt;/g, "<")
+    .replace(/&gt;/g, ">")
+    .replace(/&quot;/g, "\"")
+    .replace(/&#039;/g, "'")
+    .replace(/&nbsp;/g, " ")
+    .replace(/\s+/g, " ")
+    .trim();
+
+  if (!cleaned) return "";
+  return cleaned.length > 280 ? cleaned.slice(0, 277).trim() + "..." : cleaned;
 }
 
 async function dispatchTelegram(botToken, chatId, textHtml) {
@@ -794,6 +831,7 @@ async function checkCloudDeadlines(env, sessionData) {
   for (const course of courses) {
     const courseId = typeof course === "object" ? (course.id || course.courseId) : course;
     const courseCode = typeof course === "object" ? (course.code || courseId) : course;
+    const courseName = typeof course === "object" ? (course.name || course.fullname || courseCode) : courseCode;
     if (!courseId) continue;
 
     const studentOcc = occurrences[courseId] || occurrences[courseCode] || "";
@@ -1181,6 +1219,7 @@ async function checkCloudAnnouncements(env, sessionData) {
   for (const course of courses) {
     const courseId = typeof course === "object" ? (course.id || course.courseId) : course;
     const courseCode = typeof course === "object" ? (course.code || courseId) : course;
+    const courseName = typeof course === "object" ? (course.name || course.fullname || courseCode) : courseCode;
     if (!courseId) continue;
 
     try {
@@ -1266,13 +1305,49 @@ async function checkCloudAnnouncements(env, sessionData) {
             ? rawDiscussUrl
             : `https://spectrum.um.edu.my/${rawDiscussUrl.replace(/^\//, "")}`;
 
+          const cleanCode = courseCode ? String(courseCode).trim() : "UM";
+          const cleanName = courseName ? String(courseName).trim() : "";
+          const courseHeader = cleanName && cleanName !== cleanCode
+            ? (cleanName.toUpperCase().includes(cleanCode.toUpperCase()) ? cleanName : `${cleanCode} - ${cleanName}`)
+            : (cleanName || cleanCode);
+
+          // Fetch full notice to extract the summarized version
+          let summaryText = "";
+          try {
+            const ctrl = typeof AbortController !== "undefined" ? new AbortController() : null;
+            const tid = ctrl ? setTimeout(() => ctrl.abort(), 4000) : null;
+            try {
+              const discussRes = await fetch(fullDiscussUrl, {
+                headers: { "Cookie": cookieHeader, "User-Agent": "Mozilla/5.0 Spectra-Relay/1.0" },
+                signal: ctrl?.signal
+              });
+              if (discussRes && discussRes.ok) {
+                const discussHtml = await discussRes.text();
+                summaryText = extractWorkerNoticeSummary(discussHtml);
+              }
+            } finally {
+              if (tid) clearTimeout(tid);
+            }
+          } catch (_) { }
+
+          const lines = [
+            `📢 <b>Spectra Notice: ${escapeWorkerHtml(courseHeader)}</b>`,
+            `<b>Course:</b> ${escapeWorkerHtml(courseHeader)}`,
+            `<b>Title:</b> ${escapeWorkerHtml(rawSubject)}`,
+            `<b>By:</b> ${escapeWorkerHtml(author)} (${escapeWorkerHtml(dateText)})`
+          ];
+
+          if (summaryText) {
+            lines.push(`<b>Summary:</b> ${escapeWorkerHtml(summaryText)}`);
+          }
+
+          lines.push(``);
+          lines.push(`🔗 <a href="${fullDiscussUrl}">Open on SPeCTRUM</a>`);
+
           await dispatchTelegram(
             botToken,
             chatId,
-            `📢 <b>Spectra Announcement: ${courseCode}</b>\n` +
-            `<b>Topic:</b> ${rawSubject}\n` +
-            `<b>Author:</b> ${author} (${dateText})\n` +
-            `🔗 <a href="${fullDiscussUrl}">Read Discussion on SPeCTRUM</a>`
+            lines.join("\n")
           );
 
           sentAnnouncementIds.add(discussionId);
