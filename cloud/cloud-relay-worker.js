@@ -852,12 +852,20 @@ async function checkCloudDeadlines(env, sessionData) {
           let rowMatch;
           while ((rowMatch = rowRegex.exec(html)) !== null) {
             const rowHtml = rowMatch[1];
-            const linkMatch = rowHtml.match(/<a[^>]+href=["']([^"']*mod\/assign\/view\.php\?id=(\d+)[^"']*)["'][^>]*>([\s\S]*?)<\/a>/i);
+            const linkMatch = rowHtml.match(/<a[^>]+href=["']([^"']*(?:mod\/assign\/view\.php\?id=\d+|view\.php\?id=\d+)[^"']*)["'][^>]*>([\s\S]*?)<\/a>/i);
             if (!linkMatch) continue;
 
-            const assignUrl = linkMatch[1];
-            const cmid = linkMatch[2];
-            const rawTitle = linkMatch[3].replace(/<[^>]+>/g, "").trim();
+            let assignUrl = linkMatch[1];
+            const cmidMatch = assignUrl.match(/id=(\d+)/);
+            if (!cmidMatch) continue;
+            const cmid = cmidMatch[1];
+            const rawTitle = linkMatch[2].replace(/<[^>]+>/g, "").trim();
+
+            if (!assignUrl.startsWith("http")) {
+              assignUrl = assignUrl.startsWith("/")
+                ? `https://spectrum.um.edu.my${assignUrl}`
+                : `https://spectrum.um.edu.my/mod/assign/${assignUrl}`;
+            }
 
             if (isAttendanceWorkerActivity(rawTitle, assignUrl)) continue;
 
@@ -1225,24 +1233,58 @@ async function checkCloudAnnouncements(env, sessionData) {
     try {
       const forumUrls = new Set();
 
+      // A. If sesskey is available, query Moodle AJAX core_course_get_contents
+      if (sessionData.sesskey) {
+        try {
+          const ajaxPayload = [{
+            index: 0,
+            methodname: "core_course_get_contents",
+            args: { courseid: parseInt(courseId, 10) }
+          }];
+          const ajaxRes = await fetch(`https://spectrum.um.edu.my/lib/ajax/service.php?sesskey=${encodeURIComponent(sessionData.sesskey)}&info=core_course_get_contents`, {
+            method: "POST",
+            headers: { "Cookie": cookieHeader, "Content-Type": "application/json", "User-Agent": "Mozilla/5.0 Spectra-Relay/1.0" },
+            body: JSON.stringify(ajaxPayload)
+          });
+          if (ajaxRes.ok) {
+            const sections = await ajaxRes.json();
+            if (Array.isArray(sections) && sections[0]?.data) {
+              for (const sec of sections[0].data) {
+                for (const mod of (sec.modules || [])) {
+                  if (mod.modname === "forum") {
+                    forumUrls.add(mod.url || `https://spectrum.um.edu.my/mod/forum/view.php?id=${mod.id}`);
+                  }
+                }
+              }
+            }
+          }
+        } catch (_) { }
+      }
+
+      // B. Fetch /mod/forum/index.php?id={courseId}
       try {
         const indexRes = await fetch(`https://spectrum.um.edu.my/mod/forum/index.php?id=${encodeURIComponent(courseId)}`, {
           headers: { "Cookie": cookieHeader, "User-Agent": "Mozilla/5.0 Spectra-Relay/1.0" }
         });
         if (indexRes.ok) {
           const indexHtml = await indexRes.text();
-          const fMatches = indexHtml.match(/href=["']([^"']*\/mod\/forum\/view\.php\?id=\d+[^"']*)["']/gi) || [];
+          const fMatches = indexHtml.match(/href=["']([^"']*(?:mod\/forum\/view\.php\?[^"']*|view\.php\?id=\d+[^"']*))["']/gi) || [];
           for (const m of fMatches) {
             const urlM = m.match(/href=["']([^"']+)["']/i);
             if (urlM) {
               let u = urlM[1];
-              if (!u.startsWith("http")) u = `https://spectrum.um.edu.my/${u.replace(/^\//, "")}`;
+              if (!u.startsWith("http")) {
+                u = u.startsWith("/")
+                  ? `https://spectrum.um.edu.my${u}`
+                  : `https://spectrum.um.edu.my/mod/forum/${u}`;
+              }
               forumUrls.add(u);
             }
           }
         }
       } catch (_) { }
 
+      // C. Fallback: Parse course/view.php to catch forum inside sub-sections or containers
       if (forumUrls.size === 0) {
         try {
           const courseRes = await fetch(`https://spectrum.um.edu.my/course/view.php?id=${encodeURIComponent(courseId)}`, {
@@ -1250,12 +1292,16 @@ async function checkCloudAnnouncements(env, sessionData) {
           });
           if (courseRes.ok) {
             const courseHtml = await courseRes.text();
-            const fMatches = courseHtml.match(/href=["']([^"']*\/mod\/forum\/view\.php\?id=\d+[^"']*)["']/gi) || [];
+            const fMatches = courseHtml.match(/href=["']([^"']*(?:mod\/forum\/view\.php\?[^"']*|view\.php\?id=\d+[^"']*))["']/gi) || [];
             for (const m of fMatches) {
               const urlM = m.match(/href=["']([^"']+)["']/i);
               if (urlM) {
                 let u = urlM[1];
-                if (!u.startsWith("http")) u = `https://spectrum.um.edu.my/${u.replace(/^\//, "")}`;
+                if (!u.startsWith("http")) {
+                  u = u.startsWith("/")
+                    ? `https://spectrum.um.edu.my${u}`
+                    : `https://spectrum.um.edu.my/mod/forum/${u}`;
+                }
                 forumUrls.add(u);
               }
             }
