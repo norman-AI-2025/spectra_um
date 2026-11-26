@@ -236,7 +236,7 @@ Receive real-time push alerts on your phone whenever attendance opens, when an a
 
 ### Step 5 (Optional): 24/7 Cloudflare Relay Worker
 
-If you want Spectra to monitor attendance and deadlines **24/7 in the cloud**—even when your laptop is closed, sleeping, or turned off—you can optionally deploy the included Cloudflare Worker.
+If you want Spectra to monitor and automatically submit attendance and deadlines **24/7 in the cloud**—even when your laptop is closed, sleeping, or turned off—you can optionally deploy the included Cloudflare Worker. The Worker checks open sessions every three minutes, verifies your configured occurrence, fetches the attendance form, selects Present/Hadir, submits it, and sends a Telegram confirmation.
 
 1. Install Cloudflare Wrangler CLI:
    ```bash
@@ -252,8 +252,11 @@ If you want Spectra to monitor attendance and deadlines **24/7 in the cloud**—
    ```
 4. In Spectra **Settings**, paste your Worker URL (e.g. `https://spectra-relay.<username>.workers.dev`) and click **Sync Session to Cloud**.
 
+> [!IMPORTANT]
+> Cloud auto-attendance requires a valid SPeCTRUM `MoodleSession` cookie. The browser only needs to be opened initially to synchronize that session and whenever SPeCTRUM expires it. If a lecturer requires a session password, save that course password in Spectra before syncing; otherwise the Worker will notify you instead of submitting blindly.
+
 > [!NOTE]
-> The Cloudflare Worker is completely optional. The Chrome extension functions 100% locally on its own without it!
+> The Cloudflare Worker is completely optional. In local-only mode, the Chrome extension performs the attendance checks from the browser. In cloud mode, your synchronized Moodle session and configured course data are stored in your Cloudflare KV namespace; deploy this only if you accept that trade-off.
 
 ---
 

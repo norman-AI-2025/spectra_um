@@ -135,6 +135,20 @@ globalThis.fetch = async function mockFetch(url, options = {}) {
     };
   }
 
+  if (url.includes("spectrum.um.edu.my/mod/attendance/attendance.php")) {
+    return {
+      status: 200,
+      ok: true,
+      text: async () => `
+        <form action="attendance.php" method="post">
+          <input type="hidden" name="sesskey" value="sess_cloud_123">
+          <input type="hidden" name="sessid" value="7701">
+          <input type="radio" name="status" value="701"><label>Present</label>
+        </form>
+      `
+    };
+  }
+
   // Mock SPeCTRUM calendar endpoint
   if (url.includes("spectrum.um.edu.my/calendar/view.php")) {
     return {
@@ -359,7 +373,7 @@ async function runTestSuite() {
   const body6 = await res6.json();
   assert(body6.hasSession === true, "Reports hasSession: true after sync");
   assert(body6.updatedAt !== null, "Includes ISO updatedAt timestamp");
-  assert(body6.cronSchedule === "Every 1 minute", "Reports active 1m cron schedule");
+  assert(body6.cronSchedule === "Every 3 minutes", "Reports active 3m cron schedule");
 
   const missingSecret = await worker.fetch(new MockRequest("https://worker.spectra.dev/status", {
     headers: { "Authorization": "Bearer worker-auth-secret-key" }
@@ -503,7 +517,7 @@ async function runTestSuite() {
   const body14 = await poll14.json();
   assert(body14.attendanceRecorded >= 1, "Cloud Relay detects open attendance with sesskey-first URL and Malay text");
   assert(sentTgAlertText.includes("sessid=8801"), "Telegram message contains direct attendance submission link with sessid 8801");
-  assert(sentTgAlertText.includes("Please submit your attendance here"), "Telegram alert instructs student to submit attendance");
+  assert(sentTgAlertText.includes("Auto-Attendance Recorded"), "Telegram confirms cloud auto-attendance submission");
 
   const stored8801 = await kv.get("recorded_sessids");
   assert(stored8801 !== null && stored8801.includes("8801"), "Sessid 8801 saved to recorded_sessids in KV");

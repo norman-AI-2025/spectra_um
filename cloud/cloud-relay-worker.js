@@ -122,7 +122,7 @@ export default {
         hasSession: Boolean(record?.sessionToken),
         coursesCount: record?.courses?.length || 0,
         updatedAt: record?.updatedAt ? new Date(record.updatedAt).toISOString() : null,
-        cronSchedule: "Every 1 minute"
+        cronSchedule: "Every 3 minutes"
       }), {
         headers: { "Content-Type": "application/json", ...corsHeaders }
       });
@@ -357,6 +357,86 @@ function resolveWorkerCourseOccurrence(course, occurrences = {}) {
   return "";
 }
 
+function parseWorkerAttendanceForm(html) {
+  if (!html) return { statusId: "", sesskey: "", sessid: "", requiresPassword: false };
+
+  const valueFor = (name) => {
+    const match = html.match(new RegExp(`name=["']${name}["'][^>]*value=["']([^"']+)["']`, "i")) ||
+      html.match(new RegExp(`value=["']([^"']+)["'][^>]*name=["']${name}["']`, "i"));
+    return match ? match[1] : "";
+  };
+
+  const requiresPassword = /<input[^>]+(?:name=["'](?:studentpassword|password)["']|type=["']password["'])/i.test(html);
+  let statusId = "";
+  const statusRegex = /<input[^>]*name=["']status["'][^>]*>/gi;
+  let match;
+  while ((match = statusRegex.exec(html)) !== null) {
+    const tag = match[0];
+    const value = tag.match(/value=["'](\d+)["']/i)?.[1];
+    if (!value) continue;
+    const id = tag.match(/id=["']([^"']+)["']/i)?.[1];
+    const label = id
+      ? html.match(new RegExp(`<label[^>]*for=["']${id}["'][^>]*>([\\s\\S]*?)<\\/label>`, "i"))?.[1] || ""
+      : html.slice(statusRegex.lastIndex, statusRegex.lastIndex + 300);
+    if (/present|hadir|^\s*p\b/i.test(label.replace(/<[^>]+>/g, " ").trim())) {
+      statusId = value;
+      break;
+    }
+  }
+  if (!statusId) statusId = html.match(/name=["']status["'][^>]*value=["'](\d+)["']/i)?.[1] || "";
+
+  return {
+    statusId,
+    sesskey: valueFor("sesskey"),
+    sessid: valueFor("sessid"),
+    requiresPassword
+  };
+}
+
+async function submitWorkerAttendance({ formUrl, sessid, fallbackSesskey, password = "", sessionToken }) {
+  const formRes = await fetch(formUrl, {
+    headers: {
+      "Cookie": `MoodleSession=${sessionToken}`,
+      "User-Agent": "Mozilla/5.0 Spectra-Relay/1.0"
+    }
+  });
+  if (!formRes.ok) return { success: false, error: `Attendance form returned HTTP ${formRes.status}` };
+
+  const formInfo = parseWorkerAttendanceForm(await formRes.text());
+  if (formInfo.requiresPassword && !password) {
+    return { success: false, requiresPassword: true, error: "Attendance password is required" };
+  }
+  if (!formInfo.statusId) return { success: false, error: "Present status was not found in attendance form" };
+
+  const params = new URLSearchParams();
+  params.set("sessid", formInfo.sessid || sessid);
+  params.set("sesskey", formInfo.sesskey || fallbackSesskey || "");
+  params.set("mform_is_submitted", "1");
+  params.set("status", formInfo.statusId);
+  params.set("submitbutton", "Save changes");
+  if (password) {
+    params.set("studentpassword", password.trim());
+    params.set("password", password.trim());
+  }
+
+  const postRes = await fetch("https://spectrum.um.edu.my/mod/attendance/attendance.php", {
+    method: "POST",
+    headers: {
+      "Cookie": `MoodleSession=${sessionToken}`,
+      "Content-Type": "application/x-www-form-urlencoded",
+      "User-Agent": "Mozilla/5.0 Spectra-Relay/1.0"
+    },
+    body: params.toString()
+  });
+  const responseText = await postRes.text();
+  if (/incorrect password|wrong password|password is incorrect/i.test(responseText)) {
+    return { success: false, requiresPassword: true, error: "Attendance password was rejected" };
+  }
+  const confirmed = /attendance has been (?:successfully )?recorded|kehadiran anda telah direkodkan|attendance recorded successfully/i.test(responseText);
+  if (postRes.ok && confirmed) return { success: true, status: "Present" };
+  return { success: false, error: `SPeCTRUM did not confirm attendance (HTTP ${postRes.status})` };
+}
+
 /**
  * 24/7 Cloud Attendance Scanner & Alert Routine
  */
@@ -568,40 +648,43 @@ async function checkAndRecordCloudAttendance(env, sessionData) {
                 : `https://spectrum.um.edu.my/mod/attendance/${formTargetUrl}`;
             }
 
-            // Inspect form to check whether attendance requires a password
-            let passwordText = "";
-            try {
-              const formRes = await fetch(formTargetUrl, {
-                headers: { "Cookie": cookieHeader, "User-Agent": "Mozilla/5.0 Spectra-Relay/1.0" }
-              });
-              if (formRes.ok) {
-                const formHtml = await formRes.text();
-                const requiresPassword = /<input[^>]+name=["'](studentpassword|password)["']/i.test(formHtml);
-                if (requiresPassword) {
-                  if (storedPwd) {
-                    passwordText = `\n🔑 <b>Password:</b> <code>${storedPwd}</code>`;
-                  } else {
-                    passwordText = `\n🔑 <b>Password:</b> Required (Check with your lecturer)`;
-                  }
-                }
-              }
-            } catch (_) { }
+            const submitResult = await submitWorkerAttendance({
+              formUrl: formTargetUrl,
+              sessid,
+              fallbackSesskey: sessionData.sesskey,
+              password: storedPwd,
+              sessionToken
+            });
 
-            // Dispatch alert to user with direct submission link
-            if (botToken && chatId) {
-              await dispatchTelegram(
-                botToken,
-                chatId,
-                `📢 <b>Spectra Alert: Attendance Submission Open!</b>\n` +
-                `<b>Course:</b> ${courseCode}\n` +
-                `<b>Occurrence:</b> ${studentOcc || groupText || "All students"}\n` +
-                `<b>Session:</b> ${descText} (${dateText} ${timeText})${passwordText}\n\n` +
-                `👉 <b>Please submit your attendance here:</b>\n` +
-                `<a href="${formTargetUrl}">${formTargetUrl}</a>`
-              );
+            if (submitResult.success) {
               recordedSessids.add(sessid);
               recordedCount++;
               foundOpenSession = true;
+              if (botToken && chatId) {
+                await dispatchTelegram(
+                  botToken,
+                  chatId,
+                  `✅ <b>Spectra Auto-Attendance Recorded</b>\n` +
+                  `<b>Course:</b> ${courseCode}\n` +
+                  `<b>Occurrence:</b> ${studentOcc || groupText || "All students"}\n` +
+                  `<b>Session:</b> ${descText} (${dateText} ${timeText})\n` +
+                  `<b>Status:</b> Present\n` +
+                  `<a href="${formTargetUrl}">Open attendance record</a>`
+                );
+              }
+            } else if (botToken && chatId) {
+              const detail = submitResult.requiresPassword
+                ? "Password required or rejected; attendance was not submitted."
+                : "Cloud submission failed; please submit manually.";
+              await dispatchTelegram(
+                botToken,
+                chatId,
+                `⚠️ <b>Spectra Attendance Needs Attention</b>\n` +
+                `<b>Course:</b> ${courseCode}\n` +
+                `<b>Occurrence:</b> ${studentOcc || groupText || "All students"}\n` +
+                `${detail}\n` +
+                `<a href="${formTargetUrl}">Open attendance form</a>`
+              );
             }
           }
 
